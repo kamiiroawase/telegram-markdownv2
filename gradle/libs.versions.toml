@@ -2,7 +2,7 @@
 agp = "9.3.3"
 kotlin = "2.4.20"
 commonmarkKotlin = "0.26.0"
-spotless = "8.10.2"
+spotless = "8.10.3"
 
 [libraries]
 commonmark = { module = "io.github.darriousliu:commonmark", version.ref = "commonmarkKotlin" }
