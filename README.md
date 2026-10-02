@@ -37,7 +37,7 @@ repositories {
 
 ```toml
 [versions]
-telegramMarkdownv2 = "1.0.0"
+telegramMarkdownv2 = "1.1.0"
 
 [libraries]
 telegram-markdownv2-jvm = { module = "com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm", version.ref = "telegramMarkdownv2" }
@@ -55,24 +55,24 @@ dependencies {
 
 | 平台 | 坐标 |
 | --- | --- |
-| Android | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-android:1.0.0` |
-| JVM | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm:1.0.0` |
-| JS | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-js:1.0.0` |
-| Wasm | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-wasm-js:1.0.0` |
-| Linux x64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-linuxx64:1.0.0` |
-| Linux Arm64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-linuxarm64:1.0.0` |
-| macOS Arm64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-macosarm64:1.0.0` |
-| Windows | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-mingwx64:1.0.0` |
-| iOS arm64（设备） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iosarm64:1.0.0` |
-| iOS x64（模拟器） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iosx64:1.0.0` |
-| iOS arm64（模拟器） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iossimulatorarm64:1.0.0` |
+| Android | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-android:1.1.0` |
+| JVM | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm:1.1.0` |
+| JS | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-js:1.1.0` |
+| Wasm | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-wasm-js:1.1.0` |
+| Linux x64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-linuxx64:1.1.0` |
+| Linux Arm64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-linuxarm64:1.1.0` |
+| macOS Arm64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-macosarm64:1.1.0` |
+| Windows | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-mingwx64:1.1.0` |
+| iOS arm64（设备） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iosarm64:1.1.0` |
+| iOS x64（模拟器） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iosx64:1.1.0` |
+| iOS arm64（模拟器） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iossimulatorarm64:1.1.0` |
 
 KMP 消费方在 commonMain 中无法直接引用本库 API（JitPack 无 common metadata）；可按 source set 引用各平台变体，或把 GitHub Release 附件搭成自建 Maven 仓库解决：
 
 ```kotlin
 kotlin {
     sourceSets {
-        jvmMain.dependencies { implementation("com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm:1.0.0") }
+        jvmMain.dependencies { implementation("com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm:1.1.0") }
         // 其余平台同理替换变体
     }
 }
