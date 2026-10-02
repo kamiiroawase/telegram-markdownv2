@@ -1,0 +1,18 @@
+[versions]
+agp = "9.3.3"
+kotlin = "2.4.20"
+commonmarkKotlin = "0.26.0"
+spotless = "8.10.2"
+
+[libraries]
+commonmark = { module = "io.github.darriousliu:commonmark", version.ref = "commonmarkKotlin" }
+commonmark-ext-footnotes = { module = "io.github.darriousliu:commonmark-ext-footnotes", version.ref = "commonmarkKotlin" }
+commonmark-ext-gfm-strikethrough = { module = "io.github.darriousliu:commonmark-ext-gfm-strikethrough", version.ref = "commonmarkKotlin" }
+commonmark-ext-gfm-tables = { module = "io.github.darriousliu:commonmark-ext-gfm-tables", version.ref = "commonmarkKotlin" }
+
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
+
+[plugins]
+android-kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }

@@ -1,0 +1,62 @@
+# Triggered on v* tag pushes: publishes the KMP module artifacts (aar/jar/klib plus
+# pom/module/sources files) as GitHub Release attachments, creating the Release when it
+# does not exist. Tests are not repeated here; the Build workflow covers them on main pushes.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full clone: the version derives from the nearest v* tag; a shallow clone misses it
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            gradle/libs.versions.toml
+            gradle/wrapper/gradle-wrapper.properties
+            **/*.gradle.kts
+
+      - name: Publish to local Maven
+        run: chmod +x gradlew && ./gradlew publishToMavenLocal
+
+      - name: Collect release assets
+        run: |
+          M2="$HOME/.m2/repository/com/github/kamiiroawase"
+          STAGE="release-assets"
+          mkdir -p "$STAGE"
+          for module in \
+            telegram-markdownv2 \
+            telegram-markdownv2-android \
+            telegram-markdownv2-jvm \
+            telegram-markdownv2-js \
+            telegram-markdownv2-wasm-js \
+            telegram-markdownv2-linuxx64 \
+            telegram-markdownv2-linuxarm64 \
+            telegram-markdownv2-macosarm64 \
+            telegram-markdownv2-mingwx64 \
+            telegram-markdownv2-iosarm64 \
+            telegram-markdownv2-iosx64 \
+            telegram-markdownv2-iossimulatorarm64; do
+            find "$M2/$module" -type f ! -name 'maven-metadata-local.xml' -exec cp {} "$STAGE/" \;
+          done
+          echo "Collected $(find "$STAGE" -type f | wc -l) files"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true

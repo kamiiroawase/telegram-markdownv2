@@ -1,0 +1,7 @@
+.gradle/
+build/
+.idea/
+.kotlin/
+.docker/
+/local.properties
+/config.properties

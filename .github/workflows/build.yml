@@ -1,0 +1,117 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full clone: git describe needs the commit history to reach tags; a shallow
+          # clone misses the nearest tag
+          fetch-depth: 0
+
+      - uses: gradle/actions/wrapper-validation@v3
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            gradle/libs.versions.toml
+            gradle/wrapper/gradle-wrapper.properties
+            **/*.gradle.kts
+
+      # spotlessCheck hooks into check, so build already includes the format check;
+      # iOS/macOS/Windows targets cross-compile on Linux; jvm/android unit tests and
+      # js/wasm (Node) tests run on the host
+      - name: Build, test and check format
+        run: chmod +x gradlew && ./gradlew build
+
+      # JitPack release builds skip tests (-xtest), so the publishing pipeline can only be
+      # verified on the CI side: the version derives from the git tag (needs the full clone
+      # above); after publishing to the local Maven repo, assert that all twelve KMP modules
+      # (root + android/jvm/js/wasmJs/linux/macos/mingw/ios) have their artifacts, the
+      # version is not a SNAPSHOT, and the pom carries the commonmark transitive dependency
+      - name: Verify Maven publishing
+        run: |
+          ./gradlew publishToMavenLocal
+          GROUP_DIR="$HOME/.m2/repository/com/github/kamiiroawase"
+          ROOT="$GROUP_DIR/telegram-markdownv2"
+          test "$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1
+          VERSION=$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | head -n 1)
+          test -n "$VERSION"
+          test "$VERSION" != "0.0.0-SNAPSHOT"
+          A="$ROOT/$VERSION"
+          for art in \
+            "$A/telegram-markdownv2-$VERSION.module" \
+            "$A/telegram-markdownv2-$VERSION.jar" \
+            "$GROUP_DIR/telegram-markdownv2-android/$VERSION/telegram-markdownv2-android-$VERSION.aar" \
+            "$GROUP_DIR/telegram-markdownv2-jvm/$VERSION/telegram-markdownv2-jvm-$VERSION.jar" \
+            "$GROUP_DIR/telegram-markdownv2-js/$VERSION/telegram-markdownv2-js-$VERSION.klib" \
+            "$GROUP_DIR/telegram-markdownv2-wasm-js/$VERSION/telegram-markdownv2-wasm-js-$VERSION.klib" \
+            "$GROUP_DIR/telegram-markdownv2-linuxx64/$VERSION/telegram-markdownv2-linuxx64-$VERSION.klib" \
+            "$GROUP_DIR/telegram-markdownv2-linuxarm64/$VERSION/telegram-markdownv2-linuxarm64-$VERSION.klib" \
+            "$GROUP_DIR/telegram-markdownv2-macosarm64/$VERSION/telegram-markdownv2-macosarm64-$VERSION.klib" \
+            "$GROUP_DIR/telegram-markdownv2-mingwx64/$VERSION/telegram-markdownv2-mingwx64-$VERSION.klib" \
+            "$GROUP_DIR/telegram-markdownv2-iosarm64/$VERSION/telegram-markdownv2-iosarm64-$VERSION.klib" \
+            "$GROUP_DIR/telegram-markdownv2-iosx64/$VERSION/telegram-markdownv2-iosx64-$VERSION.klib" \
+            "$GROUP_DIR/telegram-markdownv2-iossimulatorarm64/$VERSION/telegram-markdownv2-iossimulatorarm64-$VERSION.klib"; do
+            test -f "$art" || { echo "missing artifact: $art"; exit 1; }
+          done
+          grep -q commonmark "$A/telegram-markdownv2-$VERSION.pom"
+          echo "Published artifacts verified: $VERSION"
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            build/reports/tests/**
+            build/test-results/**
+          if-no-files-found: ignore
+
+  # iOS simulator and macOS Arm64 native tests need macOS; the ubuntu job already covers
+  # cross-compilation
+  apple-tests:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            gradle/libs.versions.toml
+            gradle/wrapper/gradle-wrapper.properties
+            **/*.gradle.kts
+
+      - name: Run macOS and iOS simulator tests
+        run: chmod +x gradlew && ./gradlew macosArm64Test iosSimulatorArm64Test
+
+      - name: Upload macOS and iOS test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-test-reports
+          path: |
+            build/reports/tests/**
+            build/test-results/**
+          if-no-files-found: ignore
