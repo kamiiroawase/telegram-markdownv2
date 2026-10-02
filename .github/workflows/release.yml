@@ -20,7 +20,7 @@ jobs:
           # Full clone: the version derives from the nearest v* tag; a shallow clone misses it
           fetch-depth: 0
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
