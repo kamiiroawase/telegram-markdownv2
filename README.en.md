@@ -37,7 +37,7 @@ Version catalog:
 
 ```toml
 [versions]
-telegramMarkdownv2 = "1.2.0"
+telegramMarkdownv2 = "1.3.0"
 
 [libraries]
 telegram-markdownv2 = { module = "io.github.kamiiroawase:telegram-markdownv2", version.ref = "telegramMarkdownv2" }
@@ -55,24 +55,24 @@ To pin a concrete platform variant (Maven dependency graphs, locked coordinates 
 
 | Platform | Coordinate |
 | --- | --- |
-| Android | `io.github.kamiiroawase:telegram-markdownv2-android:1.2.0` |
-| JVM | `io.github.kamiiroawase:telegram-markdownv2-jvm:1.2.0` |
-| JS | `io.github.kamiiroawase:telegram-markdownv2-js:1.2.0` |
-| Wasm | `io.github.kamiiroawase:telegram-markdownv2-wasm-js:1.2.0` |
-| Linux x64 | `io.github.kamiiroawase:telegram-markdownv2-linuxx64:1.2.0` |
-| Linux Arm64 | `io.github.kamiiroawase:telegram-markdownv2-linuxarm64:1.2.0` |
-| macOS Arm64 | `io.github.kamiiroawase:telegram-markdownv2-macosarm64:1.2.0` |
-| Windows | `io.github.kamiiroawase:telegram-markdownv2-mingwx64:1.2.0` |
-| iOS arm64 (device) | `io.github.kamiiroawase:telegram-markdownv2-iosarm64:1.2.0` |
-| iOS x64 (simulator) | `io.github.kamiiroawase:telegram-markdownv2-iosx64:1.2.0` |
-| iOS arm64 (simulator) | `io.github.kamiiroawase:telegram-markdownv2-iossimulatorarm64:1.2.0` |
+| Android | `io.github.kamiiroawase:telegram-markdownv2-android:1.3.0` |
+| JVM | `io.github.kamiiroawase:telegram-markdownv2-jvm:1.3.0` |
+| JS | `io.github.kamiiroawase:telegram-markdownv2-js:1.3.0` |
+| Wasm | `io.github.kamiiroawase:telegram-markdownv2-wasm-js:1.3.0` |
+| Linux x64 | `io.github.kamiiroawase:telegram-markdownv2-linuxx64:1.3.0` |
+| Linux Arm64 | `io.github.kamiiroawase:telegram-markdownv2-linuxarm64:1.3.0` |
+| macOS Arm64 | `io.github.kamiiroawase:telegram-markdownv2-macosarm64:1.3.0` |
+| Windows | `io.github.kamiiroawase:telegram-markdownv2-mingwx64:1.3.0` |
+| iOS arm64 (device) | `io.github.kamiiroawase:telegram-markdownv2-iosarm64:1.3.0` |
+| iOS x64 (simulator) | `io.github.kamiiroawase:telegram-markdownv2-iosx64:1.3.0` |
+| iOS arm64 (simulator) | `io.github.kamiiroawase:telegram-markdownv2-iossimulatorarm64:1.3.0` |
 
 KMP consumers reference the root coordinate from commonMain:
 
 ```kotlin
 kotlin {
     sourceSets {
-        commonMain.dependencies { implementation("io.github.kamiiroawase:telegram-markdownv2:1.2.0") }
+        commonMain.dependencies { implementation("io.github.kamiiroawase:telegram-markdownv2:1.3.0") }
     }
 }
 ```
