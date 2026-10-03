@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Chunking and truncation no longer drop the content of an empty-label link/image whose
+  bare-URL degradation exceeds the limit: the plain-text fallback paths now extract the
+  destination like the renderer does (`renderChunked("![](<URL longer than the limit>)")`
+  used to return an empty list; `render` used to return a lone ellipsis)
+- A whitespace-only link label (Markdown link, image alt, closed or unclosed HTML anchor)
+  degrades to the bare escaped URL on every path, matching the output-time completion of
+  unclosed anchors; the closed paths used to emit `[ ](url)`-shaped entities Telegram
+  may reject
 - Chunking no longer drops whitespace at piece boundaries: flattening an oversized block,
   list item, quote child or inline node to escaped text preserves every character, as the
   losslessness guarantee always claimed (`renderChunked("aa *b* cc *d*", 4)` now yields

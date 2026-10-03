@@ -1,0 +1,259 @@
+package com.github.kamiiroawase.markdownv2
+
+import org.commonmark.ext.footnotes.FootnotesExtension
+import org.commonmark.ext.gfm.tables.TableBlock
+import org.commonmark.node.HtmlBlock
+import org.commonmark.node.Paragraph
+import org.commonmark.node.Text
+import org.commonmark.parser.Parser
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+/**
+ * Lossless chunking — `MarkdownV2.renderChunked`: blocks packed whole while they fit,
+ * natural-seam splits (code lines, list items, quote children, paragraph lines, inline
+ * nodes), escaped-text flattening that keeps every character, and per-chunk validity
+ * and length bounds.
+ */
+class ChunkingTest {
+    @Test
+    fun renderChunkedPassesParserAndOptionsThrough() {
+        val parser =
+            Parser
+                .builder()
+                .extensions(MarkdownV2.defaultExtensions + FootnotesExtension.create())
+                .build()
+        assertEquals(listOf("Text\n\nThe note"), MarkdownV2.renderChunked("Text[^1]\n\n[^1]: The note", parser = parser))
+
+        val table = "| a very long cell |\n| --- |\n| b |"
+        val capped = MarkdownV2.renderChunked(table, options = RenderOptions(maxCellWidth = 5))
+        assertTrue(capped.single().contains("a ve…"), "maxCellWidth was not applied: ${capped.single()}")
+    }
+
+    @Test
+    fun chunkedHeadingPrefixStaysGluedToText() {
+        // The hashes lead the first piece instead of becoming a bare "\#" chunk detached
+        // from all text
+        val pieces = MarkdownV2.renderChunked("# " + "x".repeat(50), 10)
+        assertEquals("\\# xxxxxxx", pieces.first())
+        pieces.forEach { piece -> assertTrue(piece.length <= 10, "over-long piece: $piece") }
+    }
+
+    @Test
+    fun chunkedListItemMarkerDroppedWhenLimitTooSmall() {
+        // No room for the marker plus one escape unit: text wins, the marker is dropped
+        // instead of a bare "1\." piece or an escapeChunks limit below its promised ≥2
+        val pieces = MarkdownV2.renderChunked("1. " + "x".repeat(20), 5)
+        assertTrue(pieces.isNotEmpty())
+        pieces.forEach { piece ->
+            assertTrue(piece.length <= 5, "over-long piece: $piece")
+            assertFalse(piece.trim() == "1\\.", "bare marker piece: $piece")
+        }
+    }
+
+    @Test
+    fun renderChunkedShortContentSingleChunk() {
+        assertEquals(listOf("*hello* world"), MarkdownV2.renderChunked("**hello** world"))
+    }
+
+    @Test
+    fun renderChunkedSplitsAtBlockBoundaries() {
+        assertEquals(listOf("aaa", "bbb"), MarkdownV2.renderChunked("aaa\n\nbbb", 3))
+    }
+
+    @Test
+    fun renderChunkedSplitsParagraphLines() {
+        assertEquals(listOf("aaaa\nbbbb", "cccc"), MarkdownV2.renderChunked("aaaa\nbbbb\ncccc", 9))
+    }
+
+    @Test
+    fun renderChunkedSplitsInlineNodes() {
+        // Boundary spaces are content — the Text nodes are "aa " and " cc " — so the
+        // pieces carry their edge whitespace instead of trimming it away
+        assertEquals(listOf("aa ", "_b_", " cc ", "_d_"), MarkdownV2.renderChunked("aa *b* cc *d*", 4))
+    }
+
+    @Test
+    fun renderChunkedFlatteningLosesNoWhitespace() {
+        // The last-resort escaped-text flattening must keep every character, spaces
+        // included (pre-fix each piece was trimmed, dropping spaces at piece edges)
+        val content = "x ".repeat(3000)
+        val chunks = MarkdownV2.renderChunked(content, maxLength = 4096)
+        assertTrue(chunks.size > 1)
+        chunks.forEach { assertTrue(it.length <= 4096, "over-long chunk: $it") }
+        assertEquals(3000, chunks.sumOf { chunk -> chunk.count { it == 'x' } })
+        assertEquals(2999, chunks.sumOf { chunk -> chunk.count { it == ' ' } })
+    }
+
+    @Test
+    fun renderChunkedOversizedItemFlatteningKeepsSpaces() {
+        // Same guarantee down the list-item flattening path: every content space survives
+        // ("a b " x200 = 400 spaces, the paragraph-final one is parser-stripped, and the
+        // kept "• " marker adds its own — 399 + 1)
+        val chunks = MarkdownV2.renderChunked("- " + "a b ".repeat(200), 50)
+        assertTrue(chunks.size > 1)
+        chunks.forEach { assertTrue(it.length <= 50, "over-long chunk: $it") }
+        assertEquals(400, chunks.sumOf { chunk -> chunk.count { it == 'a' || it == 'b' } })
+        assertEquals(400, chunks.sumOf { chunk -> chunk.count { it == ' ' } })
+    }
+
+    @Test
+    fun renderChunkedSplitsCodeBlockLines() {
+        assertEquals(
+            listOf("```\naaaa\n```", "```\nbbbb\n```", "```\ncccc\n```"),
+            MarkdownV2.renderChunked("```\naaaa\nbbbb\ncccc\n```", 12),
+        )
+    }
+
+    @Test
+    fun renderChunkedSplitsOversizedCodeLineIntoFencedSegments() {
+        assertEquals(
+            List(5) { "```\naaaa\n```" },
+            MarkdownV2.renderChunked("```\n" + "a".repeat(20) + "\n```", 12),
+        )
+    }
+
+    @Test
+    fun renderChunkedListItemsKeepNumberingAcrossChunks() {
+        assertEquals(
+            listOf("1\\. aaaa", "2\\. bbbb", "3\\. cccc"),
+            MarkdownV2.renderChunked("1. aaaa\n2. bbbb\n3. cccc", 10),
+        )
+    }
+
+    @Test
+    fun renderChunkedOversizedItemFlattensWithMarkerOnFirstPiece() {
+        assertEquals(listOf("• aaaa", "bbbb"), MarkdownV2.renderChunked("- aaaabbbb", 6))
+    }
+
+    @Test
+    fun renderChunkedSplitsQuoteChildren() {
+        assertEquals(listOf("> aaaa", "> bbbb"), MarkdownV2.renderChunked("> aaaa\n>\n> bbbb", 8))
+    }
+
+    @Test
+    fun renderChunkedOversizedQuoteChildSplitsLines() {
+        assertEquals(listOf("> aaaaaa", "> aaaaaa"), MarkdownV2.renderChunked("> " + "a".repeat(12), 8))
+    }
+
+    @Test
+    fun renderChunkedOversizedLineDegradesToEscapedUnits() {
+        assertEquals(listOf("aaaa", "\\*bbb", "b"), MarkdownV2.renderChunked("aaaa*bbbb", 5))
+    }
+
+    @Test
+    fun renderChunkedNeverSplitsEscapeUnitsAndLosesNoText() {
+        // '.' is a special character that never forms an entity, so the whole paragraph
+        // stays plain text and the chunks' concatenation must equal the full escape
+        val content = "a.b".repeat(60)
+        val chunks = MarkdownV2.renderChunked(content, 7)
+        assertTrue(chunks.size > 1)
+        chunks.forEach { chunk ->
+            assertTrue(chunk.length <= 7)
+            assertFalse(chunk.endsWith("\\"), "escape sequence split across chunks: $chunk")
+        }
+        assertEquals(MarkdownV2.escape(content), chunks.joinToString(""))
+    }
+
+    @Test
+    fun renderChunkedNonPositiveMaxLengthSingleChunk() {
+        val content = "word ".repeat(2000)
+        assertEquals(listOf(MarkdownV2.render(content)), MarkdownV2.renderChunked(content, 0))
+        assertEquals(listOf(MarkdownV2.render(content)), MarkdownV2.renderChunked(content, -5))
+    }
+
+    @Test
+    fun renderChunkedMaxLengthOneSingleChunk() {
+        // A positive size below 2 cannot hold even one escaped special character, so it
+        // joins 0 and the negatives on the no-chunking path
+        val content = "word ".repeat(2000)
+        assertEquals(listOf(MarkdownV2.render(content)), MarkdownV2.renderChunked(content, 1))
+    }
+
+    @Test
+    fun renderChunkedDefaultLimitSplitsHugeParagraph() {
+        val content = "word ".repeat(2000)
+        val chunks = MarkdownV2.renderChunked(content)
+        assertTrue(chunks.size > 1)
+        chunks.forEach { assertTrue(it.length <= maxMessageLength) }
+        assertEquals(content.count { it.isLetter() }, chunks.sumOf { chunk -> chunk.count { it.isLetter() } })
+    }
+
+    @Test
+    fun renderChunkedEmptyContentYieldsNoChunks() {
+        assertEquals(emptyList(), MarkdownV2.renderChunked(""))
+    }
+
+    @Test
+    fun renderChunkedViaAst() {
+        val document = MarkdownV2.defaultParser.parse("aaa\n\nbbb")!!
+        assertEquals(listOf("aaa", "bbb"), MarkdownV2.renderChunked(document, 3))
+        val paragraph = document.firstChild as Paragraph
+        assertEquals(listOf("aaa"), MarkdownV2.renderChunked(paragraph, 3))
+    }
+
+    @Test
+    fun renderChunkedEmptyRenderingBlocksYieldNoChunksViaAst() {
+        val htmlComment = HtmlBlock()
+        htmlComment.literal = "<!-- hidden -->"
+        assertEquals(emptyList(), MarkdownV2.renderChunked(htmlComment, 30))
+        assertEquals(emptyList(), MarkdownV2.renderChunked(TableBlock(), 30))
+    }
+
+    @Test
+    fun renderChunkedTableDegradesToFencedChunks() {
+        val chunks =
+            MarkdownV2.renderChunked(
+                "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |",
+                30,
+            )
+        assertEquals(4, chunks.size)
+        chunks.forEach { chunk ->
+            assertTrue(chunk.length <= 30)
+            assertTrue(chunk.startsWith("```"))
+            assertTrue(chunk.endsWith("```"))
+        }
+    }
+
+    @Test
+    fun renderChunkedMixedDocumentAllChunksBounded() {
+        val content =
+            """
+            # Title here
+
+            > quoted line one
+            > quoted line two
+
+            - first item
+            - second item
+
+            ```
+            code one
+            code two
+            ```
+            """.trimIndent()
+        val chunks = MarkdownV2.renderChunked(content, 30)
+        assertTrue(chunks.size > 1)
+        chunks.forEach { chunk ->
+            assertTrue(chunk.isNotBlank())
+            assertTrue(chunk.length <= 30, "over-long chunk: $chunk")
+        }
+    }
+
+    @Test
+    fun renderChunkedBareUrlDegradationLosesNoText() {
+        // An empty-label link/image renders to the bare escaped URL; when that alone
+        // exceeds the limit, the flattening path must carry every character (pre-fix the
+        // blank plain-text extraction dropped the whole content and the call returned no
+        // chunks at all)
+        val url = "https://example.com/" + "a".repeat(5000)
+        for (content in listOf("![]($url)", "[]($url)")) {
+            val chunks = MarkdownV2.renderChunked(content, 4096)
+            assertTrue(chunks.isNotEmpty(), "content was lost entirely")
+            chunks.forEach { chunk -> assertTrue(chunk.length <= 4096, "over-long chunk: ${chunk.take(60)}") }
+            assertEquals(MarkdownV2.escape(url), chunks.joinToString(""), "text lost for: ${content.take(20)}")
+        }
+    }
+}

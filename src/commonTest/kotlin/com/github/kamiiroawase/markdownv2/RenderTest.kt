@@ -15,7 +15,6 @@ import org.commonmark.node.HardLineBreak
 import org.commonmark.node.HtmlBlock
 import org.commonmark.node.HtmlInline
 import org.commonmark.node.Image
-import org.commonmark.node.IndentedCodeBlock
 import org.commonmark.node.Link
 import org.commonmark.node.ListItem
 import org.commonmark.node.Node
@@ -31,185 +30,20 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Behavior-level tests: feed input, assert the exact rendered output — nothing about
- * internal structure. Tests suffixed `ViaAst` build the AST by hand to reach shapes the
- * CommonMark parser cannot produce from text (null literals, foreign children, deep
+ * Rendering behavior — `MarkdownV2.render` without truncation: escaping rules, every
+ * block kind, inline-HTML mapping, links/images, table degradation (display widths,
+ * caps) and the linear-scan regressions. Behavior-level tests: feed input, assert the
+ * exact rendered output. Tests suffixed `ViaAst` build the AST by hand to reach shapes
+ * the CommonMark parser cannot produce from text (null literals, foreign children, deep
  * chains, lone surrogates). HTML-parsing tests are guarded by [htmlParsingSupported]
  * because of the upstream JS/Wasm parser defect. Test data is ASCII wherever possible;
  * non-ASCII appears only where the behavior under test is itself Unicode-specific
  * (display width, surrogate pairs).
  */
-class MarkdownV2Test {
-    private val maxMessageLength = MarkdownV2.MAX_MESSAGE_LENGTH
-
+class RenderTest {
     @Test
     fun shortContentRenderedWithoutTruncation() {
         assertEquals("*hello* world", MarkdownV2.render("**hello** world"))
-    }
-
-    @Test
-    fun maxMessageLengthMatchesTelegramDocumentedLimit() {
-        // Guards the public constant itself: the field above delegates to it, so a silent
-        // drift would otherwise go unnoticed by every test using maxMessageLength
-        assertEquals(4096, MarkdownV2.MAX_MESSAGE_LENGTH)
-    }
-
-    @Test
-    fun longContentTruncatedWithinLimit() {
-        val content = "intro\n\n" + "long content ".repeat(2000)
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.startsWith("intro"))
-    }
-
-    @Test
-    fun zeroMaxLengthRendersFullContent() {
-        val content = "word ".repeat(2000) // ~10k chars, well past the Telegram limit
-        assertEquals("word ".repeat(2000).trim(), MarkdownV2.render(content, 0))
-    }
-
-    @Test
-    fun defaultMaxLengthRendersFullContent() {
-        val content = "word ".repeat(2000)
-        assertEquals(MarkdownV2.render(content, 0), MarkdownV2.render(content))
-    }
-
-    @Test
-    fun negativeMaxLengthRendersFullContent() {
-        val content = "word ".repeat(2000)
-        assertEquals(MarkdownV2.render(content, 0), MarkdownV2.render(content, -1))
-    }
-
-    @Test
-    fun longParagraphTruncatesWholeLines() {
-        val content = "intro\n\n" + (1..2000).joinToString("\n") { "line $it" }
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.contains("line 1"))
-        assertTrue(result.contains("\nline 2"), "soft line breaks were glued together")
-        assertTrue(!result.contains("line 2000"))
-    }
-
-    @Test
-    fun longCodeBlockStaysClosed() {
-        val code = (1..1000).joinToString("\n") { "line $it" }
-        val content = "intro\n\n```\n$code\n```"
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        assertEquals(0, Regex("```").findAll(result).count() % 2)
-        assertTrue(result.contains("line 1"))
-        assertTrue(!result.contains("line 1000"))
-    }
-
-    @Test
-    fun longListKeepsWholeItems() {
-        val content = (1..2000).joinToString("\n") { "- item $it" }
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.contains("• item 1"))
-        assertTrue(!result.contains("item 2000"))
-        result.lines().dropLast(1).forEach { line ->
-            assertTrue(line.startsWith("• "), "line is not a whole item: $line")
-        }
-    }
-
-    @Test
-    fun longOrderedListKeepsMarkerSpace() {
-        val content = (1..2000).joinToString("\n") { "$it. item $it" }
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.contains("1\\. item 1"), "marker space lost: $result.take(50)")
-        assertTrue(!result.contains("item 2000"))
-        result.lines().dropLast(1).forEach { line ->
-            assertTrue(
-                Regex("^\\d+\\\\\\. ").containsMatchIn(line),
-                "marker space lost: $line",
-            )
-        }
-    }
-
-    @Test
-    fun longBlockQuoteTruncatesWithPrefix() {
-        val content = "> " + (1..2000).joinToString("\n") { "quote $it" }
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.contains("quote 1"))
-        result.lines().dropLast(1).forEach { line ->
-            assertTrue(line.startsWith("> "), "quote prefix lost: $line")
-        }
-    }
-
-    @Test
-    fun longTableTruncatesAsClosedCodeBlock() {
-        val header = "| col1 | col2 |\n| --- | --- |"
-        val rows = (1..1000).joinToString("\n") { "| cell$it | data$it |" }
-        val result = MarkdownV2.render("$header\n$rows", maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.startsWith("```"), "table did not degrade to a code block: ${result.take(20)}")
-        assertTrue(result.contains("col1"), "header row was lost")
-        assertTrue(result.contains("cell1"), "first body row was lost")
-        assertTrue(!result.contains("cell1000"), "truncation kept the last row")
-        assertEquals(0, Regex("```").findAll(result).count() % 2)
-    }
-
-    @Test
-    fun overlongSingleLineFallsBackToEscapedPlainText() {
-        val content = "special*char_content" + "x".repeat(5000)
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        val plain = removeEscapes(result.dropLast(1))
-        assertEquals(content.take(plain.length), plain)
-    }
-
-    @Test
-    fun htmlBoldAcrossLinesStaysBalanced() {
-        val content = "prefix<b>bold\n" + "x".repeat(5000) + "\nsecond line</b>tail"
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        val body = removeEscapes(result.dropLast(1))
-        assertTrue(body.startsWith("prefix*bold"), "bold opening was lost: ${body.take(20)}")
-        assertEquals(0, body.count { it == '*' } % 2)
-    }
-
-    @Test
-    fun customSmallLimitTruncatesWithinLimit() {
-        val content = "**bold** head\n\n" + "body".repeat(500) + "\n\n```\ncode line\n```"
-        val result = MarkdownV2.render(content, 200)
-        assertTrue(result.length <= 200)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.startsWith("*bold* head"))
-    }
-
-    @Test
-    fun customLimitKeepsCodeBlockClosed() {
-        val code = (1..100).joinToString("\n") { "line $it" }
-        val result = MarkdownV2.render("```\n$code\n```", 300)
-        assertTrue(result.length <= 300)
-        assertTrue(result.startsWith("```"), "code block was dropped: ${result.take(20)}")
-        assertTrue(result.contains("line 1"), "first code line was lost")
-        assertTrue(!result.contains("line 100"), "truncation kept the last line")
-        assertEquals(0, Regex("```").findAll(result).count() % 2)
-    }
-
-    @Test
-    fun fallbackTruncationDoesNotSplitEscape() {
-        val content = "```kotlin\n\\user\\home\n```"
-        // The whole plain text fits: returned as-is, no spurious ellipsis
-        assertEquals("\\\\user\\\\home", MarkdownV2.render(content, 12))
-        val cut = MarkdownV2.render(content, 11)
-        assertTrue(cut.length <= 11)
-        assertTrue(cut.endsWith("…"))
-        assertFalse(cut.dropLast(1).endsWith("\\"), "truncation split an escape: $cut")
-        // The fallback is escaped plain text: code-block content stays literal and the whole output remains valid MarkdownV2
-        assertEquals("\\\\user\\\\ho…", cut)
     }
 
     @Test
@@ -394,95 +228,14 @@ class MarkdownV2Test {
     }
 
     @Test
-    fun minimalLimitRendersEllipsisOnly() {
-        assertEquals("…", MarkdownV2.render("abcdef", 1))
-    }
-
-    @Test
-    fun longHeadingKeepsEscapedPrefixWhenTruncated() {
-        val content = "# " + "x".repeat(5000)
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.startsWith("\\# "))
-        assertTrue(result.endsWith("…"))
-    }
-
-    @Test
-    fun surrogatePairIsNotSplitWhenTruncated() {
-        val result = MarkdownV2.render("😀".repeat(3000), 100)
-        assertTrue(result.length <= 100)
-        assertTrue(result.endsWith("…"))
-        assertFalse(result.dropLast(1).last().code in 0xD800..0xDBFF, "surrogate pair was split")
-    }
-
-    @Test
-    fun partialListItemKeepsMarkerPrefix() {
-        val content = "- short\n- second line item\n  continued"
-        val result = MarkdownV2.render(content, 15)
-        assertTrue(result.length <= 15)
-        assertTrue(result.endsWith("…"))
-        assertEquals("• short", result.lines().first())
-        assertTrue(result.lines()[1].startsWith("• "), "marker prefix lost: $result")
-    }
-
-    @Test
-    fun tinyLimitTruncatesListContent() {
-        assertEquals("• it…", MarkdownV2.render("- item", 5))
-    }
-
-    @Test
     fun hardLineBreakRendersAsNewline() {
         assertEquals("a\nb", MarkdownV2.render("a  \nb"))
-    }
-
-    @Test
-    fun longHtmlBlockTruncatesAsClosedCodeBlock() {
-        if (!htmlParsingSupported) return
-
-        val content = "<div>\n" + "x".repeat(5000) + "\n</div>"
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.startsWith("```\n<div>"), "html block was dropped: ${result.take(20)}")
-        assertTrue(!result.contains("</div>"), "truncation kept the closing tag line")
-        assertEquals(0, Regex("```").findAll(result).count() % 2)
     }
 
     @Test
     fun tableCellKeepsCodeText() {
         val content = "| a |\n| --- |\n| `x` |"
         assertEquals("```\n| a   |\n| --- |\n| x   |\n```", MarkdownV2.render(content))
-    }
-
-    @Test
-    fun truncatedGroupWithInlineHtmlFallsBackToPlainText() {
-        val content = "a<b>bold" + "x".repeat(5000) + "<!-- hidden -->"
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        val plain = removeEscapes(result.dropLast(1))
-        assertTrue(plain.startsWith("a<b>"), "html tag should remain as plain text: ${plain.take(20)}")
-        assertFalse(plain.contains("hidden"), "html comment should be dropped")
-    }
-
-    @Test
-    fun fallbackTruncationAvoidsSplittingSurrogatePair() {
-        assertEquals("😀😀😀", MarkdownV2.render("```js\n😀😀😀\n```", 8))
-        assertEquals("😀😀…", MarkdownV2.render("```js\n😀😀😀\n```", 5))
-    }
-
-    @Test
-    fun fallbackTruncationEscapesCharAfterLoneSurrogate() {
-        // A lone high surrogate is not a pair: treated as a single char, the special char after it escapes normally
-        // (the pre-fix surrogate branch swallowed the * alongside it, emitting a raw unescaped char)
-        val paragraph = Paragraph()
-        paragraph.appendChild(Text("a\uD800*" + "x".repeat(50)))
-        assertEquals("a\uD800\\*xxxxx…", MarkdownV2.render(paragraph, 10))
-    }
-
-    @Test
-    fun unshrinkableBlockFallsBackToPlainText() {
-        assertEquals("x", MarkdownV2.render("---\n\nx", 3))
     }
 
     @Test
@@ -593,39 +346,6 @@ class MarkdownV2Test {
         assertTrue(result.startsWith("```"), "table did not degrade to a code block: ${result.take(20)}")
         assertTrue(result.contains("| a"), "header row was lost: ${result.take(60)}")
         assertEquals(0, Regex("```").findAll(result).count() % 2)
-    }
-
-    @Test
-    fun quoteWithCodeBlockTruncatesBalanced() {
-        val code = (1..500).joinToString("\n") { "> line $it" }
-        val result = MarkdownV2.render("> ```\n$code\n> ```", 60)
-        assertTrue(result.length <= 60)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.startsWith("> ```"), "code block was dropped: ${result.take(20)}")
-        assertTrue(result.contains("line 1"), "first code line was lost")
-        assertTrue(!result.contains("line 500"), "truncation kept the last line")
-        assertEquals(0, Regex("```").findAll(result).count() % 2, "unclosed fence in quote: $result")
-    }
-
-    @Test
-    fun truncatedLooseListKeepsBlankLineAndIndentation() {
-        val content = "- a\n\n  b\n" + (1..2000).joinToString("\n") { "- item $it" }
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        val lines = result.lines()
-        assertEquals("• a", lines[0])
-        assertEquals("", lines[1])
-        assertEquals("  b", lines[2])
-    }
-
-    @Test
-    fun quoteWithFittingHeadThenHugeBodyKeepsBoth() {
-        val content = "> short\n>\n> " + (1..2000).joinToString("\n") { "quote $it" }
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.startsWith("> short\n> "), "head quote lost: ${result.take(30)}")
     }
 
     @Test
@@ -763,20 +483,6 @@ class MarkdownV2Test {
     }
 
     @Test
-    fun renderChunkedPassesParserAndOptionsThrough() {
-        val parser =
-            Parser
-                .builder()
-                .extensions(MarkdownV2.defaultExtensions + FootnotesExtension.create())
-                .build()
-        assertEquals(listOf("Text\n\nThe note"), MarkdownV2.renderChunked("Text[^1]\n\n[^1]: The note", parser = parser))
-
-        val table = "| a very long cell |\n| --- |\n| b |"
-        val capped = MarkdownV2.renderChunked(table, options = RenderOptions(maxCellWidth = 5))
-        assertTrue(capped.single().contains("a ve…"), "maxCellWidth was not applied: ${capped.single()}")
-    }
-
-    @Test
     fun renderNodeOverloadPassesOptionsThrough() {
         val document = MarkdownV2.defaultParser.parse("| a very long cell |\n| --- |\n| b |")!!
         val capped = MarkdownV2.render(document, options = RenderOptions(maxCellWidth = 5))
@@ -888,6 +594,20 @@ class MarkdownV2Test {
     }
 
     @Test
+    fun whitespaceOnlyLabelDegradesToBareUrl() {
+        // A whitespace-only label renders no visible text, so it degrades like an empty
+        // one — on every path (pre-fix the closed paths emitted "[ ](u)"-shaped entities
+        // while the output-time completion of unclosed anchors already treated them as
+        // empty)
+        assertEquals("u", MarkdownV2.render("[ ](u)"))
+        assertEquals("u", MarkdownV2.render("![ ](u)"))
+        if (!htmlParsingSupported) return
+
+        // Leading text keeps the anchor inline — a bare tag line parses as an HTML block
+        assertEquals("xu", MarkdownV2.render("x<a href=\"u\"> </a>"))
+    }
+
+    @Test
     fun unclosedHtmlEmphasisInsideLinkLabelClosesBeforeLink() {
         if (!htmlParsingSupported) return
 
@@ -904,18 +624,6 @@ class MarkdownV2Test {
         // The nested-literal sentinel left by the unclosed inner anchor used to degrade
         // every following link in the document to plain text
         assertEquals("[x <a\\>y](u) and [z](t)", MarkdownV2.render("[x <a>y](u) and [z](t)"))
-    }
-
-    @Test
-    fun htmlBlockPlainTextFallbackKeepsContent() {
-        if (!htmlParsingSupported) return
-
-        // The plain-text fallback must carry the HTML block's literal, like it does for
-        // fenced code blocks
-        assertEquals("<div\\>…", MarkdownV2.render("<div>\nhello world\n</div>", 7))
-        val chunks = MarkdownV2.renderChunked("<div>\nhello world\n</div>", 9)
-        assertTrue(chunks.isNotEmpty(), "content was lost entirely")
-        chunks.forEach { chunk -> assertTrue(chunk.length <= 9, "over-long chunk: $chunk") }
     }
 
     @Test
@@ -936,27 +644,6 @@ class MarkdownV2Test {
         // Raw backticks here would pair with the entity's own delimiters and garble the
         // code span boundaries
         assertEquals("`a \\`b\\` c`", MarkdownV2.render("<kbd>a `b` c</kbd>"))
-    }
-
-    @Test
-    fun chunkedHeadingPrefixStaysGluedToText() {
-        // The hashes lead the first piece instead of becoming a bare "\#" chunk detached
-        // from all text
-        val pieces = MarkdownV2.renderChunked("# " + "x".repeat(50), 10)
-        assertEquals("\\# xxxxxxx", pieces.first())
-        pieces.forEach { piece -> assertTrue(piece.length <= 10, "over-long piece: $piece") }
-    }
-
-    @Test
-    fun chunkedListItemMarkerDroppedWhenLimitTooSmall() {
-        // No room for the marker plus one escape unit: text wins, the marker is dropped
-        // instead of a bare "1\." piece or an escapeChunks limit below its promised ≥2
-        val pieces = MarkdownV2.renderChunked("1. " + "x".repeat(20), 5)
-        assertTrue(pieces.isNotEmpty())
-        pieces.forEach { piece ->
-            assertTrue(piece.length <= 5, "over-long piece: $piece")
-            assertFalse(piece.trim() == "1\\.", "bare marker piece: $piece")
-        }
     }
 
     @Test
@@ -1119,55 +806,6 @@ class MarkdownV2Test {
     }
 
     @Test
-    fun indentedCodeBlockTruncatesClosed() {
-        val code = (1..100).joinToString("\n") { "    line $it" }
-        val result = MarkdownV2.render(code, 300)
-        assertTrue(result.length <= 300)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.startsWith("```"), "code block was dropped: ${result.take(20)}")
-        assertTrue(result.contains("line 1"), "first code line was lost")
-        assertTrue(!result.contains("line 100"), "truncation kept the last line")
-        assertEquals(0, Regex("```").findAll(result).count() % 2)
-    }
-
-    @Test
-    fun indentedCodeFallsBackToPlainTextOnTinyLimit() {
-        assertEquals("abc", MarkdownV2.render("    abc", 5))
-    }
-
-    @Test
-    fun fencedCodeFallsBackToPlainTextWhenFenceDoesNotFit() {
-        assertEquals("code", MarkdownV2.render("```\ncode\n```", 6))
-    }
-
-    @Test
-    fun headingPrefixTooLongFallsBackToPlainText() {
-        assertEquals("x", MarkdownV2.render("# x", 3))
-    }
-
-    @Test
-    fun tinyLimitListFallsBackToPlainText() {
-        // The plain-text fallback keeps item content only; the "-" marker is syntax and never part of plain text
-        assertEquals("it…", MarkdownV2.render("- item", 3))
-    }
-
-    @Test
-    fun unknownCustomBlockShrinksToEmptyViaFootnotes() {
-        val parser =
-            Parser
-                .builder()
-                .extensions(MarkdownV2.defaultExtensions + FootnotesExtension.create())
-                .build()
-        val content = "Text[^1]\n\n[^1]: " + "x".repeat(100)
-        assertEquals("Text…", MarkdownV2.render(content, 20, parser))
-    }
-
-    @Test
-    fun contentExactlyAtLimitIsReturnedUntouched() {
-        assertEquals("ab", MarkdownV2.render("ab", 2))
-    }
-
-    @Test
     fun tableRaggedRowsArePadded() {
         assertEquals(
             "```\n| a   | b   |\n| --- | --- |\n| x   |     |\n```",
@@ -1275,38 +913,6 @@ class MarkdownV2Test {
     }
 
     @Test
-    fun quoteWithInnerListTruncates() {
-        val content = "> " + (1..100).joinToString("\n> ") { "- item $it" }
-        val result = MarkdownV2.render(content, 100)
-        assertTrue(result.length <= 100)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.contains("> • item 1"))
-        result.lines().dropLast(1).forEach { line ->
-            assertTrue(line.startsWith("> "), "quote prefix lost: $line")
-        }
-    }
-
-    @Test
-    fun mixedDocumentTruncationKeepsLeadingBlocks() {
-        val content =
-            buildString {
-                appendLine("# Title")
-                appendLine()
-                appendLine("Intro paragraph with *emphasis* and [link](https://example.com).")
-                appendLine()
-                appendLine((1..100).joinToString("\n") { "- item $it with filler" })
-            }
-        val result = MarkdownV2.render(content, 300)
-        assertTrue(result.length <= 300)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.startsWith("\\# Title"))
-        assertTrue(result.contains("_emphasis_"))
-        assertTrue(result.contains("[link](https://example.com)"))
-        assertTrue(result.contains("• item 1"))
-        assertFalse(result.contains("item 100"))
-    }
-
-    @Test
     fun htmlEmphasisTagAliasesMapToEntities() {
         val content =
             "a<strong>s</strong>b<em>e</em>c<del>d</del>e<strike>k</strike>f<ins>u</ins>" +
@@ -1359,45 +965,6 @@ class MarkdownV2Test {
     }
 
     @Test
-    fun blockBudgetExhaustedBeforeSecondBlock() {
-        assertEquals("aaaa…", MarkdownV2.render("aaaa\n\nb", 5))
-    }
-
-    @Test
-    fun paragraphLineBreakSkippedWhenBudgetFull() {
-        assertEquals("aaaa…", MarkdownV2.render("aaaa\nbb", 5))
-    }
-
-    @Test
-    fun truncatedGroupIsNotAppendedTwice() {
-        // When first-line truncation stops at a special-char boundary (budget 1 left), the pre-fix tail fallback
-        // would truncate the same group a second time and append it, duplicating one character
-        val paragraph = Paragraph()
-        paragraph.appendChild(Text("aaa*"))
-        paragraph.appendChild(SoftLineBreak())
-        paragraph.appendChild(Text("end"))
-        assertEquals("aaa…", MarkdownV2.render(paragraph, 5))
-    }
-
-    @Test
-    fun hardLineBreakInsideTruncatedParagraph() {
-        val content = "keep" + (1..2000).joinToString("  \n") { "row $it" }
-        val result = MarkdownV2.render(content, 100)
-        assertTrue(result.length <= 100)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.startsWith("keep"))
-    }
-
-    @Test
-    fun quoteBudgetExhaustedBeforeInnerSecondBlock() {
-        val content = "> " + "a".repeat(50) + "\n>\n> " + "b".repeat(50)
-        val result = MarkdownV2.render(content, 54)
-        assertTrue(result.length <= 54)
-        assertTrue(result.startsWith("> " + "a".repeat(50)))
-        assertTrue(result.endsWith("…"))
-    }
-
-    @Test
     fun astOrderedListWithoutStartNumberDefaultsToOne() {
         val paragraph = Paragraph()
         paragraph.appendChild(Text("x"))
@@ -1406,31 +973,6 @@ class MarkdownV2Test {
         val list = OrderedList()
         list.appendChild(item)
         assertEquals("1\\. x", MarkdownV2.render(list))
-    }
-
-    @Test
-    fun astOrderedListNullStartInTruncationDefaultsToOne() {
-        val item =
-            ListItem().apply {
-                appendChild(Paragraph().apply { appendChild(Text("x".repeat(500))) })
-            }
-        val list = OrderedList()
-        list.appendChild(item)
-        val result = MarkdownV2.render(list, 100)
-        assertTrue(result.length <= 100, "len=${result.length}")
-        assertTrue(result.startsWith("1\\. "), "got: ${result.take(30)}")
-    }
-
-    @Test
-    fun astTruncatedListSkipsNonListItemChildren() {
-        val long = Paragraph().apply { appendChild(Text("x".repeat(500))) }
-        val item = ListItem().apply { appendChild(Paragraph().apply { appendChild(Text("y")) }) }
-        val list = BulletList()
-        list.appendChild(long)
-        list.appendChild(item)
-        val result = MarkdownV2.render(list, 100)
-        assertTrue(result.length <= 100)
-        assertTrue(result.startsWith("• y"))
     }
 
     @Test
@@ -1450,17 +992,6 @@ class MarkdownV2Test {
         val list = BulletList()
         list.appendChild(ListItem())
         assertEquals("•", MarkdownV2.render(list))
-    }
-
-    @Test
-    fun astCodeBlocksWithNullLiteralFallBackToPlainText() {
-        val document = Document()
-        document.appendChild(FencedCodeBlock())
-        document.appendChild(IndentedCodeBlock())
-        val paragraph = Paragraph()
-        paragraph.appendChild(Text("x"))
-        document.appendChild(paragraph)
-        assertEquals("x", MarkdownV2.render(document, 6))
     }
 
     @Test
@@ -1561,17 +1092,6 @@ class MarkdownV2Test {
             "```\n| $wide |\n| ${"-".repeat(22)} |\n| a${" ".repeat(21)} |\n```",
             MarkdownV2.render("| $wide |\n| --- |\n| a |"),
         )
-    }
-
-    @Test
-    fun astTruncatedParagraphOpeningWithSoftBreak() {
-        val paragraph = Paragraph()
-        paragraph.appendChild(SoftLineBreak())
-        paragraph.appendChild(Text("x".repeat(500)))
-        val result = MarkdownV2.render(paragraph, 100)
-        assertTrue(result.length <= 100)
-        assertTrue(result.endsWith("…"))
-        assertFalse(result.startsWith("\n"))
     }
 
     @Test
@@ -1723,418 +1243,4 @@ class MarkdownV2Test {
             MarkdownV2.render("| a | b |\n| --- | --- |\n| c | d |", options = options)
         }
     }
-
-    @Test
-    fun quoteFitsAfterBlockwiseShrinkWithinBudget() {
-        // The whole render exceeds the budget, but after block-wise shrinking both sub-blocks fit: the list exhausts normally and exits
-        assertEquals("> ab\n> cd…", MarkdownV2.render("> ab\n>\n> cd", 10))
-    }
-
-    @Test
-    fun truncatedListItemKeepsEmphasisClosedAcrossSoftBreak() {
-        // applyPrefix's continuation indent used to push the closing _ into a dropped line, emitting • _abc… with an unclosed entity
-        assertEquals("• abc def…", MarkdownV2.render("- *abc\ndef*", 12))
-    }
-
-    @Test
-    fun truncatedQuoteKeepsEmphasisClosedAcrossSoftBreak() {
-        assertEquals("> abc def…", MarkdownV2.render("> *abc\ndef*", 11))
-    }
-
-    @Test
-    fun truncatedListItemKeepsLinkClosedAcrossSoftBreak() {
-        assertEquals("• abc def…", MarkdownV2.render("- [abc\ndef](u)", 15))
-    }
-
-    @Test
-    fun longListWithEmphasisAcrossLinesStaysBalanced() {
-        val content = (1..300).joinToString("\n") { "- *a${it}\nb$it*" }
-        val result = MarkdownV2.render(content, maxMessageLength)
-        assertTrue(result.length <= maxMessageLength)
-        assertTrue(result.endsWith("…"))
-        assertTrue(result.startsWith("• _a1"), "first item's emphasis was lost: ${result.take(20)}")
-        assertEquals(0, result.count { it == '_' } % 2, "unclosed emphasis: ${result.take(200)}")
-    }
-
-    @Test
-    fun orderedListIndentOverheadBeyondBudgetFallsBackToPlainText() {
-        // When continuation-indent overhead exceeds the whole item budget, item shrinking cannot converge: plain-text fallback;
-        // the whole plain text fits, returned as-is without an ellipsis
-        assertEquals("a b c d", MarkdownV2.render("1. a\nb\nc\nd", 10))
-    }
-
-    @Test
-    fun truncatedListStopsAtEmptyItem() {
-        val content = "-\n- " + "z".repeat(50)
-        assertEquals("z".repeat(9) + "…", MarkdownV2.render(content, 10))
-    }
-
-    @Test
-    fun truncatedListWithUnfittableCodeItemFallsBackToPlainText() {
-        val item = ListItem().apply { appendChild(FencedCodeBlock()) }
-        val list = BulletList()
-        list.appendChild(item)
-        assertEquals("…", MarkdownV2.render(list, 8))
-    }
-
-    @Test
-    fun quoteTailTooSmallForPrefixFallsBackToPlainText() {
-        assertEquals("ab", MarkdownV2.render("> ab", 3))
-    }
-
-    @Test
-    fun nestedListItemOverrunDegradesToPlainText() {
-        // Nested lists do not re-shrink (prevents exponential re-rendering): an inner item that does not fit degrades to escaped plain text, still closed
-        assertEquals("• • abc def…", MarkdownV2.render("- - *abc\ndef*", 12))
-    }
-
-    @Test
-    fun nestedQuoteOverrunFallsBackToPlainText() {
-        // A quote inside a list does not fit (indent overhead included): the block is abandoned, document-level plain-text fallback;
-        // the whole plain text fits, returned as-is without an ellipsis
-        assertEquals("abc def", MarkdownV2.render("- > *abc\ndef*", 13))
-    }
-
-    @Test
-    fun renderChunkedShortContentSingleChunk() {
-        assertEquals(listOf("*hello* world"), MarkdownV2.renderChunked("**hello** world"))
-    }
-
-    @Test
-    fun renderChunkedSplitsAtBlockBoundaries() {
-        assertEquals(listOf("aaa", "bbb"), MarkdownV2.renderChunked("aaa\n\nbbb", 3))
-    }
-
-    @Test
-    fun renderChunkedSplitsParagraphLines() {
-        assertEquals(listOf("aaaa\nbbbb", "cccc"), MarkdownV2.renderChunked("aaaa\nbbbb\ncccc", 9))
-    }
-
-    @Test
-    fun renderChunkedSplitsInlineNodes() {
-        // Boundary spaces are content — the Text nodes are "aa " and " cc " — so the
-        // pieces carry their edge whitespace instead of trimming it away
-        assertEquals(listOf("aa ", "_b_", " cc ", "_d_"), MarkdownV2.renderChunked("aa *b* cc *d*", 4))
-    }
-
-    @Test
-    fun renderChunkedFlatteningLosesNoWhitespace() {
-        // The last-resort escaped-text flattening must keep every character, spaces
-        // included (pre-fix each piece was trimmed, dropping spaces at piece edges)
-        val content = "x ".repeat(3000)
-        val chunks = MarkdownV2.renderChunked(content, maxLength = 4096)
-        assertTrue(chunks.size > 1)
-        chunks.forEach { assertTrue(it.length <= 4096, "over-long chunk: $it") }
-        assertEquals(3000, chunks.sumOf { chunk -> chunk.count { it == 'x' } })
-        assertEquals(2999, chunks.sumOf { chunk -> chunk.count { it == ' ' } })
-    }
-
-    @Test
-    fun renderChunkedOversizedItemFlatteningKeepsSpaces() {
-        // Same guarantee down the list-item flattening path: every content space survives
-        // ("a b " x200 = 400 spaces, the paragraph-final one is parser-stripped, and the
-        // kept "• " marker adds its own — 399 + 1)
-        val chunks = MarkdownV2.renderChunked("- " + "a b ".repeat(200), 50)
-        assertTrue(chunks.size > 1)
-        chunks.forEach { assertTrue(it.length <= 50, "over-long chunk: $it") }
-        assertEquals(400, chunks.sumOf { chunk -> chunk.count { it == 'a' || it == 'b' } })
-        assertEquals(400, chunks.sumOf { chunk -> chunk.count { it == ' ' } })
-    }
-
-    @Test
-    fun renderChunkedSplitsCodeBlockLines() {
-        assertEquals(
-            listOf("```\naaaa\n```", "```\nbbbb\n```", "```\ncccc\n```"),
-            MarkdownV2.renderChunked("```\naaaa\nbbbb\ncccc\n```", 12),
-        )
-    }
-
-    @Test
-    fun renderChunkedSplitsOversizedCodeLineIntoFencedSegments() {
-        assertEquals(
-            List(5) { "```\naaaa\n```" },
-            MarkdownV2.renderChunked("```\n" + "a".repeat(20) + "\n```", 12),
-        )
-    }
-
-    @Test
-    fun renderChunkedListItemsKeepNumberingAcrossChunks() {
-        assertEquals(
-            listOf("1\\. aaaa", "2\\. bbbb", "3\\. cccc"),
-            MarkdownV2.renderChunked("1. aaaa\n2. bbbb\n3. cccc", 10),
-        )
-    }
-
-    @Test
-    fun renderChunkedOversizedItemFlattensWithMarkerOnFirstPiece() {
-        assertEquals(listOf("• aaaa", "bbbb"), MarkdownV2.renderChunked("- aaaabbbb", 6))
-    }
-
-    @Test
-    fun renderChunkedSplitsQuoteChildren() {
-        assertEquals(listOf("> aaaa", "> bbbb"), MarkdownV2.renderChunked("> aaaa\n>\n> bbbb", 8))
-    }
-
-    @Test
-    fun renderChunkedOversizedQuoteChildSplitsLines() {
-        assertEquals(listOf("> aaaaaa", "> aaaaaa"), MarkdownV2.renderChunked("> " + "a".repeat(12), 8))
-    }
-
-    @Test
-    fun renderChunkedOversizedLineDegradesToEscapedUnits() {
-        assertEquals(listOf("aaaa", "\\*bbb", "b"), MarkdownV2.renderChunked("aaaa*bbbb", 5))
-    }
-
-    @Test
-    fun renderChunkedNeverSplitsEscapeUnitsAndLosesNoText() {
-        // '.' is a special character that never forms an entity, so the whole paragraph
-        // stays plain text and the chunks' concatenation must equal the full escape
-        val content = "a.b".repeat(60)
-        val chunks = MarkdownV2.renderChunked(content, 7)
-        assertTrue(chunks.size > 1)
-        chunks.forEach { chunk ->
-            assertTrue(chunk.length <= 7)
-            assertFalse(chunk.endsWith("\\"), "escape sequence split across chunks: $chunk")
-        }
-        assertEquals(MarkdownV2.escape(content), chunks.joinToString(""))
-    }
-
-    @Test
-    fun renderChunkedNonPositiveMaxLengthSingleChunk() {
-        val content = "word ".repeat(2000)
-        assertEquals(listOf(MarkdownV2.render(content)), MarkdownV2.renderChunked(content, 0))
-        assertEquals(listOf(MarkdownV2.render(content)), MarkdownV2.renderChunked(content, -5))
-    }
-
-    @Test
-    fun renderChunkedMaxLengthOneSingleChunk() {
-        // A positive size below 2 cannot hold even one escaped special character, so it
-        // joins 0 and the negatives on the no-chunking path
-        val content = "word ".repeat(2000)
-        assertEquals(listOf(MarkdownV2.render(content)), MarkdownV2.renderChunked(content, 1))
-    }
-
-    @Test
-    fun renderChunkedDefaultLimitSplitsHugeParagraph() {
-        val content = "word ".repeat(2000)
-        val chunks = MarkdownV2.renderChunked(content)
-        assertTrue(chunks.size > 1)
-        chunks.forEach { assertTrue(it.length <= maxMessageLength) }
-        assertEquals(content.count { it.isLetter() }, chunks.sumOf { chunk -> chunk.count { it.isLetter() } })
-    }
-
-    @Test
-    fun renderChunkedEmptyContentYieldsNoChunks() {
-        assertEquals(emptyList(), MarkdownV2.renderChunked(""))
-    }
-
-    @Test
-    fun renderChunkedViaAst() {
-        val document = MarkdownV2.defaultParser.parse("aaa\n\nbbb")!!
-        assertEquals(listOf("aaa", "bbb"), MarkdownV2.renderChunked(document, 3))
-        val paragraph = document.firstChild as Paragraph
-        assertEquals(listOf("aaa"), MarkdownV2.renderChunked(paragraph, 3))
-    }
-
-    @Test
-    fun renderChunkedEmptyRenderingBlocksYieldNoChunksViaAst() {
-        val htmlComment = HtmlBlock()
-        htmlComment.literal = "<!-- hidden -->"
-        assertEquals(emptyList(), MarkdownV2.renderChunked(htmlComment, 30))
-        assertEquals(emptyList(), MarkdownV2.renderChunked(TableBlock(), 30))
-    }
-
-    @Test
-    fun renderChunkedTableDegradesToFencedChunks() {
-        val chunks =
-            MarkdownV2.renderChunked(
-                "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |",
-                30,
-            )
-        assertEquals(4, chunks.size)
-        chunks.forEach { chunk ->
-            assertTrue(chunk.length <= 30)
-            assertTrue(chunk.startsWith("```"))
-            assertTrue(chunk.endsWith("```"))
-        }
-    }
-
-    @Test
-    fun renderChunkedMixedDocumentAllChunksBounded() {
-        val content =
-            """
-            # Title here
-
-            > quoted line one
-            > quoted line two
-
-            - first item
-            - second item
-
-            ```
-            code one
-            code two
-            ```
-            """.trimIndent()
-        val chunks = MarkdownV2.renderChunked(content, 30)
-        assertTrue(chunks.size > 1)
-        chunks.forEach { chunk ->
-            assertTrue(chunk.isNotBlank())
-            assertTrue(chunk.length <= 30, "over-long chunk: $chunk")
-        }
-    }
-
-    @Test
-    fun plainTextPassthroughKeepsUnmarkedText() {
-        assertEquals("hello world 123", MarkdownV2.toPlainText("hello world 123"))
-        assertEquals("• item", MarkdownV2.toPlainText("• item"))
-        assertEquals("", MarkdownV2.toPlainText(""))
-    }
-
-    @Test
-    fun plainTextResolvesTextEscapes() {
-        assertEquals("a*b_c. #x", MarkdownV2.toPlainText(MarkdownV2.escape("a*b_c. #x")))
-        // A lone backslash before a non-special character is not an escape and stays
-        assertEquals("a\\b", MarkdownV2.toPlainText("a\\b"))
-    }
-
-    @Test
-    fun plainTextStripsEmphasisMarkers() {
-        assertEquals("a b c d u", MarkdownV2.toPlainText("_a *b* c_ ~d~ __u__"))
-        assertEquals("a b c", MarkdownV2.toPlainText("__a _b_ c__"))
-    }
-
-    @Test
-    fun plainTextKeepsCodeSpanContentAndUnescapes() {
-        // Inside code entities only \` and \\ are escapes
-        assertEquals("a `b` c", MarkdownV2.toPlainText("`a \\`b\\` c`"))
-        assertEquals("code", MarkdownV2.toPlainText("`code`"))
-    }
-
-    @Test
-    fun plainTextDropsFencesAndLanguage() {
-        assertEquals("fun x()", MarkdownV2.toPlainText("```kotlin\nfun x()\n```"))
-        assertEquals("L1\nL2", MarkdownV2.toPlainText("```\nL1\nL2\n```"))
-    }
-
-    @Test
-    fun plainTextKeepsQuoteMarkersInsidePreBlocks() {
-        assertEquals("> code", MarkdownV2.toPlainText("```\n> code\n```"))
-    }
-
-    @Test
-    fun plainTextQuoteWrappedFenceStripsPerLinePrefixes() {
-        // A fence behind a quote prefix opens the quote's code block: every line's marker
-        // strips, leaving exactly the code (pre-fix the fence was read as code spans and
-        // the block de-formed with stray blank lines)
-        assertEquals("q", MarkdownV2.toPlainText("> ```\n> q\n> ```"))
-        assertEquals("q", MarkdownV2.toPlainText("> > ```\n> > q\n> > ```"))
-        // Hand-made shape: fence behind a quote prefix, unprefixed content lines
-        assertEquals("q", MarkdownV2.toPlainText("> ```\nq\n```"))
-        // And the round trip through the renderer's own quote-wrapped code shape
-        assertEquals("code line", MarkdownV2.toPlainText(MarkdownV2.render("> ```\n> code line\n> ```")))
-    }
-
-    @Test
-    fun plainTextQuoteWrappedCodeKeepsContentGreaterThanSigns() {
-        // Only the wrapping quote's markers strip: a code line starting with its own '>'
-        // keeps it, at one and two quote levels alike
-        assertEquals("> xml", MarkdownV2.toPlainText("> ```\n> > xml\n> ```"))
-        assertEquals("> xml", MarkdownV2.toPlainText(MarkdownV2.render("> ```\n> > xml\n> ```")))
-        assertEquals("> xml", MarkdownV2.toPlainText("> > ```\n> > > xml\n> > ```"))
-    }
-
-    @Test
-    fun plainTextStripsQuotePrefixes() {
-        assertEquals("a\n\nb", MarkdownV2.toPlainText("> a\n>\n> > b"))
-        // Mid-line '>' is not a quote marker and stays (as-is, unescaped garbage tolerated)
-        assertEquals("a > b", MarkdownV2.toPlainText("a > b"))
-    }
-
-    @Test
-    fun plainTextKeepsEscapedGreaterThanLiteral() {
-        assertEquals("> not a quote", MarkdownV2.toPlainText("\\> not a quote"))
-    }
-
-    @Test
-    fun plainTextLinkBecomesLabelAndUrl() {
-        assertEquals("t (u)", MarkdownV2.toPlainText("[t](u)"))
-        assertEquals("b (u)", MarkdownV2.toPlainText("[_b_](u)"))
-        // URL escapes resolve; the bare ')' that closed the entity does not leak
-        assertEquals("t (https://e.com/a)b)", MarkdownV2.toPlainText("[t](https://e.com/a\\)b)"))
-    }
-
-    @Test
-    fun plainTextIncompleteLinkStaysLiteral() {
-        assertEquals("[oops", MarkdownV2.toPlainText("[oops"))
-        assertEquals("[a](b", MarkdownV2.toPlainText("[a](b"))
-    }
-
-    @Test
-    fun plainTextEmptyLinkPiecesDegradeToTheNonEmptyPiece() {
-        // No dangling parentheses: an empty side yields the other side alone
-        assertEquals("", MarkdownV2.toPlainText("[]()"))
-        assertEquals("x", MarkdownV2.toPlainText("[x]()"))
-        assertEquals("u", MarkdownV2.toPlainText("[](u)"))
-    }
-
-    @Test
-    fun plainTextNeverClosedMarkersReturnLiterally() {
-        assertEquals("*a", MarkdownV2.toPlainText("*a"))
-        assertEquals("a_", MarkdownV2.toPlainText("a_"))
-        assertEquals("*_a", MarkdownV2.toPlainText("*_a"))
-    }
-
-    @Test
-    fun plainTextRoundTripsARenderedDocument() {
-        val content = "# Title\n\nsome *emph* and `code`\n\n> quote\n\n- item"
-        assertEquals(
-            "# Title\n\nsome emph and code\n\nquote\n\n• item",
-            MarkdownV2.toPlainText(MarkdownV2.render(content)),
-        )
-    }
-
-    @Test
-    fun plainTextOfChunkedPiecesLeavesNoUnresolvedEscapes() {
-        // The rejected-chunk fallback shape: every piece de-formats to text with no
-        // entity markers or escape sequences left for a no-parse_mode send
-        val content =
-            """
-            # Deep *dive*
-
-            Some _emphasis_ with `code` and [a link](https://e.com/a(b)) plus \| chars\.
-
-            > quoted *bold* text
-            > second line
-
-            - item one
-            - item two
-
-            ```
-            fenced `code` block
-            with \ backslash
-            ```
-            """.trimIndent()
-        MarkdownV2.renderChunked(content, 60).forEach { piece ->
-            val plain = MarkdownV2.toPlainText(piece)
-            assertTrue(plain.isNotBlank(), "piece de-formed to nothing: $piece")
-            "_*[]()~`>#+-=|{}.!\\".forEach { special ->
-                assertFalse("\\$special" in plain, "unresolved escape \\$special in: $plain")
-            }
-        }
-    }
-
-    private fun removeEscapes(text: String): String =
-        buildString {
-            var index = 0
-            while (index < text.length) {
-                if (text[index] == '\\' && index + 1 < text.length) {
-                    append(text[index + 1])
-                    index += 2
-                } else {
-                    append(text[index])
-                    index++
-                }
-            }
-        }
 }

@@ -170,12 +170,10 @@ internal class Visitor(
     fun output(): String {
         // An anchor still open with an empty label degrades like visit(link): an empty
         // label means nothing but trailing block separators follows its [, so rewinding
-        // the bracket is safe (a whitespace-only label counts as empty — it renders no
-        // visible text)
-        val contentEnd = sb.toString().trimEnd().length
+        // the bracket is safe (labelIsBlank covers the whitespace-only label too)
         openLinkUrls
             .lastOrNull { anchor ->
-                anchor.url.isNotEmpty() && anchor.url != NESTED_LITERAL_ANCHOR && contentEnd == anchor.labelStart
+                anchor.url.isNotEmpty() && anchor.url != NESTED_LITERAL_ANCHOR && labelIsBlank(anchor.labelStart)
             }?.let { emptyLabel ->
                 sb.setLength(emptyLabel.openBracket)
                 sb.append(escapeText(emptyLabel.url))
@@ -380,10 +378,12 @@ internal class Visitor(
         visitChildren(link)
         openMarkdownLinks--
         // Telegram also rejects link entities with empty text: a label that renders to
-        // nothing (no children, or children like a lone HTML comment) degrades to the bare
-        // escaped URL. Rewinding is safe — inside a label every pushed entity marker is
-        // accompanied by output, so an empty label left nothing open on the stacks
-        if (sb.length == labelStart) {
+        // no visible text (no children, whitespace-only, or children like a lone HTML
+        // comment) degrades to the bare escaped URL — the same blank test output() applies
+        // to anchors left unclosed at output time. Rewinding is safe — inside a label every
+        // pushed entity marker is accompanied by output, so a blank label left nothing
+        // open on the stacks
+        if (labelIsBlank(labelStart)) {
             sb.setLength(openBracket)
             sb.append(escapeText(destination))
             return
@@ -419,7 +419,8 @@ internal class Visitor(
         val labelStart = sb.length
         visitChildren(image)
         openMarkdownLinks--
-        if (sb.length == labelStart) {
+        // See visit(link): a label with no visible text degrades to the bare escaped URL
+        if (labelIsBlank(labelStart)) {
             sb.setLength(openBracket)
             sb.append(escapeText(destination))
             return
@@ -505,10 +506,11 @@ internal class Visitor(
             if (anchor.url == NESTED_LITERAL_ANCHOR) return escapeText(tag)
             // "" is the href-less open tag: pop the stack, emit no link
             if (anchor.url.isEmpty()) return ""
-            // Telegram rejects link entities with empty text: a label that rendered
-            // nothing degrades to the bare escaped URL, rewinding the bracket — safe for
-            // the same reason as in visit(link): an empty label left nothing open
-            if (sb.length == anchor.labelStart) {
+            // Telegram rejects link entities with empty text: a label that rendered no
+            // visible text (whitespace included) degrades to the bare escaped URL,
+            // rewinding the bracket — safe for the same reason as in visit(link): a blank
+            // label left nothing open
+            if (labelIsBlank(anchor.labelStart)) {
                 sb.setLength(anchor.openBracket)
                 return escapeText(anchor.url)
             }
@@ -627,6 +629,13 @@ internal class Visitor(
     }
 
     private fun linkEntityOpen(): Boolean = openLinkUrls.isNotEmpty() || openMarkdownLinks > 0
+
+    // Whether a link label region starting at [labelStart] renders no visible text: empty
+    // or whitespace only. Every caller checks it immediately after the label's children,
+    // so the region runs exactly to the end of the current output; any entity marker a
+    // label had opened would have emitted a non-whitespace character, so a blank region
+    // guarantees nothing was left open inside it
+    private fun labelIsBlank(labelStart: Int): Boolean = sb.substring(labelStart).isBlank()
 
     private fun enterInline(): Boolean {
         if (inlineDepth >= MAX_RENDER_DEPTH) return false

@@ -65,8 +65,9 @@ public object MarkdownV2 {
         parser: Parser = defaultParser,
         options: RenderOptions = RenderOptions(),
     ): String {
-        // parse() does not return null for non-null content in practice; this branch is
-        // purely defensive
+        // The Parser interface types parse() as Node?: the default parser never returns
+        // null for non-null input, but a custom implementation may — such a document
+        // renders to nothing
         val document = parser.parse(content) ?: return ""
         return render(document, maxLength, options)
     }
@@ -152,6 +153,7 @@ public object MarkdownV2 {
         parser: Parser = defaultParser,
         options: RenderOptions = RenderOptions(),
     ): List<String> {
+        // See the render(content) overload: only a custom parser can return null here
         val document = parser.parse(content) ?: return emptyList()
         return renderChunked(document, maxLength, options)
     }
