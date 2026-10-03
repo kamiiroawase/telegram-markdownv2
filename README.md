@@ -1,7 +1,7 @@
 # telegram-markdownv2
 
 [![Build](https://github.com/kamiiroawase/telegram-markdownv2/actions/workflows/build.yml/badge.svg)](https://github.com/kamiiroawase/telegram-markdownv2/actions/workflows/build.yml)
-[![JitPack](https://jitpack.io/v/kamiiroawase/telegram-markdownv2.svg)](https://jitpack.io/#kamiiroawase/telegram-markdownv2)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.kamiiroawase/telegram-markdownv2.svg)](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
 Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转换为 Telegram MarkdownV2**，并对超长内容做保持结构完整的截断（Telegram 消息上限 4096 字符）。为 LLM 机器人输出而生——模型回复是任意长度、任意结构的 Markdown，还经常带 Telegram 渲染不了的构造。
@@ -25,12 +25,11 @@ Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转�
 
 ### 第一步：引入依赖
 
-通过 [JitPack](https://jitpack.io/#kamiiroawase/telegram-markdownv2) 引用，版本跟随 `v*` git tag。
+发布于 [Maven Central](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)，版本跟随 `v*` git tag。
 
 ```kotlin
 repositories {
-    maven("https://jitpack.io")
-    mavenCentral() // commonmark-kotlin 传递依赖
+    mavenCentral()
 }
 ```
 
@@ -38,43 +37,42 @@ repositories {
 
 ```toml
 [versions]
-telegramMarkdownv2 = "1.1.0"
+telegramMarkdownv2 = "1.2.0"
 
 [libraries]
-telegram-markdownv2-jvm = { module = "com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm", version.ref = "telegramMarkdownv2" }
+telegram-markdownv2 = { module = "io.github.kamiiroawase:telegram-markdownv2", version.ref = "telegramMarkdownv2" }
 ```
 
-按平台引用变体：
+单平台项目直接引用根坐标（Gradle module metadata 会解析到对应平台变体）：
 
 ```kotlin
 dependencies {
-    implementation(libs.telegram.markdownv2.jvm)
+    implementation(libs.telegram.markdownv2)
 }
 ```
 
-各平台变体坐标（截至 v1.1.0（2026-10）实测：JitPack 缺少 common metadata，**根坐标不可用**，须按变体引用；若 JitPack 修复该问题，可直接改用根坐标）：
+需要钉住具体平台变体时（Maven 依赖、锁坐标等场景）：
 
 | 平台 | 坐标 |
 | --- | --- |
-| Android | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-android:1.1.0` |
-| JVM | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm:1.1.0` |
-| JS | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-js:1.1.0` |
-| Wasm | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-wasm-js:1.1.0` |
-| Linux x64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-linuxx64:1.1.0` |
-| Linux Arm64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-linuxarm64:1.1.0` |
-| macOS Arm64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-macosarm64:1.1.0` |
-| Windows | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-mingwx64:1.1.0` |
-| iOS arm64（设备） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iosarm64:1.1.0` |
-| iOS x64（模拟器） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iosx64:1.1.0` |
-| iOS arm64（模拟器） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iossimulatorarm64:1.1.0` |
+| Android | `io.github.kamiiroawase:telegram-markdownv2-android:1.2.0` |
+| JVM | `io.github.kamiiroawase:telegram-markdownv2-jvm:1.2.0` |
+| JS | `io.github.kamiiroawase:telegram-markdownv2-js:1.2.0` |
+| Wasm | `io.github.kamiiroawase:telegram-markdownv2-wasm-js:1.2.0` |
+| Linux x64 | `io.github.kamiiroawase:telegram-markdownv2-linuxx64:1.2.0` |
+| Linux Arm64 | `io.github.kamiiroawase:telegram-markdownv2-linuxarm64:1.2.0` |
+| macOS Arm64 | `io.github.kamiiroawase:telegram-markdownv2-macosarm64:1.2.0` |
+| Windows | `io.github.kamiiroawase:telegram-markdownv2-mingwx64:1.2.0` |
+| iOS arm64（设备） | `io.github.kamiiroawase:telegram-markdownv2-iosarm64:1.2.0` |
+| iOS x64（模拟器） | `io.github.kamiiroawase:telegram-markdownv2-iosx64:1.2.0` |
+| iOS arm64（模拟器） | `io.github.kamiiroawase:telegram-markdownv2-iossimulatorarm64:1.2.0` |
 
-KMP 消费方在 commonMain 中无法直接引用本库 API（同为上述 v1.1.0 时点观察：JitPack 无 common metadata）；可按 source set 引用各平台变体，或把 GitHub Release 附件搭成自建 Maven 仓库解决：
+KMP 消费方在 commonMain 引用根坐标即可：
 
 ```kotlin
 kotlin {
     sourceSets {
-        jvmMain.dependencies { implementation("com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm:1.1.0") }
-        // 其余平台同理替换变体
+        commonMain.dependencies { implementation("io.github.kamiiroawase:telegram-markdownv2:1.2.0") }
     }
 }
 ```
@@ -82,7 +80,7 @@ kotlin {
 ### 第二步：调用
 
 ```kotlin
-import com.github.kamiiroawase.markdownv2.MarkdownV2
+import io.github.kamiiroawase.markdownv2.MarkdownV2
 
 val mdv2 = MarkdownV2.render("**hello** world")
 // *hello* world —— 可直接用于 parse_mode = MarkdownV2 的 sendMessage
@@ -175,7 +173,7 @@ val text2 = MarkdownV2.render(document, MarkdownV2.MAX_MESSAGE_LENGTH)
 - **超深嵌套平铺**：超过 100 层的引用 / 列表 / 行内强调降级为平铺纯文本（防病态输入栈溢出）；截断时放不下的深层结构整体退化为转义纯文本，不逐层重缩（防嵌套重渲染指数膨胀）
 - **超长内容渲染两遍**：先完整渲染判断长度、超限再分块收缩；4096 字符上限下开销可忽略，不为超大输入做单遍渲染优化
 - **截断收缩按重试收敛（最坏 O(n²)）**：列表项或引用行放不下时，整棵子树重渲染、预算减去超出量再试——直接丢行会连实体闭合符一起丢，生成非法 MarkdownV2，故不允许；超出量最小 1 字符（续行缩进开销），精确卡边界的对抗性输入每轮只前进 1 字符而每轮成本是整棵子树。重试仅限顶层（嵌套逐层重试会指数膨胀，深层结构直接退化为转义纯文本），4096 默认上限下无感；自定义超大 `maxLength` 配合对抗性输入可放大此路径
-- **版本号来自 git tag（仅当 HEAD 恰在 tag 上）**：JitPack 的 tag 构建与 release 工作流的 tag 检出即此情形，取 tag 版本号；其余一律 `0.0.0-SNAPSHOT`——tag 之后的提交不再复用已发布版本号，本地 `publishToMavenLocal` 也就不会覆盖同名已发布工件。CI 需完整克隆（`fetch-depth: 0`）才能推导版本
+- **版本号来自 git tag（仅当 HEAD 恰在 tag 上）**：release 工作流的 tag 检出即此情形，取 tag 版本号；其余一律 `0.0.0-SNAPSHOT`——tag 之后的提交不再复用已发布版本号，本地 `publishToMavenLocal` 也就不会覆盖同名已发布工件。CI 需完整克隆（`fetch-depth: 0`）才能推导版本
 
 ## 二、参与代码贡献
 
@@ -193,7 +191,7 @@ cd telegram-markdownv2
 
 ```
 src/
-├── commonMain/kotlin/com/github/kamiiroawase/markdownv2/
+├── commonMain/kotlin/io/github/kamiiroawase/markdownv2/
 │   ├── MarkdownV2.kt      公共 API 与顶层流程（render / escape / 默认解析器）
 │   ├── Visitor.kt         AST → MarkdownV2 的全文渲染（行内 HTML 映射、未闭合实体补全）
 │   ├── Blocks.kt          截断与分片共用的块级内核（单块渲染、块形态分类、列表标记与列表项遍历、行/引用前缀）
@@ -242,7 +240,7 @@ src/
 
 ## 三、性能测试数据
 
-`./gradlew benchmark` 可复跑（实现见 [Benchmark.kt](src/jvmTest/kotlin/com/github/kamiiroawase/markdownv2/Benchmark.kt)：JVM 单线程，先全局预热，全套场景多轮交错重复、每场景取各轮中位数的最佳值——CPU 频率与热窗等环境干扰可使单轮结果偏差数倍，最佳轮远比单轮可复现；计时覆盖 commonmark 解析与渲染/截断全程，吞吐按 UTF-8 字节计）。下表为 Windows 11 / JDK 21 / Intel x86-64 上的实测参考值（2026-10，最佳轮口径），绝对值随机器浮动，量级更有参考意义。为防表格静默老化，后续每次发版都会在 GitHub Release 附件附带当次 CI（ubuntu runner）复跑的完整输出（`benchmark.txt`），随时可与下表核对量级：
+`./gradlew benchmark` 可复跑（实现见 [Benchmark.kt](src/jvmTest/kotlin/io/github/kamiiroawase/markdownv2/Benchmark.kt)：JVM 单线程，先全局预热，全套场景多轮交错重复、每场景取各轮中位数的最佳值——CPU 频率与热窗等环境干扰可使单轮结果偏差数倍，最佳轮远比单轮可复现；计时覆盖 commonmark 解析与渲染/截断全程，吞吐按 UTF-8 字节计）。下表为 Windows 11 / JDK 21 / Intel x86-64 上的实测参考值（2026-10，最佳轮口径），绝对值随机器浮动，量级更有参考意义。为防表格静默老化，后续每次发版都会在 GitHub Release 附件附带当次 CI（ubuntu runner）复跑的完整输出（`benchmark.txt`），随时可与下表核对量级：
 
 | 场景 | 输入 | 耗时（最佳轮中位数） | 吞吐 |
 | --- | --- | --- | --- |

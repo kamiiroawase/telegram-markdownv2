@@ -1,7 +1,7 @@
 # telegram-markdownv2
 
 [![Build](https://github.com/kamiiroawase/telegram-markdownv2/actions/workflows/build.yml/badge.svg)](https://github.com/kamiiroawase/telegram-markdownv2/actions/workflows/build.yml)
-[![JitPack](https://jitpack.io/v/kamiiroawase/telegram-markdownv2.svg)](https://jitpack.io/#kamiiroawase/telegram-markdownv2)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.kamiiroawase/telegram-markdownv2.svg)](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
 Kotlin Multiplatform library that converts **CommonMark (incl. GFM tables & strikethrough) into Telegram MarkdownV2**, with structure-preserving truncation for over-length content (Telegram message limit: 4096 characters). Built for LLM bot output — model replies are arbitrary Markdown of unpredictable structure, frequently containing constructs Telegram cannot render.
@@ -25,12 +25,11 @@ Supported platforms: Android (minSdk 23), JVM 11+, JS, Wasm, Linux (x64/Arm64), 
 
 ### Step 1: Add the dependency
 
-Consume via [JitPack](https://jitpack.io/#kamiiroawase/telegram-markdownv2); versions follow `v*` git tags.
+Published on [Maven Central](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2); versions follow `v*` git tags.
 
 ```kotlin
 repositories {
-    maven("https://jitpack.io")
-    mavenCentral() // transitive dependencies of commonmark-kotlin
+    mavenCentral()
 }
 ```
 
@@ -38,43 +37,42 @@ Version catalog:
 
 ```toml
 [versions]
-telegramMarkdownv2 = "1.1.0"
+telegramMarkdownv2 = "1.2.0"
 
 [libraries]
-telegram-markdownv2-jvm = { module = "com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm", version.ref = "telegramMarkdownv2" }
+telegram-markdownv2 = { module = "io.github.kamiiroawase:telegram-markdownv2", version.ref = "telegramMarkdownv2" }
 ```
 
-Reference the variant per platform:
+Single-platform projects reference the root coordinate (Gradle module metadata resolves the matching platform variant):
 
 ```kotlin
 dependencies {
-    implementation(libs.telegram.markdownv2.jvm)
+    implementation(libs.telegram.markdownv2)
 }
 ```
 
-Per-platform variant coordinates (as observed at v1.1.0, 2026-10: JitPack lacks common metadata, so the **root coordinate is unusable** — reference variants; if JitPack fixes this, the root coordinate becomes usable):
+To pin a concrete platform variant (Maven dependency graphs, locked coordinates and the like):
 
 | Platform | Coordinate |
 | --- | --- |
-| Android | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-android:1.1.0` |
-| JVM | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm:1.1.0` |
-| JS | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-js:1.1.0` |
-| Wasm | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-wasm-js:1.1.0` |
-| Linux x64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-linuxx64:1.1.0` |
-| Linux Arm64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-linuxarm64:1.1.0` |
-| macOS Arm64 | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-macosarm64:1.1.0` |
-| Windows | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-mingwx64:1.1.0` |
-| iOS arm64 (device) | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iosarm64:1.1.0` |
-| iOS x64 (simulator) | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iosx64:1.1.0` |
-| iOS arm64 (simulator) | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iossimulatorarm64:1.1.0` |
+| Android | `io.github.kamiiroawase:telegram-markdownv2-android:1.2.0` |
+| JVM | `io.github.kamiiroawase:telegram-markdownv2-jvm:1.2.0` |
+| JS | `io.github.kamiiroawase:telegram-markdownv2-js:1.2.0` |
+| Wasm | `io.github.kamiiroawase:telegram-markdownv2-wasm-js:1.2.0` |
+| Linux x64 | `io.github.kamiiroawase:telegram-markdownv2-linuxx64:1.2.0` |
+| Linux Arm64 | `io.github.kamiiroawase:telegram-markdownv2-linuxarm64:1.2.0` |
+| macOS Arm64 | `io.github.kamiiroawase:telegram-markdownv2-macosarm64:1.2.0` |
+| Windows | `io.github.kamiiroawase:telegram-markdownv2-mingwx64:1.2.0` |
+| iOS arm64 (device) | `io.github.kamiiroawase:telegram-markdownv2-iosarm64:1.2.0` |
+| iOS x64 (simulator) | `io.github.kamiiroawase:telegram-markdownv2-iosx64:1.2.0` |
+| iOS arm64 (simulator) | `io.github.kamiiroawase:telegram-markdownv2-iossimulatorarm64:1.2.0` |
 
-KMP consumers cannot reference this library's API from commonMain directly (same v1.1.0 observation: JitPack has no common metadata); reference per-platform variants in each source set, or self-host the GitHub Release attachments as a Maven repository:
+KMP consumers reference the root coordinate from commonMain:
 
 ```kotlin
 kotlin {
     sourceSets {
-        jvmMain.dependencies { implementation("com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-jvm:1.1.0") }
-        // swap the variant for other platforms accordingly
+        commonMain.dependencies { implementation("io.github.kamiiroawase:telegram-markdownv2:1.2.0") }
     }
 }
 ```
@@ -82,7 +80,7 @@ kotlin {
 ### Step 2: Call it
 
 ```kotlin
-import com.github.kamiiroawase.markdownv2.MarkdownV2
+import io.github.kamiiroawase.markdownv2.MarkdownV2
 
 val mdv2 = MarkdownV2.render("**hello** world")
 // *hello* world — ready for sendMessage with parse_mode = MarkdownV2
@@ -175,7 +173,7 @@ val text2 = MarkdownV2.render(document, MarkdownV2.MAX_MESSAGE_LENGTH)
 - **Ultra-deep nesting flattens**: quotes / lists / inline emphasis nested deeper than 100 levels degrade to flattened plain text (guarding against stack overflow on pathological input); when truncated, over-budget deep structures fall back to escaped plain text wholesale instead of being re-shrunk level by level (preventing exponential re-rendering)
 - **Over-length content is rendered twice**: once fully to measure, then block-wise when shrinking; negligible under the 4096-character limit, so no single-pass optimization is made for huge inputs
 - **Truncation converges by retry (worst-case O(n²))**: when a list item or a quote line does not fit, the whole subtree re-renders with the budget tightened by the overflow, again and again — dropping lines outright is forbidden (an entity closer would drop with its line, yielding invalid MarkdownV2); the overflow can be as small as 1 character (the continuation-indent overhead), so boundary-adversarial input advances 1 character per round while each round costs a full subtree render. Retrying happens at the top level only (nested per-level retries would explode exponentially — deep structures degrade to escaped plain text instead) and stays imperceptible under the default 4096 limit; a custom huge `maxLength` combined with adversarial input can amplify this path
-- **Version numbers come from git tags (only when HEAD sits exactly on one)**: the JitPack tag build and the release workflow's tag checkout are exactly that shape and take the tag's version; everything else builds as `0.0.0-SNAPSHOT` — commits past a tag no longer reuse the released version number, so a local `publishToMavenLocal` cannot shadow published artifacts under the same coordinates. CI needs a full clone (`fetch-depth: 0`) to derive the version
+- **Version numbers come from git tags (only when HEAD sits exactly on one)**: the release workflow's tag checkout is exactly that shape and takes the tag's version; everything else builds as `0.0.0-SNAPSHOT` — commits past a tag no longer reuse the released version number, so a local `publishToMavenLocal` cannot shadow published artifacts under the same coordinates. CI needs a full clone (`fetch-depth: 0`) to derive the version
 
 ## Part 2: Contributing
 
@@ -193,7 +191,7 @@ Building from source requires JDK 21+ (Gradle toolchains auto-provisioning is en
 
 ```
 src/
-├── commonMain/kotlin/com/github/kamiiroawase/markdownv2/
+├── commonMain/kotlin/io/github/kamiiroawase/markdownv2/
 │   ├── MarkdownV2.kt      public API and top-level flow (render / escape / default parser)
 │   ├── Visitor.kt         full AST → MarkdownV2 rendering (inline-HTML mapping, entity completion)
 │   ├── Blocks.kt          block-level kernel shared by truncation and chunking (single-block rendering, block-shape classification, list markers and the item walk, line/quote prefixes)
@@ -242,7 +240,7 @@ Note: `kotlin-js-store/yarn.lock` is outside dependabot's coverage — its npm e
 
 ## Part 3: Performance
 
-Reproducible via `./gradlew benchmark` (implementation: [Benchmark.kt](src/jvmTest/kotlin/com/github/kamiiroawase/markdownv2/Benchmark.kt) — single-threaded JVM, global warm-up, then the whole suite repeats several rounds with the cases interleaved and each scenario keeps its best (minimum) round median; interference such as CPU frequency scaling or thermal windows can skew a single round several-fold, so the best round is far more reproducible; figures cover the full commonmark parse + render/truncate pipeline, throughput counted in UTF-8 bytes). Reference measurements on Windows 11 / JDK 21 / Intel x86-64 (2026-10, best-round methodology); absolute values vary per machine — treat them as order-of-magnitude. To keep the table from silently aging, every release from now on attaches the CI's (ubuntu runner) fresh benchmark output (`benchmark.txt`) to the GitHub Release, ready for order-of-magnitude comparison against the table:
+Reproducible via `./gradlew benchmark` (implementation: [Benchmark.kt](src/jvmTest/kotlin/io/github/kamiiroawase/markdownv2/Benchmark.kt) — single-threaded JVM, global warm-up, then the whole suite repeats several rounds with the cases interleaved and each scenario keeps its best (minimum) round median; interference such as CPU frequency scaling or thermal windows can skew a single round several-fold, so the best round is far more reproducible; figures cover the full commonmark parse + render/truncate pipeline, throughput counted in UTF-8 bytes). Reference measurements on Windows 11 / JDK 21 / Intel x86-64 (2026-10, best-round methodology); absolute values vary per machine — treat them as order-of-magnitude. To keep the table from silently aging, every release from now on attaches the CI's (ubuntu runner) fresh benchmark output (`benchmark.txt`) to the GitHub Release, ready for order-of-magnitude comparison against the table:
 
 | Scenario | Input | Median (best round) | Throughput |
 | --- | --- | --- | --- |

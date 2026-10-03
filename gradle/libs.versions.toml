@@ -5,6 +5,7 @@ commonmarkKotlin = "0.26.0"
 spotless = "8.10.3"
 binaryCompatibilityValidator = "0.18.2"
 dokka = "2.2.0"
+vanniktechMavenPublish = "0.37.0"
 
 [libraries]
 commonmark = { module = "io.github.darriousliu:commonmark", version.ref = "commonmarkKotlin" }
@@ -20,3 +21,4 @@ kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref 
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 binary-compatibility-validator = { id = "org.jetbrains.kotlinx.binary-compatibility-validator", version.ref = "binaryCompatibilityValidator" }
 dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
+maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "vanniktechMavenPublish" }

@@ -40,19 +40,20 @@ jobs:
       - name: Build, test and check format
         run: chmod +x gradlew && ./gradlew build
 
-      # JitPack release builds skip tests (-xtest), so the publishing pipeline can only be
-      # verified on the CI side. After publishing to the local Maven repo, assert that all
-      # twelve KMP modules (root + android/jvm/js/wasmJs/linux/macos/mingw/ios) publish
-      # their artifacts under a single version directory and the pom carries the commonmark
-      # transitive dependency. The exact-tag version derivation is end-to-end guarded in
-      # the Release workflow (which checks the tag out); here the version is whatever the
-      # current HEAD derives — 0.0.0-SNAPSHOT on a plain main push (HEAD sits past the tag,
-      # by design: the released number never sticks to unreleased commits), the tag version
-      # only when main HEAD is itself tagged
+      # The Maven Central publish itself runs only in the Release workflow (tag push, with
+      # credentials); here the publishing pipeline gets its only CI coverage: after
+      # publishing to the local Maven repo, assert that all twelve KMP modules (root +
+      # android/jvm/js/wasmJs/linux/macos/mingw/ios) publish their artifacts under a single
+      # version directory and the pom carries the commonmark transitive dependency. The
+      # exact-tag version derivation is end-to-end guarded in the Release workflow (which
+      # checks the tag out); here the version is whatever the current HEAD derives —
+      # 0.0.0-SNAPSHOT on a plain main push (HEAD sits past the tag, by design: the
+      # released number never sticks to unreleased commits), the tag version only when
+      # main HEAD is itself tagged
       - name: Verify Maven publishing
         run: |
           ./gradlew publishToMavenLocal
-          GROUP_DIR="$HOME/.m2/repository/com/github/kamiiroawase"
+          GROUP_DIR="$HOME/.m2/repository/io/github/kamiiroawase"
           ROOT="$GROUP_DIR/telegram-markdownv2"
           test "$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1
           VERSION=$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | head -n 1)

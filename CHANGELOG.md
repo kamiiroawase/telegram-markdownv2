@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-03
+
+### Changed
+
+- **Breaking**: the Maven group and the Kotlin package moved from `com.github.kamiiroawase`
+  to `io.github.kamiiroawase` — imports change from
+  `com.github.kamiiroawase.markdownv2.MarkdownV2` to `io.github.kamiiroawase.markdownv2.MarkdownV2`,
+  and coordinates from `com.github.kamiiroawase.telegram-markdownv2:…` to
+  `io.github.kamiiroawase:…`. Versions up to 1.1.0 remain resolvable on JitPack under the
+  old coordinates
+- **Breaking**: distribution moved from JitPack to Maven Central (jitpack.yml removed;
+  the release workflow now signs and publishes to the Central Portal via the
+  vanniktech plugin and auto-releases). The JitPack gap that forced per-variant
+  coordinates is gone: the root coordinate `io.github.kamiiroawase:telegram-markdownv2`
+  carries Gradle module metadata and serves KMP consumers from commonMain directly
+
 ### Fixed
 
 - Unclosed inline entities no longer complete into crossed, Telegram-rejected output:

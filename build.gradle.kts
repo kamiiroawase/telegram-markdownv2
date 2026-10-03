@@ -10,25 +10,23 @@ plugins {
     alias(libs.plugins.spotless)
     alias(libs.plugins.binary.compatibility.validator)
     alias(libs.plugins.dokka)
-    `maven-publish`
+    alias(libs.plugins.maven.publish)
 }
 
 // Dependency repositories live solely in settings.gradle.kts (dependencyResolutionManagement)
 
-group = "com.github.kamiiroawase"
+group = "io.github.kamiiroawase"
 
-// Version precedence: -Pversion (passed by JitPack on tag builds, e.g. v1.1.0 → 1.1.0)
-// > the exact git tag (CI needs a full clone with fetch-depth=0; only HEAD sitting exactly
-// on a v* tag yields that version — the JitPack tag checkout and the release workflow are
-// exactly this shape) > 0.0.0-SNAPSHOT (anything else: no tag at HEAD, or no git
-// environment). The nearest-tag fallback is deliberately absent: past the tag it would
+// Version precedence: the exact git tag (CI needs a full clone with fetch-depth=0; only
+// HEAD sitting exactly on a v* tag yields that version — the release workflow's tag
+// checkout is exactly this shape) > 0.0.0-SNAPSHOT (anything else: no tag at HEAD, or no
+// git environment). The nearest-tag fallback is deliberately absent: past the tag it would
 // stamp unreleased commits with the released version, and a local publishToMavenLocal
 // would then shadow the published artifact under the same coordinates. The version must
-// not be hard-coded — it would override the value JitPack passes in
+// not be hard-coded — the tag is the single source of the released number
 version =
     providers
-        .gradleProperty("version")
-        .orElse(providers.of(GitTagVersionSource::class.java) {})
+        .of(GitTagVersionSource::class.java) {}
         .orElse("0.0.0-SNAPSHOT")
         .get()
 
@@ -74,7 +72,7 @@ kotlin {
     // Android uses AGP's KMP library plugin (kotlin { android { } } — no top-level android
     // block, no androidTarget)
     android {
-        namespace = "com.github.kamiiroawase.telegram-markdownv2"
+        namespace = "io.github.kamiiroawase.telegram-markdownv2"
         compileSdk = 37
         minSdk = 23
 
@@ -159,7 +157,7 @@ tasks.register<JavaExec>("benchmark") {
             .getByName("test")
     dependsOn(testCompilation.compileTaskProvider)
     classpath = testCompilation.runtimeDependencyFiles
-    mainClass.set("com.github.kamiiroawase.markdownv2.BenchmarkKt")
+    mainClass.set("io.github.kamiiroawase.markdownv2.BenchmarkKt")
 }
 
 // Public-API compatibility guard: the api/ directory snapshots every public declaration;
@@ -176,33 +174,48 @@ apiValidation {
 // API reference from the KDoc: ./gradlew dokkaGeneratePublicationHtml (CI uploads the
 // result as an artifact); configuration is Dokka's multiplatform defaults
 
-publishing {
-    publications.withType<MavenPublication>().configureEach {
-        pom {
-            name.set("telegram-markdownv2")
-            description.set(
-                "Kotlin Multiplatform CommonMark (GFM) to Telegram MarkdownV2 converter " +
-                    "with structure-preserving truncation",
-            )
+// Maven Central publishing via the vanniktech plugin: every KMP target's publication
+// (plus the root Gradle-module publication KMP consumers reference from commonMain) is
+// signed and uploaded to the Central Portal in one `publishToMavenCentral` run. The
+// release workflow supplies the credentials and the GPG key as environment-mapped gradle
+// properties (ORG_GRADLE_PROJECT_mavenCentralUsername/Password,
+// ORG_GRADLE_PROJECT_signingInMemoryKey/KeyPassword); with none of them present — local
+// builds and the PR-time publishToMavenLocal verification — signing stays out of the way
+mavenPublishing {
+    // automaticRelease closes and releases the staging deployment right after the upload,
+    // so a green tag push needs no manual portal visit
+    publishToMavenCentral(automaticRelease = true)
+
+    // Sign only when the key is available: publishToMavenLocal must keep working without
+    // secrets (the Build workflow's artifact verification runs exactly that)
+    if (providers.gradleProperty("signingInMemoryKey").isPresent) {
+        signAllPublications()
+    }
+
+    pom {
+        name.set("telegram-markdownv2")
+        description.set(
+            "Kotlin Multiplatform CommonMark (GFM) to Telegram MarkdownV2 converter " +
+                "with structure-preserving truncation",
+        )
+        url.set("https://github.com/kamiiroawase/telegram-markdownv2")
+        licenses {
+            license {
+                name.set("The Unlicense")
+                url.set("https://unlicense.org")
+            }
+        }
+        developers {
+            developer {
+                id.set("kamiiroawase")
+                name.set("kamiiroawase")
+                url.set("https://github.com/kamiiroawase")
+            }
+        }
+        scm {
             url.set("https://github.com/kamiiroawase/telegram-markdownv2")
-            licenses {
-                license {
-                    name.set("The Unlicense")
-                    url.set("https://unlicense.org")
-                }
-            }
-            developers {
-                developer {
-                    id.set("kamiiroawase")
-                    name.set("kamiiroawase")
-                    url.set("https://github.com/kamiiroawase")
-                }
-            }
-            scm {
-                url.set("https://github.com/kamiiroawase/telegram-markdownv2")
-                connection.set("scm:git:https://github.com/kamiiroawase/telegram-markdownv2.git")
-                developerConnection.set("scm:git:git@github.com:kamiiroawase/telegram-markdownv2.git")
-            }
+            connection.set("scm:git:https://github.com/kamiiroawase/telegram-markdownv2.git")
+            developerConnection.set("scm:git:git@github.com:kamiiroawase/telegram-markdownv2.git")
         }
     }
 }
