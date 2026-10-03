@@ -442,9 +442,8 @@ internal class Visitor(
 
     override fun visit(htmlBlock: HtmlBlock) {
         val literal = htmlBlock.literal.orEmpty().trim()
-        if (literal.isEmpty() || literal.startsWith("<!--") ||
-            literal.startsWith("<!") || literal.startsWith("<?")
-        ) {
+        // "<!--" is a "<!" — one prefix covers comments and declarations alike
+        if (literal.isEmpty() || literal.startsWith("<!") || literal.startsWith("<?")) {
             return
         }
 
@@ -463,7 +462,8 @@ internal class Visitor(
      */
     private fun renderHtmlInline(literal: String): String {
         val tag = literal.trim()
-        if (tag.startsWith("<!--") || tag.startsWith("<!") || tag.startsWith("<?")) {
+        // "<!--" is a "<!" — one prefix covers comments and declarations alike
+        if (tag.startsWith("<!") || tag.startsWith("<?")) {
             return ""
         }
 
