@@ -2023,6 +2023,28 @@ class MarkdownV2Test {
     }
 
     @Test
+    fun plainTextQuoteWrappedFenceStripsPerLinePrefixes() {
+        // A fence behind a quote prefix opens the quote's code block: every line's marker
+        // strips, leaving exactly the code (pre-fix the fence was read as code spans and
+        // the block de-formed with stray blank lines)
+        assertEquals("q", MarkdownV2.toPlainText("> ```\n> q\n> ```"))
+        assertEquals("q", MarkdownV2.toPlainText("> > ```\n> > q\n> > ```"))
+        // Hand-made shape: fence behind a quote prefix, unprefixed content lines
+        assertEquals("q", MarkdownV2.toPlainText("> ```\nq\n```"))
+        // And the round trip through the renderer's own quote-wrapped code shape
+        assertEquals("code line", MarkdownV2.toPlainText(MarkdownV2.render("> ```\n> code line\n> ```")))
+    }
+
+    @Test
+    fun plainTextQuoteWrappedCodeKeepsContentGreaterThanSigns() {
+        // Only the wrapping quote's markers strip: a code line starting with its own '>'
+        // keeps it, at one and two quote levels alike
+        assertEquals("> xml", MarkdownV2.toPlainText("> ```\n> > xml\n> ```"))
+        assertEquals("> xml", MarkdownV2.toPlainText(MarkdownV2.render("> ```\n> > xml\n> ```")))
+        assertEquals("> xml", MarkdownV2.toPlainText("> > ```\n> > > xml\n> > ```"))
+    }
+
+    @Test
     fun plainTextStripsQuotePrefixes() {
         assertEquals("a\n\nb", MarkdownV2.toPlainText("> a\n>\n> > b"))
         // Mid-line '>' is not a quote marker and stays (as-is, unescaped garbage tolerated)
@@ -2046,6 +2068,14 @@ class MarkdownV2Test {
     fun plainTextIncompleteLinkStaysLiteral() {
         assertEquals("[oops", MarkdownV2.toPlainText("[oops"))
         assertEquals("[a](b", MarkdownV2.toPlainText("[a](b"))
+    }
+
+    @Test
+    fun plainTextEmptyLinkPiecesDegradeToTheNonEmptyPiece() {
+        // No dangling parentheses: an empty side yields the other side alone
+        assertEquals("", MarkdownV2.toPlainText("[]()"))
+        assertEquals("x", MarkdownV2.toPlainText("[x]()"))
+        assertEquals("u", MarkdownV2.toPlainText("[](u)"))
     }
 
     @Test

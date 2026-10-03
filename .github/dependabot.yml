@@ -8,3 +8,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # kotlin-js-store/yarn.lock is deliberately NOT covered: dependabot's npm ecosystem
+  # requires a package.json next to the lockfile, and Kotlin/JS stores only the lockfile
+  # there (upstream limitation — KMP projects maintain it manually). Security alerts still
+  # scan the lockfile through GitHub's dependency graph. Regenerate it by re-running any
+  # JS/Wasm build task after the npm dependencies change.

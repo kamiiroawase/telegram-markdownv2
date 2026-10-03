@@ -7,10 +7,12 @@ package com.github.kamiiroawase.markdownv2
  *
  * One linear pass with explicit states (text, inline code, fenced code, link label,
  * link URL) — no regex, no recursion, the same posture as the rest of the library.
- * Emphasis markers vanish, fences and quote prefixes drop, escapes resolve per context,
- * and `[label](url)` becomes `label (url)` so no link target is lost. Even malformed
- * input loses nothing: an emphasis marker that never closes is re-inserted literally,
- * and unterminated code spans / labels / URLs keep their content as text.
+ * Emphasis markers vanish, fences and quote prefixes drop — a code block inside a quote
+ * de-formats to its content with the per-line quote markers stripped — escapes resolve
+ * per context, and `[label](url)` becomes `label (url)` so no link target is lost (an
+ * empty label or URL degrades to the non-empty piece). Even malformed input loses
+ * nothing: an emphasis marker that never closes is re-inserted literally, and
+ * unterminated code spans / labels / URLs keep their content as text.
  */
 internal fun deformat(rendered: String): String {
     val sb = StringBuilder(rendered.length)
@@ -31,9 +33,13 @@ internal fun deformat(rendered: String): String {
             }
 
             char == '`' -> {
+                // A fence opens at a line start, including right behind quote prefixes
+                // ("> ```" opens a code block inside a quote); elsewhere it is a code span
+                val depth =
+                    if (rendered.startsWith("```", index)) quoteDepthBefore(rendered, index) else -1
                 index =
-                    if (rendered.startsWith("```", index) && isLineStart(rendered, index)) {
-                        skipPre(rendered, index, sb)
+                    if (depth >= 0) {
+                        skipPre(rendered, index, depth, sb)
                     } else {
                         appendCodeContent(rendered, index, sb)
                     }
@@ -136,27 +142,34 @@ private fun appendCodeContent(
 }
 
 /**
- * Fenced block from the ``` at [from]: the whole fence line (fence plus language) drops,
- * the content unescapes `\`` and `\\` only, and the closing fence line drops. Unterminated,
- * the rest of the string is content. Returns the index after the closing fence (or the end).
+ * Fenced block from the ``` at [from], possibly behind [depth] quote-prefix levels: the
+ * whole fence line (fence, language and prefix) drops, each content line strips the same
+ * [depth] prefix units, the content unescapes `\`` and `\\` only, and the closing fence
+ * line (prefix included) drops — leaving exactly the code the block displayed. A content
+ * line carrying fewer units than [depth] strips what is there; one starting with its own
+ * '>' keeps it (only the wrapping quote's markers strip). Unterminated, the rest of the
+ * string is content. Returns the index after the closing fence (or the end).
  */
 private fun skipPre(
     rendered: String,
     from: Int,
+    depth: Int,
     sb: StringBuilder,
 ): Int {
     var index = from
     while (index < rendered.length && rendered[index] != '\n') index++
     if (index < rendered.length) index++ // the fence line's own newline
+    index = skipQuoteUnits(rendered, index, depth) // the first content line's prefix
     while (index < rendered.length) {
         if (rendered[index] == '\n') {
-            if (rendered.startsWith("```", index + 1)) {
-                index++ // the newline only terminates the last content line
+            val afterPrefix = skipQuoteUnits(rendered, index + 1, depth)
+            if (rendered.startsWith("```", afterPrefix)) {
+                index = afterPrefix
                 while (index < rendered.length && rendered[index] != '\n') index++
                 return index
             }
             sb.append('\n')
-            index++
+            index = afterPrefix
             continue
         }
         val char = rendered[index]
@@ -172,10 +185,45 @@ private fun skipPre(
     return index
 }
 
+// The number of quote-prefix units ('>' plus one optional space each) between the start
+// of the line and [index], or -1 when [index] does not sit at a line start — only those
+// characters may precede a fence's opening. The walk covers the line's prefix only, and
+// each prefix precedes at most one fence check, so the de-format stays linear
+private fun quoteDepthBefore(
+    rendered: String,
+    index: Int,
+): Int {
+    var i = index - 1
+    var depth = 0
+    while (i >= 0 && (rendered[i] == '>' || rendered[i] == ' ')) {
+        if (rendered[i] == '>') depth++
+        i--
+    }
+    return if (i < 0 || rendered[i] == '\n') depth else -1
+}
+
+// Strips up to [depth] quote-prefix units ('>' plus one optional space each) from the
+// line at [from]; a line carrying fewer units strips what is there
+private fun skipQuoteUnits(
+    rendered: String,
+    from: Int,
+    depth: Int,
+): Int {
+    var index = from
+    var remaining = depth
+    while (remaining > 0 && index < rendered.length && rendered[index] == '>') {
+        index++
+        if (index < rendered.length && rendered[index] == ' ') index++
+        remaining--
+    }
+    return index
+}
+
 /**
  * Link from the `[` at [from]. The label parses as inline text — emphasis, code spans and
  * escapes all apply inside labels, so `[*b*](u)` yields `b (u)` — and a complete `](url)`
- * shape emits `label (url)`, keeping the target visible in the plain-text fallback.
+ * shape emits `label (url)`, keeping the target visible in the plain-text fallback; an
+ * empty label or URL degrades to the non-empty piece, never dangling parentheses.
  * Anything incomplete degrades to literal text: the `[` and the processed label stay.
  * Returns the index after the link (or wherever the degradation stopped).
  */
@@ -210,19 +258,23 @@ private fun appendLinkText(
                 }
             }
         }
-        if (closed) {
-            sb
-                .append(label)
-                .append(" (")
-                .append(url)
-                .append(')')
-        } else {
+        if (!closed) {
             // No closing ')': emit everything literally and stop — the shape is not a link
             sb
                 .append('[')
                 .append(label)
                 .append("](")
                 .append(url)
+        } else if (url.isEmpty()) {
+            sb.append(label)
+        } else if (label.isEmpty()) {
+            sb.append(url)
+        } else {
+            sb
+                .append(label)
+                .append(" (")
+                .append(url)
+                .append(')')
         }
         return index
     }

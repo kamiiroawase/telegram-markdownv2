@@ -19,8 +19,9 @@ import org.commonmark.parser.Parser
  *
  * This file hosts only the public API and top-level flow; the implementation is split by
  * responsibility: full-document rendering in [Visitor](Visitor.kt), over-length truncation
- * (Truncation.kt), escaping (Escape.kt), plain-text extraction (PlainText.kt), table
- * degradation (TableRenderer.kt), and customizable rendering knobs (RenderOptions.kt).
+ * (Truncation.kt), lossless chunking (Chunking.kt), de-formatting rendered output back to
+ * plain text (Deformat.kt), escaping (Escape.kt), plain-text extraction (PlainText.kt),
+ * table degradation (TableRenderer.kt), and customizable rendering knobs (RenderOptions.kt).
  */
 public object MarkdownV2 {
     /**
@@ -116,8 +117,10 @@ public object MarkdownV2 {
      * rejects a message (400 can't parse entities); send the result without parse_mode.
      *
      * Emphasis markers vanish (`*bold*`, `_italic_`, `__underline__`, `~strike~`), code spans
-     * and fenced blocks keep their content, quote `>` prefixes drop, escapes resolve per
-     * context, and `[label](url)` becomes `label (url)` so no link target is lost. The input
+     * and fenced blocks keep their content — a code block inside a quote de-formats to its
+     * content with the per-line quote markers stripped — quote `>` prefixes drop, escapes
+     * resolve per context, and `[label](url)` becomes `label (url)` so no link target is
+     * lost (an empty label or URL degrades to the non-empty piece). The input
      * is expected to be this library's output; arbitrary strings degrade best-effort but
      * losslessly — unterminated entities keep their content and never-closed markers return
      * literally — and the call never throws.

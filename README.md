@@ -19,7 +19,7 @@ Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转�
 - 不支持的构造自动降级：表格渲染为对齐的围栏代码块（CJK/emoji 按两倍显示宽度对齐，组合符、变体选择符等零宽字符按 0 宽计；单元格默认按 32 个显示宽度截断，宽度度量与截断上限可经 `RenderOptions` 自定义）、HTML 块转代码块、行内 HTML 映射为实体（`<b>` → `*`、`<br>` → 换行、`<a href>` → 链接；HTML code 类标签 `<code>`、`<kbd>` 等的内容按代码实体规则转义，仅转义反引号与反斜杠，内嵌的 Markdown 行内代码同样转义其反引号以免实体边界错乱）或按字面转义——未配对的闭合、自闭合与嵌套标签一律按字面转义，空 URL 链接退化为纯文本，空链接文本 / 图片替代文本 / 空锚点退化为转义后的裸 URL（Telegram 拒绝空文本链接实体），链接内再嵌套的图片/链接/锚点降级为纯文本或字面标签（Telegram 链接实体不能嵌套），链接标签内未闭合的 HTML 强调在链接闭合前补全、残留的嵌套锚点不会吞掉后续链接；`href` 属性名不区分大小写，属性值支持双引号 / 单引号 / 无引号写法（引号值内的 `>` 与 `/` 按 HTML5 计入值本身，不会提前闭合标签或误判为自闭合；无引号值末尾的 `/` 同理计入值本身），href 中的 HTML 实体（`&amp;`、`&#38;`、`&#x26;` 等）先解码再作链接，无法识别的引用（如 `&#0;`，其 NUL 不是合法消息文本）保持字面，其他属性值内部的 `href=` 字样不会被误认
 - 可选截断（`maxLength` 传正数时启用，默认 0 不截断），截断后仍是合法 MarkdownV2：代码围栏保持闭合、未闭合的强调 / 链接自动补全、引用与列表前缀逐行保留、绝不劈开转义序列和代理对；结构化内容完全放不下时回退为转义纯文本；超过 100 层的引用 / 列表 / 行内强调降级为平铺纯文本，病态嵌套输入不会耗尽调用栈
 - 超长内容无损分片（`renderChunked`）：把渲染结果切成多段，每段不超过上限且各自是合法 MarkdownV2——块整块装填、超限块沿代码行 / 列表项 / 引用子块 / 段落行 / 行内节点的自然接缝拆分（标题 `#` 前缀与列表标记黏附于首个分片，放不下时宁可丢弃标记也不产出裸标记片）、接缝仍放不下时退化为转义纯文本（文本无损），按顺序发送即可还原完整内容
-- 拒收兜底（`toPlainText`）：把本库渲染出的 MarkdownV2（整段或分片）还原为 Telegram 显示所见的纯文本——实体标记去除、代码内容保留、引用前缀剥除、转义按上下文解开，`[label](url)` 变为 `label (url)` 以保住链接目标；任意输入降级为尽力而为且不丢字符，永不抛异常
+- 拒收兜底（`toPlainText`）：把本库渲染出的 MarkdownV2（整段或分片）还原为 Telegram 显示所见的纯文本——实体标记去除、代码内容保留（引用内的代码块逐行剥除引用标记、代码原样保留）、引用前缀剥除、转义按上下文解开，`[label](url)` 变为 `label (url)` 以保住链接目标（空 label 或空 URL 退化为非空一侧）；任意输入降级为尽力而为且不丢字符，永不抛异常
 
 支持平台：Android（minSdk 23）、JVM 11+、JS、Wasm、Linux（x64/Arm64）、macOS（Arm64）、Windows（mingwX64）、iOS（设备与模拟器）。
 
@@ -210,12 +210,14 @@ src/
 
 ### 构建与测试
 
-242 个行为级测试（输入/输出断言，与 AST 无关），覆盖全部转义规则、每种块的渲染、截断与分片路径、代理对与转义边界（含 10 万级恶意输入的线性扫描回归测试——行内 HTML 标签解析为手写单遍扫描，全库不使用正则，从设计上不存在回溯与栈溢出风险）。注意：其中 35 个依赖 HTML 解析的测试在 JS/Wasm 上因上游 commonmark-kotlin 的解析缺陷而空跑（静默通过，见测试类 KDoc 与 `htmlParsingSupported`），待上游修复后自动生效。CI 中：JVM、Android 单元测试与 JS、Wasm（Node）、Linux x64 原生测试在 ubuntu job 执行；iOS 模拟器与 macOS Arm64 测试在 macOS job 执行；Windows（mingwX64）测试在 windows job 执行；Linux Arm64 仅交叉编译验证——Kotlin/Native 官方不支持 Linux ARM64 作为构建/测试宿主（见 [宿主支持表](https://kotlinlang.org/docs/native-target-support.html)），上游支持后可补宿主 job：
+245 个行为级测试（输入/输出断言，与 AST 无关），覆盖全部转义规则、每种块的渲染、截断与分片路径、代理对与转义边界（含 10 万级恶意输入的线性扫描回归测试——行内 HTML 标签解析为手写单遍扫描，全库不使用正则，从设计上不存在回溯与栈溢出风险）。注意：其中 35 个依赖 HTML 解析的测试在 JS/Wasm 上因上游 commonmark-kotlin 的解析缺陷而空跑（静默通过，见测试类 KDoc 与 `htmlParsingSupported`），待上游修复后自动生效。CI 中：JVM、Android 单元测试与 JS、Wasm（Node）、Linux x64 原生测试在 ubuntu job 执行；iOS 模拟器与 macOS Arm64 测试在 macOS job 执行；Windows（mingwX64）测试在 windows job 执行；Linux Arm64 仅交叉编译验证——Kotlin/Native 官方不支持 Linux ARM64 作为构建/测试宿主（见 [宿主支持表](https://kotlinlang.org/docs/native-target-support.html)），上游支持后可补宿主 job：
 
 ```bash
 ./gradlew build             # 编译全部 target + 宿主可执行的测试 + 格式检查
 ./gradlew jvmTest           # 单独跑某个平台
 ```
+
+注：`kotlin-js-store/yarn.lock` 不在 dependabot 覆盖范围内——其 npm 生态要求锁文件旁有 `package.json`，而 Kotlin/JS 只在该目录存锁文件（上游限制，KMP 项目通行做法是手动维护）；npm 依赖变化后重跑任一 JS/Wasm 构建任务即可再生成锁文件，安全告警仍由 GitHub 依赖图谱照常扫描。
 
 ### 质量门禁（PR 必须全绿）
 
@@ -223,7 +225,7 @@ src/
 - **API**：commonMain 启用 `explicitApi()`，公开声明必须显式写可见性修饰符并附 KDoc
 - **API 兼容性**：binary-compatibility-validator 为全部 target 快照公开 API（`api/` 目录），`apiCheck` 挂在 `build` 上，无意破坏公开 API 的 PR 直接失败；有意变更时跑 `./gradlew apiDump` 更新快照并在 PR 中说明
 - **API 文档与变更记录**：Dokka 从 KDoc 生成 API 参考（`./gradlew dokkaGeneratePublicationHtml`，CI 上传 HTML 产物）；用户可见的行为变化记入 [CHANGELOG.md](CHANGELOG.md) 的 Unreleased 段
-- **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS 与 Windows job 跑 iOS 模拟器、macOS Arm64 与 mingwX64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件，附带当次 CI 复跑的 benchmark 输出，并校验两份 README 的版本坐标已随 tag 同步更新（缺新版本号或残留上一版本号即失败）
+- **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS 与 Windows job 跑 iOS 模拟器、macOS Arm64 与 mingwX64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件，附带当次 CI 复跑的 benchmark 输出，并校验两份 README 的版本坐标与 CHANGELOG 的版本段已随 tag 同步更新（README 缺新版本号或残留上一版本号、CHANGELOG 缺新版本段即失败）
 
 ### 提交流程
 
@@ -238,23 +240,24 @@ src/
 
 | 场景 | 输入 | 耗时（最佳轮中位数） | 吞吐 |
 | --- | --- | --- | --- |
-| 短文本（典型聊天消息） | 0.1 KB | ~7 µs | ~14 MB/s |
-| 典型回复（标题/列表/代码/表格混排） | 2.0 KB | ~70 µs | ~29 MB/s |
-| 接近上限的纯段落（免截断） | 3.6 KB | ~16 µs | ~220 MB/s |
-| 超长多段落（结构化截断到 4096） | 42.7 KB | ~0.35 ms | ~120 MB/s |
-| 超长单行（转义纯文本兜底） | 50.0 KB | ~0.5 ms | ~100 MB/s |
+| 短文本（典型聊天消息） | 0.1 KB | ~8 µs | ~13 MB/s |
+| 典型回复（标题/列表/代码/表格混排） | 2.0 KB | ~90 µs | ~23 MB/s |
+| 接近上限的纯段落（免截断） | 3.6 KB | ~19 µs | ~190 MB/s |
+| 超长多段落（结构化截断到 4096） | 42.7 KB | ~0.4 ms | ~105 MB/s |
+| 超长单行（转义纯文本兜底） | 50.0 KB | ~0.54 ms | ~93 MB/s |
 | 大表格（60 行 × 4 列，降级对齐） | 3.2 KB | ~0.13 ms | ~24 MB/s |
 | 大代码块（500 行，截断收敛） | 21.3 KB | ~0.1 ms | ~220 MB/s |
-| 行内 HTML 混排 | 4.7 KB | ~0.09 ms | ~50 MB/s |
-| 深嵌套引用（200 层，平铺降级） | 0.3 KB | ~43 µs | ~7.4 MB/s |
-| 十万级未闭合标签（标签扫描线性回归） | 100 KB | ~0.8 ms | ~120 MB/s |
-| 超大文档（百万字符，两遍策略） | 1.0 MB | ~9.8 ms | ~100 MB/s |
+| 行内 HTML 混排 | 4.7 KB | ~0.1 ms | ~47 MB/s |
+| 深嵌套引用（200 层，平铺降级） | 0.3 KB | ~45 µs | ~7.1 MB/s |
+| 十万级未闭合标签（标签扫描线性回归） | 100 KB | ~0.9 ms | ~110 MB/s |
+| 超大文档（百万字符，两遍策略） | 1.0 MB | ~10 ms | ~100 MB/s |
+| 已渲染文本还原（toPlainText 兜底） | 64.0 KB | ~0.3 ms | ~210 MB/s |
 
 几点解读：
 
 - 常规消息（≤ 4096 字符）大多在 0.1 ms 量级内完成，对机器人收发路径的开销可忽略
 - 结构越碎越贵：同样字节量下，多级标题/列表/表格的解析与逐块渲染远慢于单一纯文本段落
-- 恶意输入（十万级未闭合标签）仍为线性耗时（~0.8 ms）——行内 HTML 标签解析为手写单遍线性扫描、全库不使用正则，从设计上不存在灾难性回溯或引擎栈溢出
+- 恶意输入（十万级未闭合标签）仍为线性耗时（~0.9 ms）——行内 HTML 标签解析为手写单遍线性扫描、全库不使用正则，从设计上不存在灾难性回溯或引擎栈溢出
 - 超大文档受「先完整渲染、超限再分块收缩」的两遍策略影响（见已知限制），百万字符约 10 ms
 
 ## 许可

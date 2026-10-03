@@ -19,7 +19,7 @@ In one sentence: Markdown in, Telegram-renderable text out. Hand any CommonMark/
 - Unsupported constructs degrade gracefully: tables render as aligned fenced code blocks (CJK/emoji aligned at double display width, combining marks and variation selectors cost zero columns; cells truncated at 32 display width by default, with both the width measure and the cap customizable via `RenderOptions`), HTML blocks become code blocks, inline HTML maps to entities (`<b>` → `*`, `<br>` → newline, `<a href>` → link; content of HTML code-family tags — `<code>`, `<kbd>`, … — escapes with code-entity rules, escaping only the backtick and backslash, and Markdown code spans nested inside escape their backticks too, keeping entity boundaries intact) or is escaped literally — unmatched closing, self-closing and nested tags are always escaped literally, empty-URL links degrade to plain text, empty link text, image alt text or an empty anchor degrades to the bare escaped URL (Telegram rejects empty-text link entities), and images/links/anchors nested inside a link degrade to plain text or literal tags (Telegram link entities cannot nest), HTML emphasis left unclosed inside a link label completes before the link closes, and a leftover nested anchor never swallows the links that follow; the `href` attribute name is case-insensitive, its value may be double-quoted, single-quoted or unquoted (per HTML5 a `>` or `/` inside a quoted value belongs to the value — it never closes the tag early or reads as self-closing — and a trailing `/` in an unquoted value belongs to the value too, never mistaken for a self-closing tag), HTML entities in hrefs (`&amp;`, `&#38;`, `&#x26;`, …) are decoded before linking, unrecognized references (e.g. `&#0;`, whose NUL is not valid message text) stay literal, and an `href=` inside another attribute's value is never mistaken for the real attribute
 - Optional truncation (enabled by a positive `maxLength`; the default 0 renders in full) stays valid MarkdownV2: code fences remain closed, unclosed emphasis / links are auto-completed, quote and list prefixes are preserved line by line, escape sequences and surrogate pairs are never split; falls back to escaped plain text when no structural content fits; quotes / lists / inline emphasis nested deeper than 100 levels flatten to plain text, so pathological nesting never exhausts the call stack
 - Lossless chunking of over-length content (`renderChunked`): the render is split into pieces of at most the limit, each independently valid MarkdownV2 — blocks are packed whole, oversized blocks split along their natural seams (code lines, list items, quote children, paragraph lines, then inline nodes; heading `#` prefixes and list markers glue to the first piece and are dropped outright when the limit cannot even fit marker plus text), and a seam still exceeding the limit flattens to escaped plain text (text lossless); send the pieces in order to deliver the full content
-- Rejection fallback (`toPlainText`): de-formats this library's rendered MarkdownV2 (a full render or one chunk) into the text Telegram would display — entity markers drop, code content stays, quote prefixes strip, escapes resolve per context, and `[label](url)` becomes `label (url)` so no link target is lost; arbitrary input degrades best-effort without losing characters, and the call never throws
+- Rejection fallback (`toPlainText`): de-formats this library's rendered MarkdownV2 (a full render or one chunk) into the text Telegram would display — entity markers drop, code content stays (a code block inside a quote strips the per-line quote markers and keeps the code), quote prefixes strip, escapes resolve per context, and `[label](url)` becomes `label (url)` so no link target is lost (an empty label or URL degrades to the non-empty piece); arbitrary input degrades best-effort without losing characters, and the call never throws
 
 Supported platforms: Android (minSdk 23), JVM 11+, JS, Wasm, Linux (x64/Arm64), macOS (Arm64), Windows (mingwX64), iOS (device and simulator).
 
@@ -210,12 +210,14 @@ src/
 
 ### Build and test
 
-242 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — inline-HTML tags parse via a hand-written single-pass scanner, the library uses no regex at all, so catastrophic backtracking and engine stack overflow are impossible by construction). Caveat: 35 of them depend on HTML parsing and silently no-op on JS/Wasm due to an upstream commonmark-kotlin parser defect (see the test class KDoc and `htmlParsingSupported`); they activate automatically once the upstream fix lands. In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows (mingwX64) tests run in a windows job; Linux Arm64 stays cross-compile only — Kotlin/Native does not support Linux ARM64 as a build/test host (see the [host support table](https://kotlinlang.org/docs/native-target-support.html)), so a host job can follow once upstream supports it:
+245 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — inline-HTML tags parse via a hand-written single-pass scanner, the library uses no regex at all, so catastrophic backtracking and engine stack overflow are impossible by construction). Caveat: 35 of them depend on HTML parsing and silently no-op on JS/Wasm due to an upstream commonmark-kotlin parser defect (see the test class KDoc and `htmlParsingSupported`); they activate automatically once the upstream fix lands. In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows (mingwX64) tests run in a windows job; Linux Arm64 stays cross-compile only — Kotlin/Native does not support Linux ARM64 as a build/test host (see the [host support table](https://kotlinlang.org/docs/native-target-support.html)), so a host job can follow once upstream supports it:
 
 ```bash
 ./gradlew build             # compile all targets + host-runnable tests + format check
 ./gradlew jvmTest           # run a single platform
 ```
+
+Note: `kotlin-js-store/yarn.lock` is outside dependabot's coverage — its npm ecosystem requires a `package.json` next to the lockfile, and Kotlin/JS stores only the lockfile in that directory (upstream limitation; KMP projects maintain it manually). Re-running any JS/Wasm build task regenerates it after the npm dependencies change, and security alerts still scan the lockfile through GitHub's dependency graph.
 
 ### Quality gates (PRs must pass them all)
 
@@ -223,7 +225,7 @@ src/
 - **API**: commonMain uses `explicitApi()`; public declarations need explicit visibility modifiers and KDoc
 - **API compatibility**: binary-compatibility-validator snapshots the public API of every target (the `api/` directory); `apiCheck` runs as part of `build`, so a PR that breaks the published API fails outright — change it intentionally via `./gradlew apiDump` and say so in the PR
 - **API docs & changelog**: Dokka generates the API reference from the KDoc (`./gradlew dokkaGeneratePublicationHtml`; CI uploads the HTML); user-visible changes go to the Unreleased section of [CHANGELOG.md](CHANGELOG.md)
-- **CI**: `build.yml` runs all of the above on main pushes and every PR (plus macOS and Windows jobs for the iOS simulator, macOS Arm64 and mingwX64 native tests) and asserts the publishing artifacts; `release.yml` publishes per-platform artifacts as GitHub Release attachments on `v*` tags, attaches the CI benchmark output, and verifies both READMEs' version coordinates were bumped with the tag (a missing new version or a leftover previous version fails the release)
+- **CI**: `build.yml` runs all of the above on main pushes and every PR (plus macOS and Windows jobs for the iOS simulator, macOS Arm64 and mingwX64 native tests) and asserts the publishing artifacts; `release.yml` publishes per-platform artifacts as GitHub Release attachments on `v*` tags, attaches the CI benchmark output, and verifies both READMEs' version coordinates and the CHANGELOG's new version section were bumped with the tag (a missing new version or a leftover previous version in a README, or a missing CHANGELOG section, fails the release)
 
 ### Submitting a PR
 
@@ -238,23 +240,24 @@ Reproducible via `./gradlew benchmark` (implementation: [Benchmark.kt](src/jvmTe
 
 | Scenario | Input | Median (best round) | Throughput |
 | --- | --- | --- | --- |
-| Short text (typical chat message) | 0.1 KB | ~7 µs | ~14 MB/s |
-| Typical reply (headings/lists/code/table) | 2.0 KB | ~70 µs | ~29 MB/s |
-| Plain paragraph near the limit (no truncation) | 3.6 KB | ~16 µs | ~220 MB/s |
-| Overlong multi-paragraph (structure-preserving truncation to 4096) | 42.7 KB | ~0.35 ms | ~120 MB/s |
-| Overlong single line (escaped plain-text fallback) | 50.0 KB | ~0.5 ms | ~100 MB/s |
+| Short text (typical chat message) | 0.1 KB | ~8 µs | ~13 MB/s |
+| Typical reply (headings/lists/code/table) | 2.0 KB | ~90 µs | ~23 MB/s |
+| Plain paragraph near the limit (no truncation) | 3.6 KB | ~19 µs | ~190 MB/s |
+| Overlong multi-paragraph (structure-preserving truncation to 4096) | 42.7 KB | ~0.4 ms | ~105 MB/s |
+| Overlong single line (escaped plain-text fallback) | 50.0 KB | ~0.54 ms | ~93 MB/s |
 | Large table (60 rows × 4 cols, degraded alignment) | 3.2 KB | ~0.13 ms | ~24 MB/s |
 | Large code block (500 lines, truncated) | 21.3 KB | ~0.1 ms | ~220 MB/s |
-| Inline HTML mix | 4.7 KB | ~0.09 ms | ~50 MB/s |
-| Deeply nested quote (200 levels, flattened) | 0.3 KB | ~43 µs | ~7.4 MB/s |
-| 100k-scale unclosed tag (tag-scan linearity regression) | 100 KB | ~0.8 ms | ~120 MB/s |
-| Huge document (1M characters, render-twice strategy) | 1.0 MB | ~9.8 ms | ~100 MB/s |
+| Inline HTML mix | 4.7 KB | ~0.1 ms | ~47 MB/s |
+| Deeply nested quote (200 levels, flattened) | 0.3 KB | ~45 µs | ~7.1 MB/s |
+| 100k-scale unclosed tag (tag-scan linearity regression) | 100 KB | ~0.9 ms | ~110 MB/s |
+| Huge document (1M characters, render-twice strategy) | 1.0 MB | ~10 ms | ~100 MB/s |
+| De-format rendered output (toPlainText fallback) | 64.0 KB | ~0.3 ms | ~210 MB/s |
 
 Reading notes:
 
 - Typical messages (≤ 4096 chars) render mostly within a 0.1 ms order of magnitude — negligible on a bot's send path
 - Fragmented structure costs: per byte, documents dense in headings/lists/tables parse and render several times slower than a single plain paragraph
-- Adversarial input (100k-char unclosed tag) stays linear (~0.8 ms) — inline-HTML tags parse via a hand-written single-pass linear scanner and the library uses no regex at all, so catastrophic backtracking and engine stack overflow are impossible by construction
+- Adversarial input (100k-char unclosed tag) stays linear (~0.9 ms) — inline-HTML tags parse via a hand-written single-pass linear scanner and the library uses no regex at all, so catastrophic backtracking and engine stack overflow are impossible by construction
 - Huge documents pay the render-full-then-shrink strategy (see known limitations): ~10 ms per million characters
 
 ## License

@@ -24,10 +24,11 @@ jobs:
 
       # The READMEs document the released coordinates 13 times each; a forgotten bump
       # ships stale versions to every reader until someone notices. Fail the release
-      # instead: the tag version must be present, the previous tag's version must be gone.
-      # The match is token-anchored — a plain fixed-string grep would hit substrings
-      # (1.1.0 inside 11.1.0 or 1.1.0.1)
-      - name: Check README version coordinates match the tag
+      # instead: the tag version must be present, the previous tag's version must be gone,
+      # and CHANGELOG.md must carry the tag's version section (history keeps old versions,
+      # so only the new one is required there). The match is token-anchored — a plain
+      # fixed-string grep would hit substrings (1.1.0 inside 11.1.0 or 1.1.0.1)
+      - name: Check README and CHANGELOG version coordinates match the tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           test -n "$VERSION"
@@ -37,6 +38,10 @@ jobs:
           for doc in README.md README.en.md; do
             mentions_version "$VERSION" "$doc" || { echo "$doc does not mention version $VERSION"; exit 1; }
           done
+          mentions_version "$VERSION" CHANGELOG.md || {
+            echo "CHANGELOG.md has no $VERSION section — move Unreleased under it"
+            exit 1
+          }
           PREV_TAG="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
           if [ -n "$PREV_TAG" ]; then
             PREV_VERSION="${PREV_TAG#v}"

@@ -141,6 +141,19 @@ private fun buildCases(): List<BenchmarkCase> {
     // A million characters: peak throughput under the render-full-then-truncate strategy
     val huge = "large document body text ".repeat(40_000)
 
+    // The rejected-chunk fallback path: de-forming a large entity-rich render (emphasis,
+    // code, links, quotes, fences — every deformat state) back to plain text
+    val deformatInput =
+        MarkdownV2.render(
+            (
+                "# Heading\n\n" +
+                    "Some *emphasis*, `code` and [a link](https://example.com/a) in a paragraph.\n\n" +
+                    "> quoted *bold* line\n\n" +
+                    "- item one\n- item two\n\n" +
+                    "```\nfenced code\n```\n\n"
+            ).repeat(400),
+        )
+
     fun stringCase(
         name: String,
         content: String,
@@ -168,6 +181,12 @@ private fun buildCases(): List<BenchmarkCase> {
             MarkdownV2.render(malicious, MarkdownV2.MAX_MESSAGE_LENGTH)
         },
         stringCase("Huge document (1M characters)", huge),
+        BenchmarkCase(
+            "De-format rendered output (toPlainText)",
+            deformatInput.toByteArray(Charsets.UTF_8).size.toLong(),
+        ) {
+            MarkdownV2.toPlainText(deformatInput)
+        },
     )
 }
 

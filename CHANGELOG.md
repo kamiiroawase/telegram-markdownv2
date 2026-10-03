@@ -42,9 +42,11 @@ All notable changes to this project are documented here. The format follows
 - `MarkdownV2.toPlainText(rendered)`: de-formats this library's rendered MarkdownV2 (a
   full render or one renderChunked piece) into the text Telegram would display — the
   last-resort fallback for a message the Bot API rejects, sent without parse_mode.
-  Entity markers drop, code content stays, quote prefixes strip, escapes resolve per
-  context, and `[label](url)` becomes `label (url)` so no link target is lost; malformed
-  input degrades best-effort without losing characters and the call never throws
+  Entity markers drop, code content stays, quote prefixes strip (a code block inside a
+  quote de-forms to its content with the per-line markers stripped), escapes resolve per
+  context, and `[label](url)` becomes `label (url)` so no link target is lost (an empty
+  label or URL degrades to the non-empty piece); malformed input degrades best-effort
+  without losing characters and the call never throws
 - Platform warning: Kotlin/JS and Kotlin/Wasm throw on inputs containing HTML blocks,
   `<a href>` anchors or documents opening with an HTML tag (upstream parser defect) —
   documented on the public API and in both READMEs with the try/catch plain-text fallback
@@ -53,7 +55,11 @@ All notable changes to this project are documented here. The format follows
 - API reference generation via Dokka (`./gradlew dokkaGeneratePublicationHtml`); CI
   uploads the HTML as a workflow artifact
 - Release workflow hardening: README version-coordinate checks match version tokens
-  exactly (no substring hits), and the published version is asserted to equal the tag
+  exactly (no substring hits), CHANGELOG.md must carry the tag's version section, and
+  the published version is asserted to equal the tag
+- A toPlainText benchmark scenario (the README performance table gains a row), and the
+  dependabot coverage documented: the Kotlin/JS yarn.lock stays manual because
+  dependabot's npm ecosystem requires a package.json beside the lockfile
 - This changelog
 
 ## [1.1.0] — 2026-10-02
