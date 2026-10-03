@@ -184,13 +184,7 @@ private fun chunkList(
                         current.append(full)
                     } else {
                         val text = plainText(listOf(item)).trim()
-                        if (text.isNotEmpty()) {
-                            val marked = prefix.length < maxLength
-                            val escaped = escapeChunks(text, if (marked) maxLength - prefix.length else maxLength)
-                            pieces += ((if (marked) prefix else "") + escaped.first()).trim()
-                            for (i in 1 until escaped.size - 1) pieces += escaped[i].trim()
-                            if (escaped.size > 1) current.append(escaped.last().trim())
-                        }
+                        if (text.isNotEmpty()) flattenWithLead(prefix, text, maxLength, pieces, current)
                     }
                 }
             }
@@ -278,8 +272,11 @@ private fun chunkQuotedText(
 
 /**
  * Paragraphs (and headings, whose hashes prefix the first piece) split at line breaks
- * first — every piece is a standalone run of lines. A line group larger than the limit
- * goes one level deeper ([chunkInlineGroup]).
+ * first — every piece is a standalone run of lines. The heading prefix glues directly
+ * onto the first line group and is never emitted as a piece of its own (a bare "\#" chunk
+ * detached from all text, or a newline between the hashes and the title, would be the
+ * wrong shape). A line group larger than the limit goes one level deeper
+ * ([chunkInlineGroup]).
  */
 private fun chunkParagraph(
     node: Node,
@@ -289,21 +286,26 @@ private fun chunkParagraph(
 ): List<String> {
     val pieces = mutableListOf<String>()
     val current = StringBuilder(prefix)
+    // How much of current is still just the un-glued prefix
+    var bare = prefix.length
     for (group in lineGroups(node)) {
         if (group.isEmpty()) continue
         val rendered = renderInlineGroup(group, options)
-        val separator = if (current.isEmpty()) "" else "\n"
+        val separator = if (current.length == bare) "" else "\n"
         if (current.length + separator.length + rendered.length <= maxLength) {
             current.append(separator).append(rendered)
         } else {
-            if (current.isNotEmpty()) {
+            if (current.length > bare) {
                 pieces += current.toString().trimEnd()
                 current.setLength(0)
+                bare = 0
             }
-            if (rendered.length <= maxLength) {
+            if (current.length + rendered.length <= maxLength) {
                 current.append(rendered)
             } else {
+                // chunkInlineGroup consumes the still-un-glued prefix, if any
                 chunkInlineGroup(group, maxLength, options, pieces, current)
+                bare = 0
             }
         }
     }
@@ -335,7 +337,9 @@ private fun lineGroups(node: Node): List<List<Node>> {
  * the message flattens to escaped text. Each node renders with its entities completed by
  * its own visitor, so a boundary between nodes never splits an entity (pathological HTML
  * pairs spanning nodes degrade to literal closers — the same trade as the depth-flattening
- * paths in Visitor).
+ * paths in Visitor). [current] arrives either empty or holding only a heading prefix (the
+ * lead): content packs after the lead, and the lead never becomes a standalone piece — it
+ * stays glued to whichever node flattens next.
  */
 private fun chunkInlineGroup(
     nodes: List<Node>,
@@ -344,26 +348,47 @@ private fun chunkInlineGroup(
     pieces: MutableList<String>,
     current: StringBuilder,
 ) {
+    val lead = current.length
     for (node in nodes) {
         val rendered = renderInlineGroup(listOf(node), options)
         if (current.length + rendered.length <= maxLength) {
             current.append(rendered)
         } else {
-            if (current.isNotEmpty()) {
+            if (current.length > lead) {
                 // Full trim: inline continuation pieces carry no meaningful edge whitespace
                 pieces += current.toString().trim()
                 current.setLength(0)
             }
-            if (rendered.length <= maxLength) {
+            if (current.isEmpty() && rendered.length <= maxLength) {
                 current.append(rendered)
             } else {
                 val text = plainText(listOf(node)).trim()
-                if (text.isNotEmpty()) {
-                    val escaped = escapeChunks(text, maxLength)
-                    escaped.subList(0, escaped.size - 1).forEach { pieces += it.trim() }
-                    current.append(escaped.last())
-                }
+                if (text.isNotEmpty()) flattenWithLead(current.toString(), text, maxLength, pieces, current)
             }
         }
     }
+}
+
+/**
+ * Last-resort flattening of an oversized item or inline node to escaped text: [lead] (a
+ * list marker, a heading prefix, or whatever content still sits in [current]) stays glued
+ * to the first piece while maxLength leaves room for it plus one escape unit — the ≥2
+ * limit escapeChunks is promised; otherwise the lead is dropped, because chunk validity
+ * and text losslessness take precedence over the marker (the same trade chunkQuotedText
+ * makes for its "> " prefix). Consumes [current] and leaves only the final piece in it.
+ */
+private fun flattenWithLead(
+    lead: String,
+    text: String,
+    maxLength: Int,
+    pieces: MutableList<String>,
+    current: StringBuilder,
+) {
+    val limit = maxLength - lead.length
+    val keepLead = limit >= 2
+    val escaped = escapeChunks(text, if (keepLead) limit else maxLength)
+    pieces += ((if (keepLead) lead else "") + escaped.first()).trim()
+    for (i in 1 until escaped.size - 1) pieces += escaped[i].trim()
+    current.setLength(0)
+    if (escaped.size > 1) current.append(escaped.last().trim())
 }

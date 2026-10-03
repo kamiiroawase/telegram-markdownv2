@@ -868,6 +868,78 @@ class MarkdownV2Test {
     }
 
     @Test
+    fun unclosedHtmlEmphasisInsideLinkLabelClosesBeforeLink() {
+        if (!htmlParsingSupported) return
+
+        // Left open past ](url) the emphasis would cross the link entity into invalid
+        // output, and htmlCodeDepth would leak code-escaping onto the text after the link
+        assertEquals("[*x*](u)", MarkdownV2.render("[<b>x](u)"))
+        assertEquals("[`x`](u) tail\\_more", MarkdownV2.render("[<code>x](u) tail_more"))
+    }
+
+    @Test
+    fun unclosedAnchorInsideLinkLabelDoesNotSuppressLaterLinks() {
+        if (!htmlParsingSupported) return
+
+        // The nested-literal sentinel left by the unclosed inner anchor used to degrade
+        // every following link in the document to plain text
+        assertEquals("[x <a\\>y](u) and [z](t)", MarkdownV2.render("[x <a>y](u) and [z](t)"))
+    }
+
+    @Test
+    fun htmlBlockPlainTextFallbackKeepsContent() {
+        if (!htmlParsingSupported) return
+
+        // The plain-text fallback must carry the HTML block's literal, like it does for
+        // fenced code blocks
+        assertEquals("<div\\>…", MarkdownV2.render("<div>\nhello world\n</div>", 7))
+        val chunks = MarkdownV2.renderChunked("<div>\nhello world\n</div>", 9)
+        assertTrue(chunks.isNotEmpty(), "content was lost entirely")
+        chunks.forEach { chunk -> assertTrue(chunk.length <= 9, "over-long chunk: $chunk") }
+    }
+
+    @Test
+    fun emptyAnchorLabelDegradesToBareUrl() {
+        if (!htmlParsingSupported) return
+
+        // The HTML-anchor counterpart of emptyLinkTextDegradesToBareUrl, closed and
+        // unclosed alike: the label rewinds, the destination survives as escaped text.
+        // Leading text keeps the tags inline — a bare tag line parses as an HTML block
+        assertEquals("u", MarkdownV2.render("<a href=\"u\"></a>"))
+        assertEquals("xu", MarkdownV2.render("x<a href=\"u\">"))
+    }
+
+    @Test
+    fun markdownCodeInsideHtmlCodeEntityEscapesBackticks() {
+        if (!htmlParsingSupported) return
+
+        // Raw backticks here would pair with the entity's own delimiters and garble the
+        // code span boundaries
+        assertEquals("`a \\`b\\` c`", MarkdownV2.render("<kbd>a `b` c</kbd>"))
+    }
+
+    @Test
+    fun chunkedHeadingPrefixStaysGluedToText() {
+        // The hashes lead the first piece instead of becoming a bare "\#" chunk detached
+        // from all text
+        val pieces = MarkdownV2.renderChunked("# " + "x".repeat(50), 10)
+        assertEquals("\\# xxxxxxx", pieces.first())
+        pieces.forEach { piece -> assertTrue(piece.length <= 10, "over-long piece: $piece") }
+    }
+
+    @Test
+    fun chunkedListItemMarkerDroppedWhenLimitTooSmall() {
+        // No room for the marker plus one escape unit: text wins, the marker is dropped
+        // instead of a bare "1\." piece or an escapeChunks limit below its promised ≥2
+        val pieces = MarkdownV2.renderChunked("1. " + "x".repeat(20), 5)
+        assertTrue(pieces.isNotEmpty())
+        pieces.forEach { piece ->
+            assertTrue(piece.length <= 5, "over-long piece: $piece")
+            assertFalse(piece.trim() == "1\\.", "bare marker piece: $piece")
+        }
+    }
+
+    @Test
     fun nullDestinationLinkRendersChildrenViaAst() {
         val link = Link(destination = null, title = null)
         link.appendChild(Text("t"))

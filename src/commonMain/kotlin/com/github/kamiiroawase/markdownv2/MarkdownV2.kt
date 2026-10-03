@@ -43,8 +43,10 @@ public object MarkdownV2 {
      * (the default) disables truncation — the full document renders regardless of
      * length; pass [MAX_MESSAGE_LENGTH] to clip to the Telegram message limit.
      * Constructs Telegram cannot render (tables, raw HTML) are degraded to fenced code
-     * blocks. Rendering knobs that have no single right answer (table cell cap,
-     * character display width) live in [options].
+     * blocks; link entities Telegram rejects (empty URL, or a label that renders to
+     * nothing) degrade to the label text or the bare escaped URL. Rendering knobs that
+     * have no single right answer (table cell cap, character display width) live in
+     * [options].
      */
     public fun render(
         content: String,

@@ -36,6 +36,15 @@ private const val MAX_RENDER_DEPTH = 100
 // is treated literally as well
 private const val NESTED_LITERAL_ANCHOR = "nested-literal"
 
+// An open HTML anchor: its URL ("" when href-less, the NESTED_LITERAL_ANCHOR sentinel
+// while an outer link is open) plus the output positions that let an empty label degrade
+// to the bare escaped URL (the same trade visit(link) makes)
+private class OpenAnchor(
+    val url: String,
+    val openBracket: Int,
+    val labelStart: Int,
+)
+
 // Linear-time by construction: the lazy [^>]*? has a single stopping point (>) and no
 // nested quantifiers; the regexLinear* regression tests pin this down at 100k scale
 private val HTML_TAG = Regex("""<(/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*?)(/?)>""")
@@ -63,7 +72,7 @@ internal class Visitor(
 ) : AbstractVisitor() {
     private val sb = StringBuilder()
 
-    private val openLinkUrls = ArrayDeque<String>()
+    private val openLinkUrls = ArrayDeque<OpenAnchor>()
 
     // Depth of open Markdown link entities (Link and Image both render as links); HTML
     // anchors are tracked separately in [openLinkUrls]. Telegram links cannot nest, so
@@ -91,16 +100,30 @@ internal class Visitor(
      * reversal because at most one real link is ever open (nested anchors are literalized).
      * trimEnd keeps the appended closers clear of trailing block separators.
      */
-    fun output(): String =
-        if (openLinkUrls.isEmpty() && openEmphasis.isEmpty()) {
+    fun output(): String {
+        // An anchor still open with an empty label degrades like visit(link): an empty
+        // label means nothing but trailing block separators follows its [, so rewinding
+        // the bracket is safe (a whitespace-only label counts as empty — it renders no
+        // visible text)
+        val contentEnd = sb.toString().trimEnd().length
+        openLinkUrls
+            .lastOrNull { anchor ->
+                anchor.url.isNotEmpty() && anchor.url != NESTED_LITERAL_ANCHOR && contentEnd == anchor.labelStart
+            }?.let { emptyLabel ->
+                sb.setLength(emptyLabel.openBracket)
+                sb.append(escapeText(emptyLabel.url))
+                openLinkUrls.remove(emptyLabel)
+            }
+        return if (openLinkUrls.isEmpty() && openEmphasis.isEmpty()) {
             sb.toString()
         } else {
             sb.toString().trimEnd() +
                 openEmphasis.reversed().joinToString("") { it } +
-                openLinkUrls.joinToString("") { url ->
-                    if (url.isEmpty() || url == NESTED_LITERAL_ANCHOR) "" else "](${escapeUrl(url)})"
+                openLinkUrls.joinToString("") { anchor ->
+                    if (anchor.url.isEmpty() || anchor.url == NESTED_LITERAL_ANCHOR) "" else "](${escapeUrl(anchor.url)})"
                 }
         }
+    }
 
     override fun visit(text: Text) {
         // Inside an HTML code entity the full 19-char escaping would leak backslashes:
@@ -173,7 +196,14 @@ internal class Visitor(
     }
 
     override fun visit(code: Code) {
-        sb.append('`').append(escapeCode(code.literal)).append('`')
+        if (htmlCodeDepth > 0) {
+            // Inside an HTML code entity the code span's own backticks would pair with
+            // the entity's delimiters and garble the span boundaries — keep them, escaped
+            // (\` renders as a literal backtick inside a code entity)
+            sb.append("\\`").append(escapeCode(code.literal)).append("\\`")
+        } else {
+            sb.append('`').append(escapeCode(code.literal)).append('`')
+        }
     }
 
     override fun visit(emphasis: Emphasis) {
@@ -185,7 +215,7 @@ internal class Visitor(
         openEmphasis.addLast("_")
         sb.append('_')
         visitChildren(emphasis)
-        closeNestedTo(baseDepth)
+        closeNestedTo(baseDepth + 1)
         sb.append('_')
         openEmphasis.removeLast()
         exitInline()
@@ -200,7 +230,7 @@ internal class Visitor(
         openEmphasis.addLast("*")
         sb.append('*')
         visitChildren(strongEmphasis)
-        closeNestedTo(baseDepth)
+        closeNestedTo(baseDepth + 1)
         sb.append('*')
         openEmphasis.removeLast()
         exitInline()
@@ -217,7 +247,7 @@ internal class Visitor(
                 openEmphasis.addLast("~")
                 sb.append('~')
                 visitChildren(customNode)
-                closeNestedTo(baseDepth)
+                closeNestedTo(baseDepth + 1)
                 sb.append('~')
                 openEmphasis.removeLast()
                 exitInline()
@@ -230,17 +260,18 @@ internal class Visitor(
     }
 
     /**
-     * When an emphasis node closes, first complete any unclosed HTML emphasis inside it
-     * (happens when the source lacks closing tags, or due to upstream parsing defects).
-     * Its own marker is located by stack depth — same-kind markers can overlap (e.g. _
-     * inside _), and matching by marker value would misalign; after completion the stack
-     * should hold exactly its own marker.
+     * Completes unclosed HTML emphasis down to [targetDepth] on the emphasis stack (the
+     * caller's own marker, when it pushed one, stays). Runs when an inline container —
+     * emphasis, strikethrough, a Markdown link or image label — closes with HTML tags
+     * still open inside it (missing closing tags, or upstream parsing defects). Markers
+     * are located by stack depth — same-kind markers can overlap (e.g. _ inside _), and
+     * matching by marker value would misalign.
      */
-    private fun closeNestedTo(baseDepth: Int) {
-        while (openEmphasis.size > baseDepth + 1) {
+    private fun closeNestedTo(targetDepth: Int) {
+        while (openEmphasis.size > targetDepth) {
             val nested = openEmphasis.removeLastOrNull() ?: break
             // Completing an unclosed HTML code entity ends its scope: Text after the
-            // emphasis boundary escapes as plain text again
+            // boundary escapes as plain text again
             if (nested == "`") htmlCodeDepth--
             sb.append(nested)
         }
@@ -274,6 +305,7 @@ internal class Visitor(
             visitChildren(link)
             return
         }
+        val emphasisDepth = openEmphasis.size
         val openBracket = sb.length
         sb.append('[')
         openMarkdownLinks++
@@ -289,6 +321,16 @@ internal class Visitor(
             sb.append(escapeText(destination))
             return
         }
+        // Whatever HTML opened inside the label closes before the link does: left open it
+        // would cross the ](url) boundary into invalid entities, or leak htmlCodeDepth
+        // escaping onto the text after the link
+        closeNestedTo(emphasisDepth)
+        // An unclosed anchor inside the label leaves a nested-literal sentinel behind;
+        // never popped, it would degrade every following link in the document to plain
+        // text. Its open tag already rendered literally, so dropping the sentinel here is
+        // lossless (the guard above emptied the stack on entry, and only sentinels can be
+        // pushed inside a label)
+        while (openLinkUrls.isNotEmpty()) openLinkUrls.removeLast()
         sb.append("](").append(escapeUrl(destination)).append(')')
     }
 
@@ -303,6 +345,7 @@ internal class Visitor(
             visitChildren(image)
             return
         }
+        val emphasisDepth = openEmphasis.size
         val openBracket = sb.length
         sb.append('[')
         openMarkdownLinks++
@@ -314,6 +357,9 @@ internal class Visitor(
             sb.append(escapeText(destination))
             return
         }
+        // See visit(link): HTML opened inside the alt text closes before the link does
+        closeNestedTo(emphasisDepth)
+        while (openLinkUrls.isNotEmpty()) openLinkUrls.removeLast()
         sb.append("](").append(escapeUrl(destination)).append(')')
     }
 
@@ -403,26 +449,28 @@ internal class Visitor(
     ): String {
         if (selfClosing) return escapeText(tag)
         if (closing) {
-            return when (val url = openLinkUrls.removeLastOrNull()) {
-                null -> escapeText(tag)
-
-                NESTED_LITERAL_ANCHOR -> escapeText(tag)
-
-                // "" is the href-less open tag: pop the stack, emit no link
-                "" -> ""
-
-                else -> "](${escapeUrl(url)})"
+            val anchor = openLinkUrls.removeLastOrNull() ?: return escapeText(tag)
+            if (anchor.url == NESTED_LITERAL_ANCHOR) return escapeText(tag)
+            // "" is the href-less open tag: pop the stack, emit no link
+            if (anchor.url.isEmpty()) return ""
+            // Telegram rejects link entities with empty text: a label that rendered
+            // nothing degrades to the bare escaped URL, rewinding the bracket — safe for
+            // the same reason as in visit(link): an empty label left nothing open
+            if (sb.length == anchor.labelStart) {
+                sb.setLength(anchor.openBracket)
+                return escapeText(anchor.url)
             }
+            return "](${escapeUrl(anchor.url)})"
         }
         // Telegram links cannot nest: while any link entity is open (Markdown link, image
         // link or an outer anchor), an inner anchor and its closing tag are escaped literally
         if (linkEntityOpen()) {
-            openLinkUrls.addLast(NESTED_LITERAL_ANCHOR)
+            openLinkUrls.addLast(OpenAnchor(NESTED_LITERAL_ANCHOR, sb.length, sb.length))
             return escapeText(tag)
         }
         // href="" is treated like a missing href: the empty URL degrades to plain text
         val href = extractHref(attrs)
-        openLinkUrls.addLast(href.orEmpty())
+        openLinkUrls.addLast(OpenAnchor(href.orEmpty(), sb.length, sb.length + 1))
         return if (href == null) "" else "["
     }
 

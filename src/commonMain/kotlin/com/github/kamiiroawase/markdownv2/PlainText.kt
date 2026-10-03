@@ -3,6 +3,7 @@ package com.github.kamiiroawase.markdownv2
 import org.commonmark.node.Code
 import org.commonmark.node.FencedCodeBlock
 import org.commonmark.node.HardLineBreak
+import org.commonmark.node.HtmlBlock
 import org.commonmark.node.HtmlInline
 import org.commonmark.node.IndentedCodeBlock
 import org.commonmark.node.Node
@@ -49,6 +50,13 @@ internal fun appendPlainText(
 
             is IndentedCodeBlock -> {
                 sb.append(current.literal)
+            }
+
+            is HtmlBlock -> {
+                // Same leaf-with-literal shape as the code blocks: without this branch the
+                // plain-text fallbacks (truncation, chunking, deep flattening) would drop
+                // the block's content entirely
+                sb.append(current.literal.orEmpty())
             }
 
             else -> {
