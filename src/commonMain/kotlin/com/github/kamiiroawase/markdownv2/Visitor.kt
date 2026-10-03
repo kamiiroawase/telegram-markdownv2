@@ -518,7 +518,9 @@ internal class Visitor(
                 digits.startsWith("x") || digits.startsWith("X") -> digits.substring(1).toIntOrNull(16)
                 else -> digits.toIntOrNull()
             } ?: return null
-        if (codePoint < 0 || codePoint > 0x10FFFF || codePoint in 0xD800..0xDFFF) return null
+        // 0 joins the rejects: the NUL it would decode to is not valid message text for
+        // Telegram — the reference stays literal like every other malformed one
+        if (codePoint <= 0 || codePoint > 0x10FFFF || codePoint in 0xD800..0xDFFF) return null
         if (codePoint <= 0xFFFF) return codePoint.toChar().toString()
         val offset = codePoint - 0x10000
         return Char(0xD800 + (offset shr 10)).toString() + Char(0xDC00 + (offset and 0x3FF))

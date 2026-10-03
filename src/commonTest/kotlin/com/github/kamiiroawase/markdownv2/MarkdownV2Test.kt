@@ -690,6 +690,8 @@ class MarkdownV2Test {
         assertEquals("[x](&#xZ;)", MarkdownV2.render("<a href=\"&#xZ;\">x</a>")) // bad hex digits
         assertEquals("[x](&#1114112;)", MarkdownV2.render("<a href=\"&#1114112;\">x</a>")) // beyond Unicode
         assertEquals("[x](&#xD800;)", MarkdownV2.render("<a href=\"&#xD800;\">x</a>")) // surrogate half
+        assertEquals("[x](&#0;)", MarkdownV2.render("<a href=\"&#0;\">x</a>")) // NUL — invalid message text
+        assertEquals("[x](&#x0;)", MarkdownV2.render("<a href=\"&#x0;\">x</a>")) // hex NUL
     }
 
     @Test
