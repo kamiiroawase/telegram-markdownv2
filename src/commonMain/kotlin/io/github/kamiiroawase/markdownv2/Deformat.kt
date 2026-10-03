@@ -10,8 +10,12 @@ package io.github.kamiiroawase.markdownv2
  * Emphasis markers vanish (`*bold*`, `_italic_`, `__underline__`, `~strike~`), runs of
  * adjacent markers included (`_a__b_`, the render of two italics side by side, resolves
  * close-then-open into plain `ab`); fences and quote prefixes drop — a code block inside
- * a quote de-formats to its content with the per-line quote markers stripped — escapes
- * resolve per context, and `[label](url)` becomes `label (url)` so no link target is
+ * a quote de-formats to its content with the per-line quote markers stripped, and so does
+ * a label or code span soft-broken onto the next line of a quote body (exactly the
+ * wrapping quote's depth strips; a content '>' beyond it survives); quote markers strip
+ * behind list structure too — a quote or fence inside a list item de-formats with the
+ * bullet and the continuation indent kept and the `> ` markers gone — escapes resolve per
+ * context, and `[label](url)` becomes `label (url)` so no link target is
  * lost (an empty label or URL degrades to the non-empty piece). Even malformed input
  * loses nothing: an emphasis marker that never closes is re-inserted literally, and
  * unterminated code spans / labels / URLs keep their content as text.
@@ -19,7 +23,13 @@ package io.github.kamiiroawase.markdownv2
 internal fun deformat(rendered: String): String {
     val sb = StringBuilder(rendered.length)
     val openMarkers = ArrayDeque<OpenMarker>()
-    var index = 0
+    // Quote-prefix depth of the line the scan is currently on: an entity opened on the
+    // line (a label, a code span) inherits it, because every line of the quote body it
+    // lives in carries the same number of prefix units. Refreshed by the line-start
+    // scan whenever a line begins
+    val first = scanLineStart(rendered, 0, sb)
+    var index = first.index
+    var lineQuoteDepth = first.quoteDepth
     while (index < rendered.length) {
         val char = rendered[index]
         when {
@@ -35,30 +45,14 @@ internal fun deformat(rendered: String): String {
             }
 
             char == '`' -> {
-                // A fence opens at a line start, including right behind quote prefixes
-                // ("> ```" opens a code block inside a quote); elsewhere it is a code span
-                val depth =
-                    if (rendered.startsWith("```", index)) quoteDepthBefore(rendered, index) else -1
-                index =
-                    if (depth >= 0) {
-                        skipPre(rendered, index, depth, sb)
-                    } else {
-                        appendCodeContent(rendered, index, sb)
-                    }
+                // Fences open only at a line start behind the line's structure, and the
+                // line-start scan consumed every such fence already; a backtick here is
+                // a code span
+                index = appendCodeContent(rendered, index, sb, lineQuoteDepth)
             }
 
             char == '[' -> {
-                index = appendLinkText(rendered, index, sb)
-            }
-
-            char == '>' && isLineStart(rendered, index) -> {
-                // An unescaped '>' at line start is Telegram's quote marker — a literal
-                // one carries a backslash outside entities — so the marker and one
-                // optional space per level drop; nested quotes strip repeatedly
-                while (index < rendered.length && rendered[index] == '>') {
-                    index++
-                    if (index < rendered.length && rendered[index] == ' ') index++
-                }
+                index = appendLinkText(rendered, index, sb, lineQuoteDepth)
             }
 
             char == '_' || char == '*' || char == '~' -> {
@@ -66,6 +60,13 @@ internal fun deformat(rendered: String): String {
                 while (index + run < rendered.length && rendered[index + run] == char) run++
                 matchMarkerRun(openMarkers, char, run, sb.length)
                 index += run
+            }
+
+            char == '\n' -> {
+                sb.append(char)
+                val line = scanLineStart(rendered, index + 1, sb)
+                index = line.index
+                lineQuoteDepth = line.quoteDepth
             }
 
             else -> {
@@ -136,20 +137,21 @@ private fun matchMarkerRun(
     }
 }
 
-private fun isLineStart(
-    text: String,
-    index: Int,
-): Boolean = index == 0 || text[index - 1] == '\n'
-
 /**
  * Inline code from the backtick at [from]: inside code entities only `\`` and `\\` are
- * escapes, everything else is literal; a lone backslash stays. Unterminated, the rest of
- * the string is content. Returns the index after the closing backtick (or the end).
+ * escapes, everything else is literal; a lone backslash stays. A content line break
+ * inside a quote body strips the next line's quote units down to [quoteDepth] while its
+ * list context (indent, markers) stays — the markers belong to the quote, not the code;
+ * a content '>' beyond the depth survives (escapeCode leaves '>' unescaped, so the depth
+ * is the only separator between marker and content — the same trade skipPre makes for
+ * fenced blocks). Unterminated, the rest of the string is content. Returns the index
+ * after the closing backtick (or the end).
  */
 private fun appendCodeContent(
     rendered: String,
     from: Int,
     sb: StringBuilder,
+    quoteDepth: Int,
 ): Int {
     var index = from + 1
     while (index < rendered.length) {
@@ -170,6 +172,13 @@ private fun appendCodeContent(
                 return index + 1
             }
 
+            char == '\n' -> {
+                sb.append(char)
+                val prefix = scanLinePrefix(rendered, index + 1, quoteDepth)
+                sb.append(prefix.context)
+                index = prefix.contentFrom
+            }
+
             else -> {
                 sb.append(char)
                 index++
@@ -180,13 +189,15 @@ private fun appendCodeContent(
 }
 
 /**
- * Fenced block from the ``` at [from], possibly behind [depth] quote-prefix levels: the
- * whole fence line (fence, language and prefix) drops, each content line strips the same
- * [depth] prefix units, the content unescapes `\`` and `\\` only, and the closing fence
- * line (prefix included) drops — leaving exactly the code the block displayed. A content
- * line carrying fewer units than [depth] strips what is there; one starting with its own
- * '>' keeps it (only the wrapping quote's markers strip). Unterminated, the rest of the
- * string is content. Returns the index after the closing fence (or the end).
+ * Fenced block from the ``` at [from] — a line start behind [depth] quote levels; the
+ * line's own prefix (list context emitted, quote markers stripped) was consumed by the
+ * caller's line-start scan: the rest of the fence line (language included) drops, each
+ * content line strips the same [depth] quote units while its list context emits, the
+ * content unescapes `\`` and `\\` only, and the closing fence line (prefix included)
+ * drops — leaving the code the block displayed. A content line carrying fewer units than
+ * [depth] strips what is there; one starting with its own '>' keeps it (only the
+ * wrapping quote's markers strip). Unterminated, the rest of the string is content.
+ * Returns the index at the closing fence line's newline (or the end).
  */
 private fun skipPre(
     rendered: String,
@@ -197,17 +208,19 @@ private fun skipPre(
     var index = from
     while (index < rendered.length && rendered[index] != '\n') index++
     if (index < rendered.length) index++ // the fence line's own newline
-    index = skipQuoteUnits(rendered, index, depth) // the first content line's prefix
+    val first = scanLinePrefix(rendered, index, depth)
+    sb.append(first.context)
+    index = first.contentFrom
     while (index < rendered.length) {
         if (rendered[index] == '\n') {
-            val afterPrefix = skipQuoteUnits(rendered, index + 1, depth)
-            if (rendered.startsWith("```", afterPrefix)) {
-                index = afterPrefix
+            val prefix = scanLinePrefix(rendered, index + 1, depth)
+            if (rendered.startsWith("```", prefix.contentFrom)) {
+                index = prefix.contentFrom
                 while (index < rendered.length && rendered[index] != '\n') index++
                 return index
             }
-            sb.append('\n')
-            index = afterPrefix
+            sb.append('\n').append(prefix.context)
+            index = prefix.contentFrom
             continue
         }
         val char = rendered[index]
@@ -223,38 +236,103 @@ private fun skipPre(
     return index
 }
 
-// The number of quote-prefix units ('>' plus one optional space each) between the start
-// of the line and [index], or -1 when [index] does not sit at a line start — only those
-// characters may precede a fence's opening. The walk covers the line's prefix only, and
-// each prefix precedes at most one fence check, so the de-format stays linear
-private fun quoteDepthBefore(
-    rendered: String,
-    index: Int,
-): Int {
-    var i = index - 1
-    var depth = 0
-    while (i >= 0 && (rendered[i] == '>' || rendered[i] == ' ')) {
-        if (rendered[i] == '>') depth++
-        i--
-    }
-    return if (i < 0 || rendered[i] == '\n') depth else -1
-}
+// The result of scanning one line's structural prefix: where the content starts, how
+// many quote units stripped, and the list context for the caller to emit
+private class LinePrefix(
+    val contentFrom: Int,
+    val quoteDepth: Int,
+    val context: String,
+)
 
-// Strips up to [depth] quote-prefix units ('>' plus one optional space each) from the
-// line at [from]; a line carrying fewer units strips what is there
-private fun skipQuoteUnits(
+// The result of a line-start scan: where the main scan resumes (past a whole fenced
+// block when one opened) and the line's quote depth for entities that open on it
+private class LineStart(
+    val index: Int,
+    val quoteDepth: Int,
+)
+
+/**
+ * Scans one line's structural prefix from [from] (a line start): up to [maxDepth] quote
+ * units ('>' plus one optional space — one per wrapping quote level) strip, and list
+ * context — indent spaces, `• ` bullets, `N\. ` ordered markers — returns as
+ * [LinePrefix.context], because plain text keeps the list structure the renderer
+ * prefixes every item line with. Content stops the scan. The classification is
+ * unambiguous on this library's output: a content character at a line start escapes
+ * when it is MarkdownV2-special ('\>' for a literal '>'), and code content doubles its
+ * backslashes, so an unescaped `N\. ` or `> ` unit is necessarily structure the
+ * renderer emitted.
+ */
+private fun scanLinePrefix(
     rendered: String,
     from: Int,
-    depth: Int,
-): Int {
+    maxDepth: Int,
+): LinePrefix {
+    val context = StringBuilder()
     var index = from
-    var remaining = depth
-    while (remaining > 0 && index < rendered.length && rendered[index] == '>') {
-        index++
-        if (index < rendered.length && rendered[index] == ' ') index++
-        remaining--
+    var depth = 0
+    while (index < rendered.length) {
+        val char = rendered[index]
+        when {
+            char == '>' && depth < maxDepth -> {
+                index++
+                depth++
+                if (index < rendered.length && rendered[index] == ' ') index++
+            }
+
+            char == '•' && index + 1 < rendered.length && rendered[index + 1] == ' ' -> {
+                context.append("• ")
+                index += 2
+            }
+
+            char in '0'..'9' -> {
+                var end = index
+                while (end < rendered.length && rendered[end] in '0'..'9') end++
+                // The ordered marker's digits continue as '\. '; digits without that
+                // tail are content and stop the scan where it stands. The marker emits
+                // unescaped — its dot renders as a plain '.' in the plain text
+                if (end + 2 < rendered.length && rendered[end] == '\\' && rendered[end + 1] == '.' && rendered[end + 2] == ' ') {
+                    context.append(rendered, index, end)
+                    context.append(". ")
+                    index = end + 3
+                } else {
+                    break
+                }
+            }
+
+            char == ' ' -> {
+                val start = index
+                while (index < rendered.length && rendered[index] == ' ') index++
+                context.append(rendered, start, index)
+            }
+
+            else -> {
+                break
+            }
+        }
     }
-    return index
+    return LinePrefix(index, depth, context.toString())
+}
+
+// Scans the line starting at [from] into [sb]: the structural prefix emits its list
+// context and strips its quote markers (scanLinePrefix), and a fence opening right
+// behind the prefix consumes its whole block (skipPre) — fences open at line starts
+// only, behind whatever structure prefixes them. Returns where the main scan resumes
+// and the line's quote depth
+private fun scanLineStart(
+    rendered: String,
+    from: Int,
+    sb: StringBuilder,
+): LineStart {
+    val prefix = scanLinePrefix(rendered, from, Int.MAX_VALUE)
+    sb.append(prefix.context)
+    val content = prefix.contentFrom
+    val index =
+        if (rendered.startsWith("```", content)) {
+            skipPre(rendered, content, prefix.quoteDepth, sb)
+        } else {
+            content
+        }
+    return LineStart(index, prefix.quoteDepth)
 }
 
 /**
@@ -269,9 +347,10 @@ private fun appendLinkText(
     rendered: String,
     from: Int,
     sb: StringBuilder,
+    quoteDepth: Int,
 ): Int {
     val label = StringBuilder()
-    val labelEnd = appendLabelText(rendered, from + 1, label)
+    val labelEnd = appendLabelText(rendered, from + 1, label, quoteDepth)
     if (rendered.startsWith("](", labelEnd)) {
         var index = labelEnd + 2
         val url = StringBuilder()
@@ -321,12 +400,15 @@ private fun appendLinkText(
 }
 
 // Label content from [from]: the text-state logic (escapes, markers, code spans) minus
-// block constructs — labels hold inline entities only. Stops at `](` (returning the index
-// of the ']') or the end of the string
+// block constructs — labels hold inline entities only. A label line break inside a quote
+// body strips the next line's quote units down to [quoteDepth] while its list context
+// stays (see appendCodeContent). Stops at `](` (returning the index of the ']') or the
+// end of the string
 private fun appendLabelText(
     rendered: String,
     from: Int,
     sb: StringBuilder,
+    quoteDepth: Int,
 ): Int {
     val openMarkers = ArrayDeque<OpenMarker>()
     var index = from
@@ -350,7 +432,7 @@ private fun appendLabelText(
             }
 
             char == '`' -> {
-                index = appendCodeContent(rendered, index, sb)
+                index = appendCodeContent(rendered, index, sb, quoteDepth)
             }
 
             char == '_' || char == '*' || char == '~' -> {
@@ -358,6 +440,13 @@ private fun appendLabelText(
                 while (index + run < rendered.length && rendered[index + run] == char) run++
                 matchMarkerRun(openMarkers, char, run, sb.length)
                 index += run
+            }
+
+            char == '\n' -> {
+                sb.append(char)
+                val prefix = scanLinePrefix(rendered, index + 1, quoteDepth)
+                sb.append(prefix.context)
+                index = prefix.contentFrom
             }
 
             else -> {

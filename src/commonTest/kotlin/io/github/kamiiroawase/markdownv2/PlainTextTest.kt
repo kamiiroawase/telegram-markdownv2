@@ -95,6 +95,73 @@ class PlainTextTest {
     }
 
     @Test
+    fun plainTextLabelSpanningLinesInQuoteStripsContinuationPrefixes() {
+        // The render of a quote whose link label soft-breaks onto the next line:
+        // prefixQuote marks every line of the body, the label's continuation line
+        // included — its marker belongs to the quote, not the label (pre-fix "> b"
+        // leaked into the plain text)
+        assertEquals(
+            "a\nb (http://x.com)",
+            MarkdownV2.toPlainText(MarkdownV2.render("> [a\n> b](http://x.com)")),
+        )
+        // Two quote levels strip both units per continuation line
+        assertEquals("a\nb (u)", MarkdownV2.toPlainText(MarkdownV2.render("> > [a\n> > b](u)")))
+    }
+
+    @Test
+    fun plainTextCodeSpanSpanningLinesInQuoteStripsContinuationPrefixes() {
+        // CommonMark normalizes a code span's line breaks to spaces, so a parser round
+        // trip never produces this shape — it reaches deformat only as the render of a
+        // hand-built Code node; hand-made input, the same shape the fence tests above use
+        assertEquals("a\nb", MarkdownV2.toPlainText("> `a\n> b`"))
+        // Only the wrapping quote's markers strip: a code line starting with its own '>'
+        // keeps it — the same trade the fence path makes
+        assertEquals("x\n>y", MarkdownV2.toPlainText("> `x\n> >y`"))
+    }
+
+    @Test
+    fun plainTextLabelWithCodeSpanSpanningLinesInQuoteStripsPrefixes() {
+        // A code span inside a label strips the continuation prefixes too: the label's
+        // own '\n' handling and the span's agree on the depth
+        assertEquals("a\nb (u)", MarkdownV2.toPlainText("> [`a\n> b`](u)"))
+    }
+
+    @Test
+    fun plainTextStripsQuoteMarkersBehindListStructure() {
+        // applyPrefix prefixes every line of a list item's body — the marker on the
+        // first line, the marker-width indent on the rest — so a quote inside an item
+        // carries its '>' markers behind list structure. They strip there too; the list
+        // structure stays (pre-fix "> " leaked into the plain text of both lines of
+        // every list-wrapped quote)
+        assertEquals("• a\n  b", MarkdownV2.toPlainText(MarkdownV2.render("- > a\n  > b")))
+        assertEquals("1. a\n   b", MarkdownV2.toPlainText(MarkdownV2.render("1. > a\n   > b")))
+        // Two quote levels behind the bullet strip both units per line
+        assertEquals("• a\n  b", MarkdownV2.toPlainText(MarkdownV2.render("- > > a\n  > > b")))
+        // A list inside a quote: the markers strip around the kept bullet
+        assertEquals("• a", MarkdownV2.toPlainText(MarkdownV2.render("> - > a")))
+    }
+
+    @Test
+    fun plainTextLabelAndCodeSpanContinuationsBehindListStructure() {
+        // The continuation-line scan behind list context: the indent stays, the quote
+        // markers strip — the list-wrapped shape of the spanning-entity tests above
+        assertEquals("• a\n  b (u)", MarkdownV2.toPlainText(MarkdownV2.render("- > [a\n  > b](u)")))
+        // Hand-made code-span shape (the parser never spans code spans across lines —
+        // the same hand-made posture as the quote-only test above)
+        assertEquals("• x\n  y", MarkdownV2.toPlainText("• > `x\n  > y`"))
+    }
+
+    @Test
+    fun plainTextFencesBehindListStructure() {
+        // A fence opens behind the bullet/indent too: markers and language drop, the
+        // bullet stays, and each content line keeps the indent the renderer put inside
+        // the entity (the continuation alignment) — pre-fix the fence misparsed as code
+        // spans, leaking backticks and markers
+        assertEquals("•   l1\n  l2", MarkdownV2.toPlainText(MarkdownV2.render("- ```\n  l1\n  l2\n  ```")))
+        assertEquals("•   code", MarkdownV2.toPlainText(MarkdownV2.render("- > ```\n  > code\n  > ```")))
+    }
+
+    @Test
     fun plainTextKeepsEscapedGreaterThanLiteral() {
         assertEquals("> not a quote", MarkdownV2.toPlainText("\\> not a quote"))
     }

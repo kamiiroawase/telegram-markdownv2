@@ -136,9 +136,12 @@ public object MarkdownV2 {
      * Emphasis markers vanish (`*bold*`, `_italic_`, `__underline__`, `~strike~`) — runs of
      * glued markers included, so `_a__b_` (the render of two italics side by side) resolves
      * to plain `ab` — code spans and fenced blocks keep their content — a code block inside
-     * a quote de-formats to its content with the per-line quote markers stripped — quote `>`
-     * prefixes drop, escapes resolve per context, and `[label](url)` becomes `label (url)`
-     * so no link target is lost (an empty label or URL degrades to the non-empty piece).
+     * a quote de-formats to its content with the per-line quote markers stripped — quote
+     * `>` prefixes drop wherever the renderer puts them (behind a list marker or a
+     * continuation indent — a quote inside a list item keeps its bullets — and on the
+     * continuation line of a label or code span soft-broken inside a quote) — escapes
+     * resolve per context, and `[label](url)` becomes `label (url)` so no link target is
+     * lost (an empty label or URL degrades to the non-empty piece).
      * The input is expected to be this library's output; arbitrary strings degrade
      * best-effort but losslessly — unterminated entities keep their content and never-closed
      * markers return literally — and the call never throws.

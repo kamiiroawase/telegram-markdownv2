@@ -32,6 +32,18 @@ All notable changes to this project are documented here. The format follows
   used the marker's escaped char count, one column wider than the `N\.` marker displays
   (`1\. first` rendered a 4-space continuation under the 3-column `1. ` marker, `10\. `
   likewise) — bullet lists were unaffected
+- De-formatting no longer leaks quote markers into entities that span lines: a link label
+  or code span soft-broken onto the next line of a quote body de-formats with that line's
+  `> ` prefix stripped (`> [a\n> b](u)` used to yield the plain text `a\n> b (u)`);
+  exactly the wrapping quote's depth strips, so a code line starting with its own `>`
+  keeps it — the same trade the fenced-block path always made
+- De-formatting now recognizes quote markers and fences behind list structure: a quote
+  inside a list item de-formats with its `> ` markers stripped and the list context
+  (bullet, ordered marker, continuation indent) kept (`MarkdownV2.render("- > a\n  > b")`
+  used to leak `> ` into the plain text of both lines), a fence behind the bullet no
+  longer misparses as code spans (its content keeps the indent the renderer put inside
+  the entity), and labels/code spans soft-broken inside such a quote strip their
+  continuation markers too
 
 ## [1.3.0] — 2026-10-03
 
