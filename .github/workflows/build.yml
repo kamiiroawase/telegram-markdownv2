@@ -41,10 +41,14 @@ jobs:
         run: chmod +x gradlew && ./gradlew build
 
       # JitPack release builds skip tests (-xtest), so the publishing pipeline can only be
-      # verified on the CI side: the version derives from the git tag (needs the full clone
-      # above); after publishing to the local Maven repo, assert that all twelve KMP modules
-      # (root + android/jvm/js/wasmJs/linux/macos/mingw/ios) have their artifacts, the
-      # version is not a SNAPSHOT, and the pom carries the commonmark transitive dependency
+      # verified on the CI side. After publishing to the local Maven repo, assert that all
+      # twelve KMP modules (root + android/jvm/js/wasmJs/linux/macos/mingw/ios) publish
+      # their artifacts under a single version directory and the pom carries the commonmark
+      # transitive dependency. The exact-tag version derivation is end-to-end guarded in
+      # the Release workflow (which checks the tag out); here the version is whatever the
+      # current HEAD derives — 0.0.0-SNAPSHOT on a plain main push (HEAD sits past the tag,
+      # by design: the released number never sticks to unreleased commits), the tag version
+      # only when main HEAD is itself tagged
       - name: Verify Maven publishing
         run: |
           ./gradlew publishToMavenLocal
@@ -53,7 +57,6 @@ jobs:
           test "$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1
           VERSION=$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | head -n 1)
           test -n "$VERSION"
-          test "$VERSION" != "0.0.0-SNAPSHOT"
           A="$ROOT/$VERSION"
           for art in \
             "$A/telegram-markdownv2-$VERSION.module" \
@@ -73,6 +76,18 @@ jobs:
           done
           grep -q commonmark "$A/telegram-markdownv2-$VERSION.pom"
           echo "Published artifacts verified: $VERSION"
+
+      # API reference from the KDoc, so the carefully-written docs are browsable without a
+      # local Dokka run; uploaded as a workflow artifact (a Pages deployment can follow
+      # once there is a docs workflow worth wiring)
+      - name: Generate API documentation
+        run: ./gradlew dokkaGeneratePublicationHtml
+
+      - name: Upload API documentation
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-docs
+          path: build/dokka/html/**
 
       - name: Upload test reports
         if: always()

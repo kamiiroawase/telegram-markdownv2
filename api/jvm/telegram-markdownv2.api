@@ -1,0 +1,33 @@
+public final class com/github/kamiiroawase/markdownv2/MarkdownV2 {
+	public static final field INSTANCE Lcom/github/kamiiroawase/markdownv2/MarkdownV2;
+	public static final field MAX_MESSAGE_LENGTH I
+	public final fun escape (Ljava/lang/String;)Ljava/lang/String;
+	public final fun getDefaultExtensions ()Ljava/util/List;
+	public final fun getDefaultParser ()Lorg/commonmark/parser/Parser;
+	public final fun render (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lcom/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/lang/String;
+	public final fun render (Lorg/commonmark/node/Node;ILcom/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/lang/String;
+	public static synthetic fun render$default (Lcom/github/kamiiroawase/markdownv2/MarkdownV2;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lcom/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/lang/String;
+	public static synthetic fun render$default (Lcom/github/kamiiroawase/markdownv2/MarkdownV2;Lorg/commonmark/node/Node;ILcom/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/lang/String;
+	public final fun renderChunked (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lcom/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public final fun renderChunked (Lorg/commonmark/node/Node;ILcom/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lcom/github/kamiiroawase/markdownv2/MarkdownV2;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lcom/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lcom/github/kamiiroawase/markdownv2/MarkdownV2;Lorg/commonmark/node/Node;ILcom/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+}
+
+public final class com/github/kamiiroawase/markdownv2/RenderOptions {
+	public static final field Companion Lcom/github/kamiiroawase/markdownv2/RenderOptions$Companion;
+	public static final field DEFAULT_MAX_CELL_WIDTH I
+	public fun <init> ()V
+	public fun <init> (ILkotlin/jvm/functions/Function1;)V
+	public synthetic fun <init> (ILkotlin/jvm/functions/Function1;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getDisplayWidthOf ()Lkotlin/jvm/functions/Function1;
+	public final fun getMaxCellWidth ()I
+}
+
+public final class com/github/kamiiroawase/markdownv2/RenderOptions$Companion {
+}
+
+public final class com/github/kamiiroawase/markdownv2/RenderOptionsKt {
+	public static final fun defaultDisplayWidth (I)I
+}
+

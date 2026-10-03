@@ -1,0 +1,39 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64, iosX64, js, linuxArm64, linuxX64, macosArm64, mingwX64, wasmJs]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.github.kamiiroawase:telegram-markdownv2>
+final class com.github.kamiiroawase.markdownv2/RenderOptions { // com.github.kamiiroawase.markdownv2/RenderOptions|null[0]
+    constructor <init>(kotlin/Int = ..., kotlin/Function1<kotlin/Int, kotlin/Int> = ...) // com.github.kamiiroawase.markdownv2/RenderOptions.<init>|<init>(kotlin.Int;kotlin.Function1<kotlin.Int,kotlin.Int>){}[0]
+
+    final val displayWidthOf // com.github.kamiiroawase.markdownv2/RenderOptions.displayWidthOf|{}displayWidthOf[0]
+        final fun <get-displayWidthOf>(): kotlin/Function1<kotlin/Int, kotlin/Int> // com.github.kamiiroawase.markdownv2/RenderOptions.displayWidthOf.<get-displayWidthOf>|<get-displayWidthOf>(){}[0]
+    final val maxCellWidth // com.github.kamiiroawase.markdownv2/RenderOptions.maxCellWidth|{}maxCellWidth[0]
+        final fun <get-maxCellWidth>(): kotlin/Int // com.github.kamiiroawase.markdownv2/RenderOptions.maxCellWidth.<get-maxCellWidth>|<get-maxCellWidth>(){}[0]
+
+    final object Companion { // com.github.kamiiroawase.markdownv2/RenderOptions.Companion|null[0]
+        final const val DEFAULT_MAX_CELL_WIDTH // com.github.kamiiroawase.markdownv2/RenderOptions.Companion.DEFAULT_MAX_CELL_WIDTH|{}DEFAULT_MAX_CELL_WIDTH[0]
+            final fun <get-DEFAULT_MAX_CELL_WIDTH>(): kotlin/Int // com.github.kamiiroawase.markdownv2/RenderOptions.Companion.DEFAULT_MAX_CELL_WIDTH.<get-DEFAULT_MAX_CELL_WIDTH>|<get-DEFAULT_MAX_CELL_WIDTH>(){}[0]
+    }
+}
+
+final object com.github.kamiiroawase.markdownv2/MarkdownV2 { // com.github.kamiiroawase.markdownv2/MarkdownV2|null[0]
+    final const val MAX_MESSAGE_LENGTH // com.github.kamiiroawase.markdownv2/MarkdownV2.MAX_MESSAGE_LENGTH|{}MAX_MESSAGE_LENGTH[0]
+        final fun <get-MAX_MESSAGE_LENGTH>(): kotlin/Int // com.github.kamiiroawase.markdownv2/MarkdownV2.MAX_MESSAGE_LENGTH.<get-MAX_MESSAGE_LENGTH>|<get-MAX_MESSAGE_LENGTH>(){}[0]
+
+    final val defaultExtensions // com.github.kamiiroawase.markdownv2/MarkdownV2.defaultExtensions|{}defaultExtensions[0]
+        final fun <get-defaultExtensions>(): kotlin.collections/List<org.commonmark/Extension> // com.github.kamiiroawase.markdownv2/MarkdownV2.defaultExtensions.<get-defaultExtensions>|<get-defaultExtensions>(){}[0]
+    final val defaultParser // com.github.kamiiroawase.markdownv2/MarkdownV2.defaultParser|{}defaultParser[0]
+        final fun <get-defaultParser>(): org.commonmark.parser/Parser // com.github.kamiiroawase.markdownv2/MarkdownV2.defaultParser.<get-defaultParser>|<get-defaultParser>(){}[0]
+
+    final fun escape(kotlin/String): kotlin/String // com.github.kamiiroawase.markdownv2/MarkdownV2.escape|escape(kotlin.String){}[0]
+    final fun render(kotlin/String, kotlin/Int = ..., org.commonmark.parser/Parser = ..., com.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin/String // com.github.kamiiroawase.markdownv2/MarkdownV2.render|render(kotlin.String;kotlin.Int;org.commonmark.parser.Parser;com.github.kamiiroawase.markdownv2.RenderOptions){}[0]
+    final fun render(org.commonmark.node/Node, kotlin/Int = ..., com.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin/String // com.github.kamiiroawase.markdownv2/MarkdownV2.render|render(org.commonmark.node.Node;kotlin.Int;com.github.kamiiroawase.markdownv2.RenderOptions){}[0]
+    final fun renderChunked(kotlin/String, kotlin/Int = ..., org.commonmark.parser/Parser = ..., com.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin.collections/List<kotlin/String> // com.github.kamiiroawase.markdownv2/MarkdownV2.renderChunked|renderChunked(kotlin.String;kotlin.Int;org.commonmark.parser.Parser;com.github.kamiiroawase.markdownv2.RenderOptions){}[0]
+    final fun renderChunked(org.commonmark.node/Node, kotlin/Int = ..., com.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin.collections/List<kotlin/String> // com.github.kamiiroawase.markdownv2/MarkdownV2.renderChunked|renderChunked(org.commonmark.node.Node;kotlin.Int;com.github.kamiiroawase.markdownv2.RenderOptions){}[0]
+}
+
+final fun com.github.kamiiroawase.markdownv2/defaultDisplayWidth(kotlin/Int): kotlin/Int // com.github.kamiiroawase.markdownv2/defaultDisplayWidth|defaultDisplayWidth(kotlin.Int){}[0]

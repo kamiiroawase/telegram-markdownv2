@@ -162,7 +162,7 @@ val text2 = MarkdownV2.render(document, MarkdownV2.MAX_MESSAGE_LENGTH)
 - **HTML anchors across emphasis boundaries**: inputs like `*<a href="u">x*` (anchor opened inside Markdown emphasis, completed outside it) produce cross-nested output such as `_[x_](u)` which Telegram rejects — fall back to plain text; purely emphasis-tag interleaving (e.g. `*a<b>b* </b>`) is auto-completed at the emphasis boundary and yields valid output
 - **Ultra-deep nesting flattens**: quotes / lists / inline emphasis nested deeper than 100 levels degrade to flattened plain text (guarding against stack overflow on pathological input); when truncated, over-budget deep structures fall back to escaped plain text wholesale instead of being re-shrunk level by level (preventing exponential re-rendering)
 - **Over-length content is rendered twice**: once fully to measure, then block-wise when shrinking; negligible under the 4096-character limit, so no single-pass optimization is made for huge inputs
-- **Version numbers come from git tags**: builds without tags are `0.0.0-SNAPSHOT`; CI needs a full clone (`fetch-depth: 0`) to derive the version
+- **Version numbers come from git tags (only when HEAD sits exactly on one)**: the JitPack tag build and the release workflow's tag checkout are exactly that shape and take the tag's version; everything else builds as `0.0.0-SNAPSHOT` — commits past a tag no longer reuse the released version number, so a local `publishToMavenLocal` cannot shadow published artifacts under the same coordinates. CI needs a full clone (`fetch-depth: 0`) to derive the version
 
 ## Part 2: Contributing
 
@@ -207,6 +207,8 @@ src/
 
 - **Formatting**: Spotless + ktlint run as part of `build`; run `./gradlew spotlessApply` to auto-format before committing
 - **API**: commonMain uses `explicitApi()`; public declarations need explicit visibility modifiers and KDoc
+- **API compatibility**: binary-compatibility-validator snapshots the public API of every target (the `api/` directory); `apiCheck` runs as part of `build`, so a PR that breaks the published API fails outright — change it intentionally via `./gradlew apiDump` and say so in the PR
+- **API docs & changelog**: Dokka generates the API reference from the KDoc (`./gradlew dokkaGeneratePublicationHtml`; CI uploads the HTML); user-visible changes go to the Unreleased section of [CHANGELOG.md](CHANGELOG.md)
 - **CI**: `build.yml` runs all of the above on main pushes and every PR (plus macOS and Windows jobs for the iOS simulator, macOS Arm64 and mingwX64 native tests) and asserts the publishing artifacts; `release.yml` publishes per-platform artifacts as GitHub Release attachments on `v*` tags, attaches the CI benchmark output, and verifies both READMEs' version coordinates were bumped with the tag (a missing new version or a leftover previous version fails the release)
 
 ### Submitting a PR

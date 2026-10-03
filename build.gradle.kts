@@ -8,6 +8,8 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.spotless)
+    alias(libs.plugins.binary.compatibility.validator)
+    alias(libs.plugins.dokka)
     `maven-publish`
 }
 
@@ -16,10 +18,13 @@ plugins {
 group = "com.github.kamiiroawase"
 
 // Version precedence: -Pversion (passed by JitPack on tag builds, e.g. v1.1.0 → 1.1.0)
-// > derivation from the git tag (CI needs a full clone with fetch-depth=0; HEAD exactly on
-// a tag yields that exact version, afterwards the nearest reachable tag sticks)
-// > 0.0.0-SNAPSHOT (no tag or no git environment). The version must not be hard-coded —
-// it would override the value JitPack passes in
+// > the exact git tag (CI needs a full clone with fetch-depth=0; only HEAD sitting exactly
+// on a v* tag yields that version — the JitPack tag checkout and the release workflow are
+// exactly this shape) > 0.0.0-SNAPSHOT (anything else: no tag at HEAD, or no git
+// environment). The nearest-tag fallback is deliberately absent: past the tag it would
+// stamp unreleased commits with the released version, and a local publishToMavenLocal
+// would then shadow the published artifact under the same coordinates. The version must
+// not be hard-coded — it would override the value JitPack passes in
 version =
     providers
         .gradleProperty("version")
@@ -33,14 +38,16 @@ abstract class GitTagVersionSource : ValueSource<String, ValueSourceParameters.N
     override fun obtain(): String? {
         val process =
             try {
-                ProcessBuilder("git", "describe", "--tags", "--abbrev=0", "--match=v*")
+                // --exact-match: describe exits non-zero unless HEAD is exactly at a
+                // matching tag, which is precisely the release shape
+                ProcessBuilder("git", "describe", "--tags", "--exact-match", "--match=v*")
                     .redirectErrorStream(true)
                     .start()
             } catch (_: Exception) {
                 return null
             }
-        // Without tags git describe exits non-zero and writes the error into the output
-        // stream — not usable as a version
+        // Without a tag at HEAD git describe exits non-zero and writes the error into the
+        // output stream — not usable as a version
         if (process.waitFor() != 0) return null
         return process
             .inputStream
@@ -136,6 +143,20 @@ tasks.register<JavaExec>("benchmark") {
     classpath = testCompilation.runtimeDependencyFiles
     mainClass.set("com.github.kamiiroawase.markdownv2.BenchmarkKt")
 }
+
+// Public-API compatibility guard: the api/ directory snapshots every public declaration;
+// apiCheck hooks into check (and thus build/CI), so a change that breaks the published
+// API fails the build until ./gradlew apiDump is re-run deliberately. klib validation is
+// on so every native/wasm target gets its own dump alongside the JVM/classic one — the
+// API lives in commonMain, so the dumps stay in sync by construction
+apiValidation {
+    klib {
+        enabled = true
+    }
+}
+
+// API reference from the KDoc: ./gradlew dokkaGeneratePublicationHtml (CI uploads the
+// result as an artifact); configuration is Dokka's multiplatform defaults
 
 publishing {
     publications.withType<MavenPublication>().configureEach {

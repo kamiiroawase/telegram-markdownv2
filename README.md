@@ -162,7 +162,7 @@ val text2 = MarkdownV2.render(document, MarkdownV2.MAX_MESSAGE_LENGTH)
 - **HTML 锚点跨强调边界**：`*<a href="u">x*` 这类锚点在 Markdown 强调内开、强调外闭的输入，链接补全会跨越强调边界（输出 `_[x_](u)` 这类交叉嵌套），Telegram 会拒收——按纯文本发送兜底；纯强调类交错（如 `*a<b>b* </b>`）已在强调边界自动补全，输出合法
 - **超深嵌套平铺**：超过 100 层的引用 / 列表 / 行内强调降级为平铺纯文本（防病态输入栈溢出）；截断时放不下的深层结构整体退化为转义纯文本，不逐层重缩（防嵌套重渲染指数膨胀）
 - **超长内容渲染两遍**：先完整渲染判断长度、超限再分块收缩；4096 字符上限下开销可忽略，不为超大输入做单遍渲染优化
-- **版本号来自 git tag**：本地无 tag 时构建为 `0.0.0-SNAPSHOT`；CI 需完整克隆（`fetch-depth: 0`）才能推导版本
+- **版本号来自 git tag（仅当 HEAD 恰在 tag 上）**：JitPack 的 tag 构建与 release 工作流的 tag 检出即此情形，取 tag 版本号；其余一律 `0.0.0-SNAPSHOT`——tag 之后的提交不再复用已发布版本号，本地 `publishToMavenLocal` 也就不会覆盖同名已发布工件。CI 需完整克隆（`fetch-depth: 0`）才能推导版本
 
 ## 二、参与代码贡献
 
@@ -207,6 +207,8 @@ src/
 
 - **格式**：Spotless + ktlint 挂在 `build` 上检查；提交前跑 `./gradlew spotlessApply` 一键格式化
 - **API**：commonMain 启用 `explicitApi()`，公开声明必须显式写可见性修饰符并附 KDoc
+- **API 兼容性**：binary-compatibility-validator 为全部 target 快照公开 API（`api/` 目录），`apiCheck` 挂在 `build` 上，无意破坏公开 API 的 PR 直接失败；有意变更时跑 `./gradlew apiDump` 更新快照并在 PR 中说明
+- **API 文档与变更记录**：Dokka 从 KDoc 生成 API 参考（`./gradlew dokkaGeneratePublicationHtml`，CI 上传 HTML 产物）；用户可见的行为变化记入 [CHANGELOG.md](CHANGELOG.md) 的 Unreleased 段
 - **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS 与 Windows job 跑 iOS 模拟器、macOS Arm64 与 mingwX64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件，附带当次 CI 复跑的 benchmark 输出，并校验两份 README 的版本坐标已随 tag 同步更新（缺新版本号或残留上一版本号即失败）
 
 ### 提交流程
