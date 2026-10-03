@@ -5,15 +5,22 @@ import org.commonmark.node.Paragraph
 import java.util.Locale
 
 // JVM rendering performance benchmark, the data source of the README performance section:
-// ./gradlew benchmark — timed iterations after warm-up, sized by input, median taken,
-// single-threaded; timing covers the full commonmark parse plus MarkdownV2 render/truncate
-// pipeline. Numbers vary per machine; treat them as order-of-magnitude references.
+// ./gradlew benchmark — the full suite repeats ROUNDS times with the cases interleaved,
+// and each scenario keeps its best (minimum) round median; single-threaded, iterations
+// sized by input after warm-up. Timing covers the full commonmark parse plus
+// MarkdownV2 render/truncate pipeline. Interference like CPU frequency scaling or thermal
+// windows can slow an entire single pass several-fold (a 4x spread was observed on the
+// truncation-heavy scenario on the same machine and code), so the best round estimates the
+// machine's capability far more reproducibly than any one pass. Numbers still vary per
+// machine; treat them as order-of-magnitude references.
 
 private class BenchmarkCase(
     val name: String,
     val inputBytes: Long,
     val action: () -> Unit,
 )
+
+private const val ROUNDS = 5
 
 fun main() {
     val cases = buildCases()
@@ -26,27 +33,34 @@ fun main() {
     println()
     println("| Scenario | Input | Median | Throughput |")
     println("| --- | --- | --- | --- |")
-    for (case in cases) {
-        // Small inputs get more iterations: per-run noise dominates their timings
-        val warmup =
-            if (case.inputBytes < 10_000) {
-                15
-            } else if (case.inputBytes < 100_000) {
-                5
-            } else {
-                3
-            }
-        val iterations =
-            if (case.inputBytes < 10_000) {
-                100
-            } else if (case.inputBytes < 100_000) {
-                20
-            } else {
-                10
-            }
-        val median = medianNanos(warmup, iterations, case.action)
+    val medians = LongArray(cases.size) { Long.MAX_VALUE }
+    repeat(ROUNDS) {
+        cases.forEachIndexed { index, case ->
+            // Small inputs get more iterations: per-run noise dominates their timings
+            val warmup =
+                if (case.inputBytes < 10_000) {
+                    15
+                } else if (case.inputBytes < 100_000) {
+                    5
+                } else {
+                    3
+                }
+            val iterations =
+                if (case.inputBytes < 10_000) {
+                    100
+                } else if (case.inputBytes < 100_000) {
+                    20
+                } else {
+                    10
+                }
+            medians[index] = minOf(medians[index], medianNanos(warmup, iterations, case.action))
+        }
+    }
+    cases.forEachIndexed { index, case ->
         println(
-            "| ${case.name} | ${formatBytes(case.inputBytes)} | ${formatNanos(median)} | ${formatThroughput(case.inputBytes, median)} |",
+            "| ${case.name} | ${formatBytes(
+                case.inputBytes,
+            )} | ${formatNanos(medians[index])} | ${formatThroughput(case.inputBytes, medians[index])} |",
         )
     }
 }

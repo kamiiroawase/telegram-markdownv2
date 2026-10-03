@@ -16,9 +16,9 @@ In one sentence: Markdown in, Telegram-renderable text out. Hand any CommonMark/
 
 - Parses with [commonmark-kotlin](https://github.com/darriousliu/commonmark-kotlin) (the Kotlin Multiplatform port of commonmark-java), emits Telegram-flavoured MarkdownV2
 - All 19 escapable characters (Telegram's 18 official special characters plus the backslash) escaped; inline code / code blocks / link URLs follow their own escaping rules
-- Unsupported constructs degrade gracefully: tables render as aligned fenced code blocks (CJK/emoji aligned at double display width, combining marks and variation selectors cost zero columns; cells truncated at 32 display width by default, with both the width measure and the cap customizable via `RenderOptions`), HTML blocks become code blocks, inline HTML maps to entities (`<b>` → `*`, `<br>` → newline, `<a href>` → link; content of HTML code-family tags — `<code>`, `<kbd>`, … — escapes with code-entity rules, escaping only the backtick and backslash) or is escaped literally — unmatched closing, self-closing and nested tags are always escaped literally, empty-URL links degrade to plain text, empty link text or image alt text degrades to the bare escaped URL (Telegram rejects empty-text link entities), and images/links/anchors nested inside a link degrade to plain text or literal tags (Telegram link entities cannot nest); the `href` attribute name is case-insensitive, its value may be double-quoted, single-quoted or unquoted (per HTML5 a trailing `/` in an unquoted value belongs to the value and is never mistaken for a self-closing tag), HTML entities in hrefs (`&amp;`, `&#38;`, `&#x26;`, …) are decoded before linking, unrecognized references (e.g. `&#0;`, whose NUL is not valid message text) stay literal, and an `href=` inside another attribute's value is never mistaken for the real attribute
+- Unsupported constructs degrade gracefully: tables render as aligned fenced code blocks (CJK/emoji aligned at double display width, combining marks and variation selectors cost zero columns; cells truncated at 32 display width by default, with both the width measure and the cap customizable via `RenderOptions`), HTML blocks become code blocks, inline HTML maps to entities (`<b>` → `*`, `<br>` → newline, `<a href>` → link; content of HTML code-family tags — `<code>`, `<kbd>`, … — escapes with code-entity rules, escaping only the backtick and backslash, and Markdown code spans nested inside escape their backticks too, keeping entity boundaries intact) or is escaped literally — unmatched closing, self-closing and nested tags are always escaped literally, empty-URL links degrade to plain text, empty link text, image alt text or an empty anchor degrades to the bare escaped URL (Telegram rejects empty-text link entities), and images/links/anchors nested inside a link degrade to plain text or literal tags (Telegram link entities cannot nest), HTML emphasis left unclosed inside a link label completes before the link closes, and a leftover nested anchor never swallows the links that follow; the `href` attribute name is case-insensitive, its value may be double-quoted, single-quoted or unquoted (per HTML5 a trailing `/` in an unquoted value belongs to the value and is never mistaken for a self-closing tag), HTML entities in hrefs (`&amp;`, `&#38;`, `&#x26;`, …) are decoded before linking, unrecognized references (e.g. `&#0;`, whose NUL is not valid message text) stay literal, and an `href=` inside another attribute's value is never mistaken for the real attribute
 - Optional truncation (enabled by a positive `maxLength`; the default 0 renders in full) stays valid MarkdownV2: code fences remain closed, unclosed emphasis / links are auto-completed, quote and list prefixes are preserved line by line, escape sequences and surrogate pairs are never split; falls back to escaped plain text when no structural content fits; quotes / lists / inline emphasis nested deeper than 100 levels flatten to plain text, so pathological nesting never exhausts the call stack
-- Lossless chunking of over-length content (`renderChunked`): the render is split into pieces of at most the limit, each independently valid MarkdownV2 — blocks are packed whole, oversized blocks split along their natural seams (code lines, list items, quote children, paragraph lines, then inline nodes), and a seam still exceeding the limit flattens to escaped plain text (text lossless); send the pieces in order to deliver the full content
+- Lossless chunking of over-length content (`renderChunked`): the render is split into pieces of at most the limit, each independently valid MarkdownV2 — blocks are packed whole, oversized blocks split along their natural seams (code lines, list items, quote children, paragraph lines, then inline nodes; heading `#` prefixes and list markers glue to the first piece and are dropped outright when the limit cannot even fit marker plus text), and a seam still exceeding the limit flattens to escaped plain text (text lossless); send the pieces in order to deliver the full content
 
 Supported platforms: Android (minSdk 23), JVM 11+, JS, Wasm, Linux (x64/Arm64), macOS (Arm64), Windows (mingwX64), iOS (device and simulator).
 
@@ -182,7 +182,7 @@ src/
 
 ### Build and test
 
-215 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — the library's only regex stays linear-time with no catastrophic backtracking). Caveat: 28 of them depend on HTML parsing and silently no-op on JS/Wasm due to an upstream commonmark-kotlin parser defect (see the test class KDoc and `htmlParsingSupported`); they activate automatically once the upstream fix lands. In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows and Linux Arm64 native tests run in their own host jobs — every native target has CI test coverage:
+222 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — the library's only regex stays linear-time with no catastrophic backtracking). Caveat: 28 of them depend on HTML parsing and silently no-op on JS/Wasm due to an upstream commonmark-kotlin parser defect (see the test class KDoc and `htmlParsingSupported`); they activate automatically once the upstream fix lands. In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows and Linux Arm64 native tests run in their own host jobs — every native target has CI test coverage:
 
 ```bash
 ./gradlew build             # compile all targets + host-runnable tests + format check
@@ -204,28 +204,28 @@ src/
 
 ## Part 3: Performance
 
-Reproducible via `./gradlew benchmark` (implementation: [Benchmark.kt](src/jvmTest/kotlin/com/github/kamiiroawase/markdownv2/Benchmark.kt) — single-threaded JVM, global warm-up, median of size-scaled timed iterations; figures cover the full commonmark parse + render/truncate pipeline, throughput counted in UTF-8 bytes). Reference measurements on Windows 11 / JDK 21 / Intel x86-64 (2026-10); absolute values vary per machine — treat them as order-of-magnitude. To keep the table from silently aging, every release from now on attaches the CI's (ubuntu runner) fresh benchmark output (`benchmark.txt`) to the GitHub Release, ready for order-of-magnitude comparison against the table:
+Reproducible via `./gradlew benchmark` (implementation: [Benchmark.kt](src/jvmTest/kotlin/com/github/kamiiroawase/markdownv2/Benchmark.kt) — single-threaded JVM, global warm-up, then the whole suite repeats several rounds with the cases interleaved and each scenario keeps its best (minimum) round median; interference such as CPU frequency scaling or thermal windows can skew a single round several-fold, so the best round is far more reproducible; figures cover the full commonmark parse + render/truncate pipeline, throughput counted in UTF-8 bytes). Reference measurements on Windows 11 / JDK 21 / Intel x86-64 (2026-10, best-round methodology); absolute values vary per machine — treat them as order-of-magnitude. To keep the table from silently aging, every release from now on attaches the CI's (ubuntu runner) fresh benchmark output (`benchmark.txt`) to the GitHub Release, ready for order-of-magnitude comparison against the table:
 
-| Scenario | Input | Median | Throughput |
+| Scenario | Input | Median (best round) | Throughput |
 | --- | --- | --- | --- |
-| Short text (typical chat message) | 0.1 KB | ~0.08 ms | ~1.3 MB/s |
-| Typical reply (headings/lists/code/table) | 2.0 KB | ~0.5 ms | ~4 MB/s |
-| Plain paragraph near the limit (no truncation) | 3.6 KB | ~0.09 ms | ~39 MB/s |
-| Overlong multi-paragraph (structure-preserving truncation to 4096) | 42.7 KB | ~1.1 ms | ~37 MB/s |
-| Overlong single line (escaped plain-text fallback) | 50.0 KB | ~0.9 ms | ~56 MB/s |
-| Large table (60 rows × 4 cols, degraded alignment) | 3.2 KB | ~0.6 ms | ~5.5 MB/s |
-| Large code block (500 lines, truncated) | 21.3 KB | ~0.3 ms | ~71 MB/s |
-| Inline HTML mix | 4.7 KB | ~0.4 ms | ~12 MB/s |
-| Deeply nested quote (200 levels, flattened) | 0.3 KB | ~0.14 ms | ~2.2 MB/s |
-| 100k-scale unclosed tag (regex linearity regression) | 100 KB | ~5.1 ms | ~20 MB/s |
-| Huge document (1M characters, render-twice strategy) | 1.0 MB | ~11.6 ms | ~86 MB/s |
+| Short text (typical chat message) | 0.1 KB | ~7 µs | ~14 MB/s |
+| Typical reply (headings/lists/code/table) | 2.0 KB | ~70 µs | ~29 MB/s |
+| Plain paragraph near the limit (no truncation) | 3.6 KB | ~16 µs | ~220 MB/s |
+| Overlong multi-paragraph (structure-preserving truncation to 4096) | 42.7 KB | ~0.35 ms | ~120 MB/s |
+| Overlong single line (escaped plain-text fallback) | 50.0 KB | ~0.5 ms | ~100 MB/s |
+| Large table (60 rows × 4 cols, degraded alignment) | 3.2 KB | ~0.13 ms | ~24 MB/s |
+| Large code block (500 lines, truncated) | 21.3 KB | ~0.1 ms | ~220 MB/s |
+| Inline HTML mix | 4.7 KB | ~0.13 ms | ~36 MB/s |
+| Deeply nested quote (200 levels, flattened) | 0.3 KB | ~43 µs | ~7.4 MB/s |
+| 100k-scale unclosed tag (regex linearity regression) | 100 KB | ~4.8 ms | ~21 MB/s |
+| Huge document (1M characters, render-twice strategy) | 1.0 MB | ~9.8 ms | ~100 MB/s |
 
 Reading notes:
 
-- Typical messages (≤ 4096 chars) render in under 1 ms end to end — negligible on a bot's send path
+- Typical messages (≤ 4096 chars) render mostly within a 0.1 ms order of magnitude — negligible on a bot's send path
 - Fragmented structure costs: per byte, documents dense in headings/lists/tables parse and render several times slower than a single plain paragraph
 - Adversarial input (100k-char unclosed tag) stays linear (~5 ms) with no catastrophic backtracking — the design goal of keeping the library's only regex linear-time
-- Huge documents pay the render-full-then-shrink strategy (see known limitations): ~12 ms per million characters
+- Huge documents pay the render-full-then-shrink strategy (see known limitations): ~10 ms per million characters
 
 ## License
 
