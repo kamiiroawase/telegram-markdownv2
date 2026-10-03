@@ -94,11 +94,29 @@ kotlin {
         }
     }
     js {
-        nodejs()
+        nodejs {
+            testTask {
+                // Mocha's default per-test timeout is 2s wall time: on a contended CI
+                // runner (other test tasks and compilers sharing the vCPUs) the stress
+                // tests — the 500-level nested list ran 3.0s there while local runs
+                // finish in milliseconds — exceed it and flake. Stress tests are
+                // deliberately heavy; Gradle's task-level bound still applies.
+                useMocha {
+                    timeout = "20s"
+                }
+            }
+        }
     }
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
-        nodejs()
+        nodejs {
+            testTask {
+                // Same wall-clock allowance as the JS side for the same reason
+                useMocha {
+                    timeout = "20s"
+                }
+            }
+        }
     }
     linuxX64()
     linuxArm64()
