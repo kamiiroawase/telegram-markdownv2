@@ -695,6 +695,51 @@ class RenderTest {
     }
 
     @Test
+    fun htmlCloserMatchingMarkdownEmphasisMarkerStaysLiteral() {
+        // Pre-fix the HTML closer matched the marker the Markdown emphasis visit itself
+        // had pushed, stole it off the stack, and the visit's own removeLast() threw
+        // NoSuchElementException ("ArrayDeque is empty") on `_x</i>_`-shaped input
+        assertEquals("_x</i\\>_", MarkdownV2.render("_x</i>_"))
+        assertEquals("*x</b\\>*", MarkdownV2.render("**x</b>**"))
+        assertEquals("~x</s\\>~", MarkdownV2.render("~~x</s>~~"))
+    }
+
+    @Test
+    fun anchorOpenedInsideEmphasisClosesAtEmphasisBoundary() {
+        // Pre-fix the anchor completed at output time and its ](url) crossed the
+        // emphasis closer into the label (`_[x_](u)`-shaped) — an entity nesting Telegram
+        // rejects; now it closes inside the emphasis, properly nested
+        if (!htmlParsingSupported) return
+
+        assertEquals("_[x](u)_", MarkdownV2.render("*<a href=\"u\">x*"))
+        assertEquals("_u_", MarkdownV2.render("*<a href=\"u\">*"))
+    }
+
+    @Test
+    fun unclosedAnchorAndEmphasisCompleteInnermostFirst() {
+        // Interleaved unclosed entities complete by opening order at output time: the
+        // anchor opened after the bold closes first, and vice versa — pre-fix output()
+        // always emitted emphasis closers before link closers, crossing `<b><a href>`-shaped
+        // stacks into `*[x*](u)`
+        if (!htmlParsingSupported) return
+
+        assertEquals("*[x](u)*", MarkdownV2.render("<b><a href=\"u\">x"))
+        assertEquals("[*x*](u)", MarkdownV2.render("<a href=\"u\"><b>x"))
+    }
+
+    @Test
+    fun closingTagCrossingStillOpenAnchorGoesLiteral() {
+        // </b> and </a> match only the innermost open entity: a closer crossing a
+        // still-open anchor (or an anchor closer crossing a still-open tag) used to pop
+        // across stacks and emit crossed entities like `[*x](u)*`; now the tag renders
+        // literally and the crossed entity completes later, innermost first
+        if (!htmlParsingSupported) return
+
+        assertEquals("[*x</a\\>*](u)", MarkdownV2.render("<a href=\"u\"><b>x</a>"))
+        assertEquals("*[x</b\\>](u)*", MarkdownV2.render("<b><a href=\"u\">x</b>"))
+    }
+
+    @Test
     fun uppercaseHtmlTagsMapToEntities() {
         assertEquals("a*b*c", MarkdownV2.render("a<B>b</B>c"))
     }

@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Unclosed inline entities no longer complete into crossed, Telegram-rejected output:
+  open HTML emphasis markers and `<a>` anchors now share one entity stack ordered by
+  opening, and every completion point — an emphasis/strikethrough/link-label boundary
+  or output time — closes what was opened inside it, latest-opened first. Pre-fix the
+  two kinds lived on separate stacks whose closers could not interleave: an anchor
+  opened inside Markdown emphasis completed past the emphasis closer
+  (`*<a href="u">x*` rendered the crossed `_[x_](u)`), output-time completion always
+  emitted emphasis closers before link closers (crossing `<b><a href="u">x` into
+  `*[x*](u)`), and a closing tag could pop across the other stack
+  (`<a href="u"><b>x</a>` → the crossed `[*x](u)*`)
+- Closing HTML tags match only the innermost open entity, which also fixes a crash: an
+  HTML closer that matched the marker pushed by a Markdown emphasis' own visit —
+  `_x</i>_`, `**x</b>**`, `~~x</s>~~` — stole that entry off the stack and the visit's
+  own pop then threw `NoSuchElementException` ("ArrayDeque is empty"). Such closers,
+  and closers crossing a still-open anchor (`</b>` in `<b><a href="u">x</b>`), now
+  escape literally and the crossed entity completes properly nested instead
 - `toPlainText` resolves runs of glued emphasis markers: `_a__b_` — the render of two
   italics side by side (`*a*_b_`) — de-formats to `ab`, where the old char-greedy read
   took the middle `__` for one underline marker, matched nothing on the marker stack,

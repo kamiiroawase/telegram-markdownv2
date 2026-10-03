@@ -36,6 +36,26 @@ private const val MAX_RENDER_DEPTH = 100
 // is treated literally as well
 private const val NESTED_LITERAL_ANCHOR = "nested-literal"
 
+// One entry per open inline entity, whichever kind pushed it — Markdown emphasis (this
+// visitor's own visits), HTML emphasis tags, HTML anchors — because their closers must
+// interleave by opening order at every completion point (a container boundary or output
+// time); two separate stacks cannot express that order and emitted crossed entities
+// Telegram rejects
+private sealed interface OpenEntity {
+    // Opening order: every completion point closes what was opened after the boundary
+    // entry, latest-opened first, so completed entities stay properly nested
+    val seq: Int
+}
+
+// marker: the MarkdownV2 closer; html: pushed by an HTML tag rather than by this
+// visitor's own emphasis visits — only html-owned markers may be matched and popped by
+// a closing tag, so a Markdown emphasis' own entry can never be stolen from under it
+private class OpenEmphasisMarker(
+    val marker: String,
+    val html: Boolean,
+    override val seq: Int,
+) : OpenEntity
+
 // An open HTML anchor: its URL ("" when href-less, the NESTED_LITERAL_ANCHOR sentinel
 // while an outer link is open) plus the output positions that let an empty label degrade
 // to the bare escaped URL (the same trade visit(link) makes)
@@ -43,7 +63,8 @@ private class OpenAnchor(
     val url: String,
     val openBracket: Int,
     val labelStart: Int,
-)
+    override val seq: Int,
+) : OpenEntity
 
 // A parsed inline-HTML tag: the lowercased name, the raw attribute string, whether the
 // tag closes, and whether its trailing slash read as self-closing
@@ -130,8 +151,10 @@ private val NAMED_ENTITIES =
     )
 
 /**
- * Renders the full AST to Telegram MarkdownV2. Unclosed HTML emphasis/anchors are completed
- * LIFO at output time ([output]); tables degrade to aligned text via [renderTableLines].
+ * Renders the full AST to Telegram MarkdownV2. Unclosed HTML entities — emphasis tags and
+ * anchors alike — complete at the nearest container boundary (an emphasis, strikethrough,
+ * or link/image label that closes over them) or at output time, always latest-opened first
+ * so the output stays properly nested; tables degrade to aligned text via [renderTableLines].
  */
 internal class Visitor(
     private val depth: Int = 0,
@@ -139,15 +162,17 @@ internal class Visitor(
 ) : AbstractVisitor() {
     private val sb = StringBuilder()
 
-    private val openLinkUrls = ArrayDeque<OpenAnchor>()
+    // Every open inline entity in opening order: this visitor's own Markdown emphasis,
+    // HTML emphasis tags and HTML anchors alike (see OpenEntity)
+    private val openEntities = ArrayDeque<OpenEntity>()
+
+    private var nextSeq = 0
 
     // Depth of open Markdown link entities (Link and Image both render as links); HTML
-    // anchors are tracked separately in [openLinkUrls]. Telegram links cannot nest, so
-    // while any link entity is open, link-like constructs degrade (see visit(link),
-    // visit(image) and renderAnchor)
+    // anchors are tracked in [openEntities]. Telegram links cannot nest, so while any
+    // link entity is open, link-like constructs degrade (see visit(link), visit(image)
+    // and renderAnchor)
     private var openMarkdownLinks = 0
-
-    private val openEmphasis = ArrayDeque<String>()
 
     // Nesting depth of open HTML code entities (<code>/<kbd>/<samp>/<tt> render as `
     // entities). Inside a code entity Telegram interprets only \` and \\, so Text children
@@ -159,34 +184,48 @@ internal class Visitor(
     private var inlineDepth = 0
 
     /**
-     * Returns the rendered text, completing any unclosed entities. Emphasis closers come
-     * before link closers: emphasis typically opens inside the link text (after `[`), so
-     * closing it first keeps the nesting valid; the reverse shape (anchor opened inside
-     * unclosed emphasis) yields crossed entities Telegram rejects — a documented
-     * limitation. Emphasis closers are emitted innermost-first (reversed); links need no
-     * reversal because at most one real link is ever open (nested anchors are literalized).
-     * trimEnd keeps the appended closers clear of trailing block separators.
+     * Returns the rendered text, completing any unclosed entities latest-opened first
+     * (by opening order, so the completed entities nest properly): markers emit their
+     * closer, real anchors their ](url) — an anchor whose label rendered no visible text
+     * rewinds and degrades to the bare escaped URL, the same trade visit(link) makes —
+     * while sentinel and href-less anchors emit nothing. Closers append after a trimEnd
+     * that keeps them clear of trailing block separators; a rewind that completed nothing
+     * else returns the rewound text as-is.
      */
     fun output(): String {
-        // An anchor still open with an empty label degrades like visit(link): an empty
-        // label means nothing but trailing block separators follows its [, so rewinding
-        // the bracket is safe (labelIsBlank covers the whitespace-only label too)
-        openLinkUrls
-            .lastOrNull { anchor ->
-                anchor.url.isNotEmpty() && anchor.url != NESTED_LITERAL_ANCHOR && labelIsBlank(anchor.labelStart)
-            }?.let { emptyLabel ->
-                sb.setLength(emptyLabel.openBracket)
-                sb.append(escapeText(emptyLabel.url))
-                openLinkUrls.remove(emptyLabel)
+        if (openEntities.isEmpty()) return sb.toString()
+        val closers = mutableListOf<String>()
+        while (openEntities.isNotEmpty()) {
+            when (val entity = openEntities.removeLast()) {
+                is OpenEmphasisMarker -> {
+                    closers += entity.marker
+                }
+
+                is OpenAnchor -> {
+                    when {
+                        entity.url.isEmpty() || entity.url == NESTED_LITERAL_ANCHOR -> {}
+
+                        labelIsBlank(entity.labelStart) -> {
+                            // A blank label means nothing was emitted after its [ —
+                            // anything opened inside would have output a marker or a
+                            // literal tag — so this anchor is the latest open entry and
+                            // rewinding the bracket discards only whitespace
+                            // (labelIsBlank covers the whitespace-only label too)
+                            sb.setLength(entity.openBracket)
+                            sb.append(escapeText(entity.url))
+                        }
+
+                        else -> {
+                            closers += "](${escapeUrl(entity.url)})"
+                        }
+                    }
+                }
             }
-        return if (openLinkUrls.isEmpty() && openEmphasis.isEmpty()) {
+        }
+        return if (closers.isEmpty()) {
             sb.toString()
         } else {
-            sb.toString().trimEnd() +
-                openEmphasis.reversed().joinToString("") { it } +
-                openLinkUrls.joinToString("") { anchor ->
-                    if (anchor.url.isEmpty() || anchor.url == NESTED_LITERAL_ANCHOR) "" else "](${escapeUrl(anchor.url)})"
-                }
+            sb.toString().trimEnd() + closers.joinToString("")
         }
     }
 
@@ -274,13 +313,13 @@ internal class Visitor(
             appendPlainText(sb, emphasis)
             return
         }
-        val baseDepth = openEmphasis.size
-        openEmphasis.addLast("_")
+        val seq = nextSeq++
+        openEntities.addLast(OpenEmphasisMarker("_", html = false, seq))
         sb.append('_')
         visitChildren(emphasis)
-        closeNestedTo(baseDepth + 1)
+        completeOpenedAfter(seq)
         sb.append('_')
-        openEmphasis.removeLast()
+        openEntities.removeLast()
         exitInline()
     }
 
@@ -289,13 +328,13 @@ internal class Visitor(
             appendPlainText(sb, strongEmphasis)
             return
         }
-        val baseDepth = openEmphasis.size
-        openEmphasis.addLast("*")
+        val seq = nextSeq++
+        openEntities.addLast(OpenEmphasisMarker("*", html = false, seq))
         sb.append('*')
         visitChildren(strongEmphasis)
-        closeNestedTo(baseDepth + 1)
+        completeOpenedAfter(seq)
         sb.append('*')
-        openEmphasis.removeLast()
+        openEntities.removeLast()
         exitInline()
     }
 
@@ -306,13 +345,13 @@ internal class Visitor(
                     appendPlainText(sb, customNode)
                     return
                 }
-                val baseDepth = openEmphasis.size
-                openEmphasis.addLast("~")
+                val seq = nextSeq++
+                openEntities.addLast(OpenEmphasisMarker("~", html = false, seq))
                 sb.append('~')
                 visitChildren(customNode)
-                closeNestedTo(baseDepth + 1)
+                completeOpenedAfter(seq)
                 sb.append('~')
-                openEmphasis.removeLast()
+                openEntities.removeLast()
                 exitInline()
             }
 
@@ -323,20 +362,41 @@ internal class Visitor(
     }
 
     /**
-     * Completes unclosed HTML emphasis down to [targetDepth] on the emphasis stack (the
-     * caller's own marker, when it pushed one, stays). Runs when an inline container —
-     * emphasis, strikethrough, a Markdown link or image label — closes with HTML tags
-     * still open inside it (missing closing tags, or upstream parsing defects). Markers
-     * are located by stack depth — same-kind markers can overlap (e.g. _ inside _), and
-     * matching by marker value would misalign.
+     * Completes unclosed entities opened strictly after [seq] — latest-opened first —
+     * before the entry owning [seq] closes itself. Runs when an inline container —
+     * emphasis, strikethrough, a Markdown link or image label — closes with HTML
+     * entities still open inside it (missing closing tags, or upstream parsing defects).
+     * An anchor opened inside completes exactly like a matched `</a>` would: a real one
+     * emits its ](url) — or rewinds, when its label rendered no visible text, the same
+     * empty-label trade visit(link) makes — while sentinels and href-less anchors close
+     * silently. Completing an unclosed HTML code entity ends its scope: Text after the
+     * boundary escapes as plain text again.
      */
-    private fun closeNestedTo(targetDepth: Int) {
-        while (openEmphasis.size > targetDepth) {
-            val nested = openEmphasis.removeLastOrNull() ?: break
-            // Completing an unclosed HTML code entity ends its scope: Text after the
-            // boundary escapes as plain text again
-            if (nested == "`") htmlCodeDepth--
-            sb.append(nested)
+    private fun completeOpenedAfter(seq: Int) {
+        while (openEntities.isNotEmpty() && openEntities.last().seq > seq) {
+            when (val entity = openEntities.removeLast()) {
+                is OpenEmphasisMarker -> {
+                    if (entity.marker == "`") htmlCodeDepth--
+                    sb.append(entity.marker)
+                }
+
+                is OpenAnchor -> {
+                    when {
+                        entity.url.isEmpty() || entity.url == NESTED_LITERAL_ANCHOR -> {}
+
+                        labelIsBlank(entity.labelStart) -> {
+                            // See output(): a blank label guarantees this anchor is the
+                            // latest open entry, so the rewind discards only whitespace
+                            sb.setLength(entity.openBracket)
+                            sb.append(escapeText(entity.url))
+                        }
+
+                        else -> {
+                            sb.append("](").append(escapeUrl(entity.url)).append(')')
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -368,7 +428,7 @@ internal class Visitor(
             visitChildren(link)
             return
         }
-        val emphasisDepth = openEmphasis.size
+        val entrySeq = nextSeq++
         val openBracket = sb.length
         sb.append('[')
         openMarkdownLinks++
@@ -380,7 +440,7 @@ internal class Visitor(
         // comment) degrades to the bare escaped URL — the same blank test output() applies
         // to anchors left unclosed at output time. Rewinding is safe — inside a label every
         // pushed entity marker is accompanied by output, so a blank label left nothing
-        // open on the stacks
+        // open on the stack
         if (labelIsBlank(labelStart)) {
             sb.setLength(openBracket)
             sb.append(escapeText(destination))
@@ -388,14 +448,10 @@ internal class Visitor(
         }
         // Whatever HTML opened inside the label closes before the link does: left open it
         // would cross the ](url) boundary into invalid entities, or leak htmlCodeDepth
-        // escaping onto the text after the link
-        closeNestedTo(emphasisDepth)
-        // An unclosed anchor inside the label leaves a nested-literal sentinel behind;
-        // never popped, it would degrade every following link in the document to plain
-        // text. Its open tag already rendered literally, so dropping the sentinel here is
-        // lossless (the guard above emptied the stack on entry, and only sentinels can be
-        // pushed inside a label)
-        while (openLinkUrls.isNotEmpty()) openLinkUrls.removeLast()
+        // escaping onto the text after the link. Anchors opened inside are all
+        // literalized sentinels (the entry guard saw to that), so they close silently
+        // here instead of lingering to degrade later links
+        completeOpenedAfter(entrySeq)
         sb.append("](").append(escapeUrl(destination)).append(')')
     }
 
@@ -410,7 +466,7 @@ internal class Visitor(
             visitChildren(image)
             return
         }
-        val emphasisDepth = openEmphasis.size
+        val entrySeq = nextSeq++
         val openBracket = sb.length
         sb.append('[')
         openMarkdownLinks++
@@ -424,8 +480,7 @@ internal class Visitor(
             return
         }
         // See visit(link): HTML opened inside the alt text closes before the link does
-        closeNestedTo(emphasisDepth)
-        while (openLinkUrls.isNotEmpty()) openLinkUrls.removeLast()
+        completeOpenedAfter(entrySeq)
         sb.append("](").append(escapeUrl(destination)).append(')')
     }
 
@@ -453,10 +508,14 @@ internal class Visitor(
     }
 
     /**
-     * A closing tag emits its entity marker only when it matches the open tag on top of
-     * the stack, otherwise it is escaped literally — an orphan `</b>` emitting a bare `*`
-     * would create an unpaired entity Telegram rejects. Anchors behave the same; an `<a>`
-     * without href pushes the empty sentinel and its closing only pops, emitting no link.
+     * A closing tag emits its entity marker only when it matches the innermost open HTML
+     * entity, otherwise it is escaped literally — an orphan `</b>` emitting a bare `*`
+     * would create an unpaired entity Telegram rejects. Innermost-only matching also
+     * keeps a closer from crossing a still-open anchor (or from popping a Markdown
+     * emphasis' own stack entry, which used to crash on inputs like `_x</i>_`); the
+     * crossed entity completes later instead, latest-opened first. Anchors behave the
+     * same; an `<a>` without href pushes the empty sentinel and its closing only pops,
+     * emitting no link.
      */
     private fun renderHtmlInline(literal: String): String {
         val tag = literal.trim()
@@ -480,14 +539,15 @@ internal class Visitor(
             }
         if (parts.selfClosing) return escapeText(tag)
         if (parts.closing) {
-            if (openEmphasis.lastOrNull() == marker) {
-                openEmphasis.removeLastOrNull()
+            val top = openEntities.lastOrNull()
+            if (top is OpenEmphasisMarker && top.html && top.marker == marker) {
+                openEntities.removeLast()
                 if (marker == "`") htmlCodeDepth--
                 return marker
             }
             return escapeText(tag)
         }
-        openEmphasis.addLast(marker)
+        openEntities.addLast(OpenEmphasisMarker(marker, html = true, nextSeq++))
         if (marker == "`") htmlCodeDepth++
         return marker
     }
@@ -500,29 +560,34 @@ internal class Visitor(
     ): String {
         if (selfClosing) return escapeText(tag)
         if (closing) {
-            val anchor = openLinkUrls.removeLastOrNull() ?: return escapeText(tag)
-            if (anchor.url == NESTED_LITERAL_ANCHOR) return escapeText(tag)
+            // See renderHtmlInline: </a> matches only the innermost open entity — an
+            // anchor closed while something opened inside it is still open goes literal
+            // rather than emitting a crossed ](url)
+            val top = openEntities.lastOrNull()
+            if (top !is OpenAnchor) return escapeText(tag)
+            openEntities.removeLast()
+            if (top.url == NESTED_LITERAL_ANCHOR) return escapeText(tag)
             // "" is the href-less open tag: pop the stack, emit no link
-            if (anchor.url.isEmpty()) return ""
+            if (top.url.isEmpty()) return ""
             // Telegram rejects link entities with empty text: a label that rendered no
             // visible text (whitespace included) degrades to the bare escaped URL,
             // rewinding the bracket — safe for the same reason as in visit(link): a blank
             // label left nothing open
-            if (labelIsBlank(anchor.labelStart)) {
-                sb.setLength(anchor.openBracket)
-                return escapeText(anchor.url)
+            if (labelIsBlank(top.labelStart)) {
+                sb.setLength(top.openBracket)
+                return escapeText(top.url)
             }
-            return "](${escapeUrl(anchor.url)})"
+            return "](${escapeUrl(top.url)})"
         }
         // Telegram links cannot nest: while any link entity is open (Markdown link, image
         // link or an outer anchor), an inner anchor and its closing tag are escaped literally
         if (linkEntityOpen()) {
-            openLinkUrls.addLast(OpenAnchor(NESTED_LITERAL_ANCHOR, sb.length, sb.length))
+            openEntities.addLast(OpenAnchor(NESTED_LITERAL_ANCHOR, sb.length, sb.length, nextSeq++))
             return escapeText(tag)
         }
         // href="" is treated like a missing href: the empty URL degrades to plain text
         val href = extractHref(attrs)
-        openLinkUrls.addLast(OpenAnchor(href.orEmpty(), sb.length, sb.length + 1))
+        openEntities.addLast(OpenAnchor(href.orEmpty(), sb.length, sb.length + 1, nextSeq++))
         return if (href == null) "" else "["
     }
 
@@ -626,7 +691,7 @@ internal class Visitor(
         return Char(0xD800 + (offset shr 10)).toString() + Char(0xDC00 + (offset and 0x3FF))
     }
 
-    private fun linkEntityOpen(): Boolean = openLinkUrls.isNotEmpty() || openMarkdownLinks > 0
+    private fun linkEntityOpen(): Boolean = openEntities.any { it is OpenAnchor } || openMarkdownLinks > 0
 
     // Whether a link label region starting at [labelStart] renders no visible text: empty
     // or whitespace only. Every caller checks it immediately after the label's children,
