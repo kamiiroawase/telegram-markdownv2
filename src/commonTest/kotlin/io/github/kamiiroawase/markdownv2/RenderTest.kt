@@ -641,7 +641,9 @@ class RenderTest {
 
     @Test
     fun orderedListWithNestedBullet() {
-        assertEquals("1\\. a\n\n    • b", MarkdownV2.render("1. a\n   - b"))
+        // The continuation indent matches the marker's display width: "1\. " renders
+        // three columns wide, so the nested bullet indents three spaces
+        assertEquals("1\\. a\n\n   • b", MarkdownV2.render("1. a\n   - b"))
     }
 
     @Test

@@ -28,6 +28,10 @@ All notable changes to this project are documented here. The format follows
   now skips it exactly as the truncation and chunking walks always have (the marker is
   still consumed, so ordered numbering keeps the source numbers) — render, truncation and
   chunking agree on which items exist
+- Ordered-list continuation lines now indent to the rendered marker width: the indent
+  used the marker's escaped char count, one column wider than the `N\.` marker displays
+  (`1\. first` rendered a 4-space continuation under the 3-column `1. ` marker, `10\. `
+  likewise) — bullet lists were unaffected
 
 ## [1.3.0] — 2026-10-03
 

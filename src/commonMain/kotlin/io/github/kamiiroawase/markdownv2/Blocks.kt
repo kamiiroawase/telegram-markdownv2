@@ -96,12 +96,15 @@ internal fun forEachListItem(
     }
 }
 
-// Blank lines stay bare — indenting them would only add trailing whitespace
+// Blank lines stay bare — indenting them would only add trailing whitespace. The indent
+// matches the marker's display width, not its char count: the ordered marker's escaped
+// dot ("N\\.") renders one column narrower than it counts, and indenting by the char
+// count pushed continuations one column right of the rendered marker
 internal fun applyPrefix(
     prefix: String,
     body: String,
 ): String {
-    val indent = " ".repeat(prefix.length)
+    val indent = " ".repeat(prefix.count { it != '\\' })
     return body
         .lines()
         .mapIndexed { index, line ->

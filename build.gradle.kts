@@ -44,13 +44,18 @@ abstract class GitTagVersionSource : ValueSource<String, ValueSourceParameters.N
             } catch (_: Exception) {
                 return null
             }
+        // Drain the output before waiting: a child whose output fills the pipe buffer
+        // blocks on write and would deadlock a wait-then-read (git describe emits one
+        // short line, but the shape stays correct whatever the child prints)
+        val output =
+            process
+                .inputStream
+                .bufferedReader()
+                .use { it.readText() }
         // Without a tag at HEAD git describe exits non-zero and writes the error into the
         // output stream — not usable as a version
         if (process.waitFor() != 0) return null
-        return process
-            .inputStream
-            .bufferedReader()
-            .readText()
+        return output
             .trim()
             .removePrefix("v")
             .ifEmpty { null }
