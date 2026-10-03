@@ -112,6 +112,11 @@ private fun shrinkRenderedCode(
     // The rendered output of the four block kinds above (fenced/indented code blocks,
     // tables, HTML blocks) is always "```\n…\n```": the first and last lines are fences
     // by construction, no further validation needed
+    // Defensive: an empty render (comment-only HtmlBlock, row-less TableBlock) cannot
+    // reach shrink — renderBlocks shrinks only blocks that did not fit, and empty blocks
+    // always fit — but the invariant lives in the caller; keep this function safe on its
+    // own ("".lines() is a single line, the subList below needs at least two)
+    if (rendered.isEmpty()) return ""
     val lines = rendered.lines()
     val open = lines.first()
     val close = lines.last()

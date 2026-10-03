@@ -1705,6 +1705,14 @@ class MarkdownV2Test {
     }
 
     @Test
+    fun renderChunkedEmptyRenderingBlocksYieldNoChunksViaAst() {
+        val htmlComment = HtmlBlock()
+        htmlComment.literal = "<!-- hidden -->"
+        assertEquals(emptyList(), MarkdownV2.renderChunked(htmlComment, 30))
+        assertEquals(emptyList(), MarkdownV2.renderChunked(TableBlock(), 30))
+    }
+
+    @Test
     fun renderChunkedTableDegradesToFencedChunks() {
         val chunks =
             MarkdownV2.renderChunked(

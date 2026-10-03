@@ -115,6 +115,10 @@ private fun chunkRenderedCode(
     rendered: String,
     maxLength: Int,
 ): List<String> {
+    // The four fence-wrapped kinds render to nothing when their content drops out
+    // entirely (comment-only or empty HtmlBlock, row-less TableBlock): nothing to chunk —
+    // "".lines() is a single line and the subList below needs at least two
+    if (rendered.isEmpty()) return emptyList()
     val lines = rendered.lines()
     val open = lines.first()
     val close = lines.last()
