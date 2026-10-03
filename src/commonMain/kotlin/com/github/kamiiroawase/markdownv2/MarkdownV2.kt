@@ -111,6 +111,20 @@ public object MarkdownV2 {
     public fun escape(text: String): String = escapeText(text)
 
     /**
+     * Converts [rendered] MarkdownV2 — a [render] result or one [renderChunked] piece — back
+     * into the plain text Telegram would display: the last-resort fallback when the Bot API
+     * rejects a message (400 can't parse entities); send the result without parse_mode.
+     *
+     * Emphasis markers vanish (`*bold*`, `_italic_`, `__underline__`, `~strike~`), code spans
+     * and fenced blocks keep their content, quote `>` prefixes drop, escapes resolve per
+     * context, and `[label](url)` becomes `label (url)` so no link target is lost. The input
+     * is expected to be this library's output; arbitrary strings degrade best-effort but
+     * losslessly — unterminated entities keep their content and never-closed markers return
+     * literally — and the call never throws.
+     */
+    public fun toPlainText(rendered: String): String = deformat(rendered)
+
+    /**
      * Converts [content] from CommonMark to Telegram MarkdownV2, splitting over-length
      * output into a list of chunks of at most [maxLength] characters each — send them as
      * consecutive messages to deliver arbitrarily long content without losing anything.

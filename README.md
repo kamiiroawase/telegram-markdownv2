@@ -19,6 +19,7 @@ Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转�
 - 不支持的构造自动降级：表格渲染为对齐的围栏代码块（CJK/emoji 按两倍显示宽度对齐，组合符、变体选择符等零宽字符按 0 宽计；单元格默认按 32 个显示宽度截断，宽度度量与截断上限可经 `RenderOptions` 自定义）、HTML 块转代码块、行内 HTML 映射为实体（`<b>` → `*`、`<br>` → 换行、`<a href>` → 链接；HTML code 类标签 `<code>`、`<kbd>` 等的内容按代码实体规则转义，仅转义反引号与反斜杠，内嵌的 Markdown 行内代码同样转义其反引号以免实体边界错乱）或按字面转义——未配对的闭合、自闭合与嵌套标签一律按字面转义，空 URL 链接退化为纯文本，空链接文本 / 图片替代文本 / 空锚点退化为转义后的裸 URL（Telegram 拒绝空文本链接实体），链接内再嵌套的图片/链接/锚点降级为纯文本或字面标签（Telegram 链接实体不能嵌套），链接标签内未闭合的 HTML 强调在链接闭合前补全、残留的嵌套锚点不会吞掉后续链接；`href` 属性名不区分大小写，属性值支持双引号 / 单引号 / 无引号写法（引号值内的 `>` 与 `/` 按 HTML5 计入值本身，不会提前闭合标签或误判为自闭合；无引号值末尾的 `/` 同理计入值本身），href 中的 HTML 实体（`&amp;`、`&#38;`、`&#x26;` 等）先解码再作链接，无法识别的引用（如 `&#0;`，其 NUL 不是合法消息文本）保持字面，其他属性值内部的 `href=` 字样不会被误认
 - 可选截断（`maxLength` 传正数时启用，默认 0 不截断），截断后仍是合法 MarkdownV2：代码围栏保持闭合、未闭合的强调 / 链接自动补全、引用与列表前缀逐行保留、绝不劈开转义序列和代理对；结构化内容完全放不下时回退为转义纯文本；超过 100 层的引用 / 列表 / 行内强调降级为平铺纯文本，病态嵌套输入不会耗尽调用栈
 - 超长内容无损分片（`renderChunked`）：把渲染结果切成多段，每段不超过上限且各自是合法 MarkdownV2——块整块装填、超限块沿代码行 / 列表项 / 引用子块 / 段落行 / 行内节点的自然接缝拆分（标题 `#` 前缀与列表标记黏附于首个分片，放不下时宁可丢弃标记也不产出裸标记片）、接缝仍放不下时退化为转义纯文本（文本无损），按顺序发送即可还原完整内容
+- 拒收兜底（`toPlainText`）：把本库渲染出的 MarkdownV2（整段或分片）还原为 Telegram 显示所见的纯文本——实体标记去除、代码内容保留、引用前缀剥除、转义按上下文解开，`[label](url)` 变为 `label (url)` 以保住链接目标；任意输入降级为尽力而为且不丢字符，永不抛异常
 
 支持平台：Android（minSdk 23）、JVM 11+、JS、Wasm、Linux（x64/Arm64）、macOS（Arm64）、Windows（mingwX64）、iOS（设备与模拟器）。
 
@@ -93,7 +94,7 @@ val clipped100 = MarkdownV2.render(longModelReply, 100)                        /
 
 > ⚠️ **JS/Wasm 平台注意**：输入含 HTML 块、`<a href>` 锚点或以 HTML 标签开头时，`render`/`renderChunked` 会在解析阶段直接抛异常（上游缺陷，见「常见坑」第一条）；这两个平台的调用请用 try/catch 包裹、捕获后把原文按纯文本发送兜底，或预先滤除 HTML。段落中间的行内标签（`<b>`、`<br>` 等）不受影响。
 
-编辑消息重发前先 render 一次；若渲染结果仍被 Telegram 拒收（理论上不应发生），把原文按纯文本发送是最后兜底。
+编辑消息重发前先 render 一次；若渲染结果仍被 Telegram 拒收（理论上不应发生），用 `MarkdownV2.toPlainText` 把已渲染文本还原成纯文本重发是最后兜底（见 renderChunked 一节）。
 
 ### 进阶：手动拼 MarkdownV2 时转义动态文本（escape）
 
@@ -119,6 +120,18 @@ parts.forEach { part -> sendMessage(chatId, part) }  // 依次发送即还原完
 ```
 
 块整块装填；放不下的块沿自然接缝拆分（代码行、列表项、引用子块、段落行，再到行内节点），列表编号跨段连续；单个接缝仍超过上限时退化为转义纯文本——结构降级、文字一个不丢。`maxLength` 传 1 或更小（分片至少要装得下一个转义字符，占两位）时返回整段渲染的单元素列表，内容渲染为空时返回空列表。
+
+某一段被 Bot API 拒收（理论上不应发生）时，用 `MarkdownV2.toPlainText` 把这段已渲染文本还原成 Telegram 显示所见的纯文本、不带 `parse_mode` 重发即可兜底——实体标记去除、代码内容保留、引用前缀剥除、转义按上下文解开，`[label](url)` 变为 `label (url)` 以保住链接目标：
+
+```kotlin
+for (part in parts) {
+    try {
+        sendMessage(chatId, part)                          // parse_mode = MarkdownV2
+    } catch (e: TelegramApiRequestException) {             // 400 can't parse entities 等
+        sendMessage(chatId, MarkdownV2.toPlainText(part))  // 兜底：不带 parse_mode 的纯文本
+    }
+}
+```
 
 ### 进阶：自定义表格降级（RenderOptions）
 
@@ -185,6 +198,7 @@ src/
 │   ├── Visitor.kt         AST → MarkdownV2 的全文渲染（行内 HTML 映射、未闭合实体补全）
 │   ├── Truncation.kt      超长内容的结构化截断
 │   ├── Chunking.kt        超长内容的无损分片（renderChunked）
+│   ├── Deformat.kt        已渲染 MarkdownV2 的纯文本还原（toPlainText 拒收兜底）
 │   ├── Escape.kt          转义规则与原子单元截断（转义序列 / 代理对）
 │   ├── PlainText.kt       迭代式纯文本提取（表格单元格与各兜底路径共用）
 │   ├── RenderOptions.kt   渲染自定义项（表格单元格截断上限、字符显示宽度度量）
@@ -196,7 +210,7 @@ src/
 
 ### 构建与测试
 
-229 个行为级测试（输入/输出断言，与 AST 无关），覆盖全部转义规则、每种块的渲染、截断与分片路径、代理对与转义边界（含 10 万级恶意输入的线性扫描回归测试——行内 HTML 标签解析为手写单遍扫描，全库不使用正则，从设计上不存在回溯与栈溢出风险）。注意：其中 35 个依赖 HTML 解析的测试在 JS/Wasm 上因上游 commonmark-kotlin 的解析缺陷而空跑（静默通过，见测试类 KDoc 与 `htmlParsingSupported`），待上游修复后自动生效。CI 中：JVM、Android 单元测试与 JS、Wasm（Node）、Linux x64 原生测试在 ubuntu job 执行；iOS 模拟器与 macOS Arm64 测试在 macOS job 执行；Windows（mingwX64）测试在 windows job 执行；Linux Arm64 仅交叉编译验证——Kotlin/Native 官方不支持 Linux ARM64 作为构建/测试宿主（见 [宿主支持表](https://kotlinlang.org/docs/native-target-support.html)），上游支持后可补宿主 job：
+242 个行为级测试（输入/输出断言，与 AST 无关），覆盖全部转义规则、每种块的渲染、截断与分片路径、代理对与转义边界（含 10 万级恶意输入的线性扫描回归测试——行内 HTML 标签解析为手写单遍扫描，全库不使用正则，从设计上不存在回溯与栈溢出风险）。注意：其中 35 个依赖 HTML 解析的测试在 JS/Wasm 上因上游 commonmark-kotlin 的解析缺陷而空跑（静默通过，见测试类 KDoc 与 `htmlParsingSupported`），待上游修复后自动生效。CI 中：JVM、Android 单元测试与 JS、Wasm（Node）、Linux x64 原生测试在 ubuntu job 执行；iOS 模拟器与 macOS Arm64 测试在 macOS job 执行；Windows（mingwX64）测试在 windows job 执行；Linux Arm64 仅交叉编译验证——Kotlin/Native 官方不支持 Linux ARM64 作为构建/测试宿主（见 [宿主支持表](https://kotlinlang.org/docs/native-target-support.html)），上游支持后可补宿主 job：
 
 ```bash
 ./gradlew build             # 编译全部 target + 宿主可执行的测试 + 格式检查

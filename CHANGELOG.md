@@ -39,6 +39,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `MarkdownV2.toPlainText(rendered)`: de-formats this library's rendered MarkdownV2 (a
+  full render or one renderChunked piece) into the text Telegram would display — the
+  last-resort fallback for a message the Bot API rejects, sent without parse_mode.
+  Entity markers drop, code content stays, quote prefixes strip, escapes resolve per
+  context, and `[label](url)` becomes `label (url)` so no link target is lost; malformed
+  input degrades best-effort without losing characters and the call never throws
 - Platform warning: Kotlin/JS and Kotlin/Wasm throw on inputs containing HTML blocks,
   `<a href>` anchors or documents opening with an HTML tag (upstream parser defect) —
   documented on the public API and in both READMEs with the try/catch plain-text fallback

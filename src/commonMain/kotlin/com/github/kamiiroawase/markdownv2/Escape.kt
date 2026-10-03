@@ -1,8 +1,9 @@
 package com.github.kamiiroawase.markdownv2
 
 // The 18 special characters Telegram officially requires to escape, plus the backslash
-// itself (a literal backslash must be written as \\)
-private val SPECIAL_CHARS = "_*[]()~`>#+-=|{}.!\\".toSet()
+// itself (a literal backslash must be written as \\). Shared with Deformat.kt, whose
+// text-state unescaping mirrors this set
+internal val SPECIAL_CHARS = "_*[]()~`>#+-=|{}.!\\".toSet()
 
 /** Escapes all MarkdownV2 special characters in [text] so the result renders as literal text. */
 internal fun escapeText(text: String): String =

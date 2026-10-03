@@ -34,6 +34,7 @@ final object com.github.kamiiroawase.markdownv2/MarkdownV2 { // com.github.kamii
     final fun render(org.commonmark.node/Node, kotlin/Int = ..., com.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin/String // com.github.kamiiroawase.markdownv2/MarkdownV2.render|render(org.commonmark.node.Node;kotlin.Int;com.github.kamiiroawase.markdownv2.RenderOptions){}[0]
     final fun renderChunked(kotlin/String, kotlin/Int = ..., org.commonmark.parser/Parser = ..., com.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin.collections/List<kotlin/String> // com.github.kamiiroawase.markdownv2/MarkdownV2.renderChunked|renderChunked(kotlin.String;kotlin.Int;org.commonmark.parser.Parser;com.github.kamiiroawase.markdownv2.RenderOptions){}[0]
     final fun renderChunked(org.commonmark.node/Node, kotlin/Int = ..., com.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin.collections/List<kotlin/String> // com.github.kamiiroawase.markdownv2/MarkdownV2.renderChunked|renderChunked(org.commonmark.node.Node;kotlin.Int;com.github.kamiiroawase.markdownv2.RenderOptions){}[0]
+    final fun toPlainText(kotlin/String): kotlin/String // com.github.kamiiroawase.markdownv2/MarkdownV2.toPlainText|toPlainText(kotlin.String){}[0]
 }
 
 final fun com.github.kamiiroawase.markdownv2/defaultDisplayWidth(kotlin/Int): kotlin/Int // com.github.kamiiroawase.markdownv2/defaultDisplayWidth|defaultDisplayWidth(kotlin.Int){}[0]

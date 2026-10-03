@@ -12,6 +12,7 @@ public final class com/github/kamiiroawase/markdownv2/MarkdownV2 {
 	public final fun renderChunked (Lorg/commonmark/node/Node;ILcom/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
 	public static synthetic fun renderChunked$default (Lcom/github/kamiiroawase/markdownv2/MarkdownV2;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lcom/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
 	public static synthetic fun renderChunked$default (Lcom/github/kamiiroawase/markdownv2/MarkdownV2;Lorg/commonmark/node/Node;ILcom/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+	public final fun toPlainText (Ljava/lang/String;)Ljava/lang/String;
 }
 
 public final class com/github/kamiiroawase/markdownv2/RenderOptions {

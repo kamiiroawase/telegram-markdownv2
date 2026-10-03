@@ -19,6 +19,7 @@ In one sentence: Markdown in, Telegram-renderable text out. Hand any CommonMark/
 - Unsupported constructs degrade gracefully: tables render as aligned fenced code blocks (CJK/emoji aligned at double display width, combining marks and variation selectors cost zero columns; cells truncated at 32 display width by default, with both the width measure and the cap customizable via `RenderOptions`), HTML blocks become code blocks, inline HTML maps to entities (`<b>` → `*`, `<br>` → newline, `<a href>` → link; content of HTML code-family tags — `<code>`, `<kbd>`, … — escapes with code-entity rules, escaping only the backtick and backslash, and Markdown code spans nested inside escape their backticks too, keeping entity boundaries intact) or is escaped literally — unmatched closing, self-closing and nested tags are always escaped literally, empty-URL links degrade to plain text, empty link text, image alt text or an empty anchor degrades to the bare escaped URL (Telegram rejects empty-text link entities), and images/links/anchors nested inside a link degrade to plain text or literal tags (Telegram link entities cannot nest), HTML emphasis left unclosed inside a link label completes before the link closes, and a leftover nested anchor never swallows the links that follow; the `href` attribute name is case-insensitive, its value may be double-quoted, single-quoted or unquoted (per HTML5 a `>` or `/` inside a quoted value belongs to the value — it never closes the tag early or reads as self-closing — and a trailing `/` in an unquoted value belongs to the value too, never mistaken for a self-closing tag), HTML entities in hrefs (`&amp;`, `&#38;`, `&#x26;`, …) are decoded before linking, unrecognized references (e.g. `&#0;`, whose NUL is not valid message text) stay literal, and an `href=` inside another attribute's value is never mistaken for the real attribute
 - Optional truncation (enabled by a positive `maxLength`; the default 0 renders in full) stays valid MarkdownV2: code fences remain closed, unclosed emphasis / links are auto-completed, quote and list prefixes are preserved line by line, escape sequences and surrogate pairs are never split; falls back to escaped plain text when no structural content fits; quotes / lists / inline emphasis nested deeper than 100 levels flatten to plain text, so pathological nesting never exhausts the call stack
 - Lossless chunking of over-length content (`renderChunked`): the render is split into pieces of at most the limit, each independently valid MarkdownV2 — blocks are packed whole, oversized blocks split along their natural seams (code lines, list items, quote children, paragraph lines, then inline nodes; heading `#` prefixes and list markers glue to the first piece and are dropped outright when the limit cannot even fit marker plus text), and a seam still exceeding the limit flattens to escaped plain text (text lossless); send the pieces in order to deliver the full content
+- Rejection fallback (`toPlainText`): de-formats this library's rendered MarkdownV2 (a full render or one chunk) into the text Telegram would display — entity markers drop, code content stays, quote prefixes strip, escapes resolve per context, and `[label](url)` becomes `label (url)` so no link target is lost; arbitrary input degrades best-effort without losing characters, and the call never throws
 
 Supported platforms: Android (minSdk 23), JVM 11+, JS, Wasm, Linux (x64/Arm64), macOS (Arm64), Windows (mingwX64), iOS (device and simulator).
 
@@ -93,7 +94,7 @@ val clipped100 = MarkdownV2.render(longModelReply, 100)                        /
 
 > ⚠️ **Heads-up for JS/Wasm**: when the input contains an HTML block, an `<a href>` anchor, or opens with an HTML tag, `render`/`renderChunked` throws at parse time on these platforms (upstream defect, see the first bullet under Known Pitfalls). Wrap calls in try/catch there — on failure, send the original text as plain text — or pre-strip HTML. Mid-paragraph inline tags (`<b>`, `<br>`, …) are not affected.
 
-Render once before editing and re-sending a message; if the result is still rejected by Telegram (theoretically it should not be), sending the original text as plain text is the last resort.
+Render once before editing and re-sending a message; if the result is still rejected by Telegram (theoretically it should not be), de-formatted via `MarkdownV2.toPlainText` and re-sent as plain text is the last resort (see the renderChunked section).
 
 ### Going further: escaping dynamic text when hand-building MarkdownV2 (escape)
 
@@ -119,6 +120,18 @@ parts.forEach { part -> sendMessage(chatId, part) }  // delivering in order repr
 ```
 
 Blocks are packed whole; a block that does not fit splits along its natural seams (code lines, list items, quote children, paragraph lines, then inline nodes) with list numbering continuing across pieces; a seam still exceeding the limit flattens to escaped plain text — structure degrades, not a single character is lost. A `maxLength` of 1 or less returns the full render as a single-element list (a chunk needs room for at least one escaped character — two chars); content that renders to nothing yields an empty list.
+
+When the Bot API rejects a piece (theoretically it should not), `MarkdownV2.toPlainText` de-formats that rendered piece back into the text Telegram would display and you re-send it without parse_mode — entity markers drop, code content stays, quote prefixes strip, escapes resolve per context, and `[label](url)` becomes `label (url)` so no link target is lost:
+
+```kotlin
+for (part in parts) {
+    try {
+        sendMessage(chatId, part)                          // parse_mode = MarkdownV2
+    } catch (e: TelegramApiRequestException) {             // 400 can't parse entities &c.
+        sendMessage(chatId, MarkdownV2.toPlainText(part))  // fallback: plain text, no parse_mode
+    }
+}
+```
 
 ### Going further: custom table degradation (RenderOptions)
 
@@ -185,6 +198,7 @@ src/
 │   ├── Visitor.kt         full AST → MarkdownV2 rendering (inline-HTML mapping, entity completion)
 │   ├── Truncation.kt      structure-preserving truncation of over-length content
 │   ├── Chunking.kt        lossless chunking of over-length content (renderChunked)
+│   ├── Deformat.kt        de-formatting rendered MarkdownV2 back to plain text (toPlainText fallback)
 │   ├── Escape.kt          escaping rules and atomic-unit truncation (escape sequences / surrogate pairs)
 │   ├── PlainText.kt       iterative plain-text extraction (table cells and fallback paths)
 │   ├── RenderOptions.kt   rendering customization (table cell cap, display-width measure)
@@ -196,7 +210,7 @@ src/
 
 ### Build and test
 
-229 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — inline-HTML tags parse via a hand-written single-pass scanner, the library uses no regex at all, so catastrophic backtracking and engine stack overflow are impossible by construction). Caveat: 35 of them depend on HTML parsing and silently no-op on JS/Wasm due to an upstream commonmark-kotlin parser defect (see the test class KDoc and `htmlParsingSupported`); they activate automatically once the upstream fix lands. In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows (mingwX64) tests run in a windows job; Linux Arm64 stays cross-compile only — Kotlin/Native does not support Linux ARM64 as a build/test host (see the [host support table](https://kotlinlang.org/docs/native-target-support.html)), so a host job can follow once upstream supports it:
+242 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — inline-HTML tags parse via a hand-written single-pass scanner, the library uses no regex at all, so catastrophic backtracking and engine stack overflow are impossible by construction). Caveat: 35 of them depend on HTML parsing and silently no-op on JS/Wasm due to an upstream commonmark-kotlin parser defect (see the test class KDoc and `htmlParsingSupported`); they activate automatically once the upstream fix lands. In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows (mingwX64) tests run in a windows job; Linux Arm64 stays cross-compile only — Kotlin/Native does not support Linux ARM64 as a build/test host (see the [host support table](https://kotlinlang.org/docs/native-target-support.html)), so a host job can follow once upstream supports it:
 
 ```bash
 ./gradlew build             # compile all targets + host-runnable tests + format check
