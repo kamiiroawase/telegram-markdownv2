@@ -118,14 +118,15 @@ public object MarkdownV2 {
      * into the plain text Telegram would display: the last-resort fallback when the Bot API
      * rejects a message (400 can't parse entities); send the result without parse_mode.
      *
-     * Emphasis markers vanish (`*bold*`, `_italic_`, `__underline__`, `~strike~`), code spans
-     * and fenced blocks keep their content — a code block inside a quote de-formats to its
-     * content with the per-line quote markers stripped — quote `>` prefixes drop, escapes
-     * resolve per context, and `[label](url)` becomes `label (url)` so no link target is
-     * lost (an empty label or URL degrades to the non-empty piece). The input
-     * is expected to be this library's output; arbitrary strings degrade best-effort but
-     * losslessly — unterminated entities keep their content and never-closed markers return
-     * literally — and the call never throws.
+     * Emphasis markers vanish (`*bold*`, `_italic_`, `__underline__`, `~strike~`) — runs of
+     * glued markers included, so `_a__b_` (the render of two italics side by side) resolves
+     * to plain `ab` — code spans and fenced blocks keep their content — a code block inside
+     * a quote de-formats to its content with the per-line quote markers stripped — quote `>`
+     * prefixes drop, escapes resolve per context, and `[label](url)` becomes `label (url)`
+     * so no link target is lost (an empty label or URL degrades to the non-empty piece).
+     * The input is expected to be this library's output; arbitrary strings degrade
+     * best-effort but losslessly — unterminated entities keep their content and never-closed
+     * markers return literally — and the call never throws.
      */
     public fun toPlainText(rendered: String): String = deformat(rendered)
 

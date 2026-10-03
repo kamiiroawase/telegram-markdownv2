@@ -108,9 +108,6 @@ private fun shrinkRenderedCode(
         // Both newlines count toward the budget: the one joining this line and the one
         // before the closing fence (pre-fix only the latter did, and the result could
         // overrun the budget by one character)
-        // Both newlines count toward the budget: the one joining this line and the one
-        // before the closing fence (pre-fix only the latter did, and the result could
-        // overrun the budget by one character)
         if (sb.length + 1 + line.length + 1 + close.length > budget) break
         sb.append('\n').append(line)
     }
@@ -233,7 +230,8 @@ private fun shrinkQuote(
  * Line-dropping truncation is not allowed — emphasis/link markers closed on continuation
  * lines and code fences would be lost with the line. As with list items, re-shrinking
  * happens only at the top level (nested retries re-render exponentially); a nested level
- * that does not fit returns an empty string and the caller falls back to plain text.
+ * that does not fit degrades to escaped plain text behind the quote prefix
+ * ([plainQuotedTail]).
  */
 private fun shrinkQuoteTail(
     node: Node,
@@ -242,7 +240,7 @@ private fun shrinkQuoteTail(
     retriable: Boolean,
     options: RenderOptions,
 ): String {
-    if (!retriable) return ""
+    if (!retriable) return plainQuotedTail(node, remaining)
 
     var budget = remaining
     while (budget > 0) {
@@ -253,6 +251,25 @@ private fun shrinkQuoteTail(
         budget -= prefixed.length - remaining
     }
     return ""
+}
+
+// Fallback for a nested (non-retriable) quote child that does not fit: the child's escaped
+// plain text behind a "> " prefix — the same trade plainListItem makes for a nested list
+// item. Returning empty here (the old behavior) dropped the whole quote, and with it the
+// list item the quote lived in — a list item holding one over-long quote degraded the
+// entire document to plain text even when a "- > …" prefix fit comfortably
+private fun plainQuotedTail(
+    node: Node,
+    remaining: Int,
+): String {
+    // 2 = the "> " prefix; without room for it plus one character there is no quote to keep
+    val budget = remaining - 2
+    if (budget <= 0) return ""
+    val plain = StringBuilder()
+    appendPlainText(plain, node)
+    val sb = StringBuilder("> ")
+    appendEscapedTruncated(sb, plain.toString().trim(), budget)
+    return sb.toString()
 }
 
 private fun shrinkParagraph(

@@ -16,7 +16,9 @@ internal fun escapeText(text: String): String =
         }
     }
 
-// Inside code entities (pre/code) Telegram only requires escaping the backslash and backtick
+// Inside code entities (pre/code) Telegram only requires escaping the backslash and backtick.
+// The chained replaces allocate two intermediate strings per call — an accepted cost at
+// message scale; escapeText (the hottest path, every Text node) keeps a single-pass loop
 internal fun escapeCode(text: String): String = text.replace("\\", "\\\\").replace("`", "\\`")
 
 // Inside the (...) part of link entities Telegram only requires escaping the backslash and ')'
@@ -65,6 +67,10 @@ internal fun escapeChunks(
     text: String,
     limit: Int,
 ): List<String> {
+    // Empty text is one empty piece, not zero: callers take escaped.first()/last()
+    // unconditionally (appendVerbatimChunks, flattenWithLead), and listOf("") keeps the
+    // concatenation invariant — "" joins to ""
+    if (text.isEmpty()) return listOf("")
     val chunks = mutableListOf<String>()
     val sb = StringBuilder()
     var index = 0

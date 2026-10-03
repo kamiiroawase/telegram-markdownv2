@@ -519,7 +519,10 @@ class TruncationTest {
 
     @Test
     fun truncatedListItemKeepsLinkClosedAcrossSoftBreak() {
-        assertEquals("• abc def…", MarkdownV2.render("- [abc\ndef](u)", 15))
+        // The flattening fallback keeps the link target as "label (url)" — the same shape
+        // toPlainText gives the rendered form; at this limit the budget reaches just into
+        // the " (u)" suffix (the '(' escapes, costing two)
+        assertEquals("• abc def \\(…", MarkdownV2.render("- [abc\ndef](u)", 15))
     }
 
     @Test
@@ -581,10 +584,23 @@ class TruncationTest {
     }
 
     @Test
-    fun nestedQuoteOverrunFallsBackToPlainText() {
-        // A quote inside a list does not fit (indent overhead included): the block is abandoned, document-level plain-text fallback;
-        // the whole plain text fits, returned as-is without an ellipsis
-        assertEquals("abc def", MarkdownV2.render("- > *abc\ndef*", 13))
+    fun nestedQuoteOverrunDegradesToPrefixedPlainText() {
+        // A quote inside a list does not fit (indent overhead included): its tail degrades
+        // to escaped plain text behind the quote prefix and the item structure survives
+        // (pre-fix the nested tail shrink returned empty, the item was dropped, and the
+        // document fell back to plain text wholesale)
+        assertEquals("• > abc def…", MarkdownV2.render("- > *abc\ndef*", 13))
+    }
+
+    @Test
+    fun quoteInsideListItemKeepsStructureWhenTailDegrades() {
+        // The same fix at length: a fitting "• > …" prefix must survive instead of the
+        // whole document degrading to escaped plain text
+        val content = "- > " + (1..30).joinToString(" ") { "w$it" }
+        val result = MarkdownV2.render(content, maxLength = 40)
+        assertTrue(result.length <= 40)
+        assertTrue(result.startsWith("• > w1"), "structure lost: $result")
+        assertTrue(result.endsWith("…"))
     }
 
     @Test

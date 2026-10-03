@@ -57,6 +57,14 @@ class ChunkingTest {
     }
 
     @Test
+    fun escapeChunksOfEmptyTextIsOneEmptyPiece() {
+        // appendVerbatimChunks and flattenWithLead take escaped.first()/last()
+        // unconditionally — zero pieces would throw. Unreachable through the public API
+        // (the isBlank guards upstream); the test pins the internal contract
+        assertEquals(listOf(""), escapeChunks("", 2))
+    }
+
+    @Test
     fun renderChunkedShortContentSingleChunk() {
         assertEquals(listOf("*hello* world"), MarkdownV2.renderChunked("**hello** world"))
     }
@@ -299,6 +307,16 @@ class ChunkingTest {
             chunks.forEach { chunk -> assertTrue(chunk.length <= 4096, "over-long chunk: ${chunk.take(60)}") }
             assertEquals(MarkdownV2.escape(url), chunks.joinToString(""), "text lost for: ${content.take(20)}")
         }
+    }
+
+    @Test
+    fun renderChunkedFlattenedLinkKeepsItsUrl() {
+        // The flattening seam used to keep only the label — the URL vanished, where
+        // toPlainText deliberately keeps the `label (url)` shape; the two fallback paths
+        // must agree
+        val chunks = MarkdownV2.renderChunked("[x](y)", maxLength = 3)
+        assertEquals(listOf("x ", "\\(y", "\\)"), chunks)
+        assertEquals("x (y)", MarkdownV2.toPlainText(chunks.joinToString("")))
     }
 
     @Test

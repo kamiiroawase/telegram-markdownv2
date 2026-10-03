@@ -15,9 +15,11 @@ import org.commonmark.node.Text
 /**
  * Iterative plain-text extraction (explicit stack, no recursion that grows with node nesting
  * depth), shared by table cells, inline-group truncation fallbacks and deep-structure
- * flattening. A link or image whose children contribute no visible text falls back to its
- * destination, mirroring the renderer's empty-label degradation to the bare escaped URL —
- * without it the truncation/chunking fallbacks would drop such content entirely.
+ * flattening. A link or image renders as `label (url)` — mirroring deformat's link handling
+ * so the flattening paths never silently drop a link target — and one whose children
+ * contribute no visible text falls back to its destination, mirroring the renderer's
+ * empty-label degradation to the bare escaped URL (without it the truncation/chunking
+ * fallbacks would drop such content entirely).
  */
 internal fun appendPlainText(
     sb: StringBuilder,
@@ -25,13 +27,20 @@ internal fun appendPlainText(
 ) {
     val stack = ArrayDeque<Any>()
     stack.addLast(node)
+    // Depth of open link/image scopes: CommonMark cannot nest them, so this stays 0/1 in
+    // practice — hand-built ASTs may nest, and there only the outermost target survives,
+    // matching the renderer's nested-link degradation to label text
+    var openLinks = 0
     while (stack.isNotEmpty()) {
         val current = stack.removeLast()
         when (current) {
             is UrlFallback -> {
+                openLinks--
                 if (sb.substring(current.start).isBlank()) {
                     sb.setLength(current.start)
                     sb.append(current.url)
+                } else if (openLinks == 0) {
+                    sb.append(" (").append(current.url).append(')')
                 }
             }
 
@@ -78,11 +87,21 @@ internal fun appendPlainText(
             }
 
             is Link -> {
-                openLink(current.destination, current, sb, stack)
+                val destination = current.destination
+                if (!destination.isNullOrEmpty()) {
+                    stack.addLast(UrlFallback(destination, sb.length))
+                    openLinks++
+                }
+                pushChildrenReversed(current, stack)
             }
 
             is Image -> {
-                openLink(current.destination, current, sb, stack)
+                val destination = current.destination
+                if (!destination.isNullOrEmpty()) {
+                    stack.addLast(UrlFallback(destination, sb.length))
+                    openLinks++
+                }
+                pushChildrenReversed(current, stack)
             }
 
             else -> {
@@ -105,18 +124,6 @@ internal fun plainText(nodes: List<Node>): String {
     val sb = StringBuilder()
     nodes.forEach { appendPlainText(sb, it) }
     return sb.toString()
-}
-
-private fun openLink(
-    destination: String?,
-    node: Node,
-    sb: StringBuilder,
-    stack: ArrayDeque<Any>,
-) {
-    if (!destination.isNullOrEmpty()) {
-        stack.addLast(UrlFallback(destination, sb.length))
-    }
-    pushChildrenReversed(node, stack)
 }
 
 private fun pushChildrenReversed(

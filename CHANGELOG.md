@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `toPlainText` resolves runs of glued emphasis markers: `_a__b_` — the render of two
+  italics side by side (`*a*_b_`) — de-formats to `ab`, where the old char-greedy read
+  took the middle `__` for one underline marker, matched nothing on the marker stack,
+  and re-inserted all three markers literally. Runs now resolve close-then-open against
+  the open-marker stack (`_a___b__`, `___x___` and the glued shapes inside link labels
+  included)
+- The truncation/chunking plain-text fallbacks keep link targets: a link or image with a
+  visible label extracts as `label (url)` — the same shape `toPlainText` gives the
+  rendered form — instead of silently dropping the URL (table cells included); nested
+  links (hand-built ASTs only; CommonMark cannot produce them) keep the outer target
+  alone, matching the renderer's degradation
+- A quote inside a list item that does not fit the shrinking budget degrades to escaped
+  plain text behind its `> ` prefix instead of dropping the whole item: pre-fix the
+  nested quote's tail shrink returned empty, so `render("- > *abc\ndef*", 13)` abandoned
+  the structural path and returned the document as plain text (`abc def`), losing the
+  bullet and quote markers a fitting `• > …` prefix could have kept
 - Truncation no longer overshoots the limit by one character on a fence-wrapped block
   (fenced/indented code, table, HTML): the shrink's line-fitting check forgot the
   newline joining the line, so at exact boundary lengths `render(content, maxLength)`

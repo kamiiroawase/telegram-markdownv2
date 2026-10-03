@@ -7,11 +7,13 @@ package com.github.kamiiroawase.markdownv2
  *
  * One linear pass with explicit states (text, inline code, fenced code, link label,
  * link URL) — no regex, no recursion, the same posture as the rest of the library.
- * Emphasis markers vanish, fences and quote prefixes drop — a code block inside a quote
- * de-formats to its content with the per-line quote markers stripped — escapes resolve
- * per context, and `[label](url)` becomes `label (url)` so no link target is lost (an
- * empty label or URL degrades to the non-empty piece). Even malformed input loses
- * nothing: an emphasis marker that never closes is re-inserted literally, and
+ * Emphasis markers vanish (`*bold*`, `_italic_`, `__underline__`, `~strike~`), runs of
+ * adjacent markers included (`_a__b_`, the render of two italics side by side, resolves
+ * close-then-open into plain `ab`); fences and quote prefixes drop — a code block inside
+ * a quote de-formats to its content with the per-line quote markers stripped — escapes
+ * resolve per context, and `[label](url)` becomes `label (url)` so no link target is
+ * lost (an empty label or URL degrades to the non-empty piece). Even malformed input
+ * loses nothing: an emphasis marker that never closes is re-inserted literally, and
  * unterminated code spans / labels / URLs keep their content as text.
  */
 internal fun deformat(rendered: String): String {
@@ -60,15 +62,10 @@ internal fun deformat(rendered: String): String {
             }
 
             char == '_' || char == '*' || char == '~' -> {
-                // '__' is always underline (Telegram), never two italics
-                val marker = if (char == '_' && rendered.getOrNull(index + 1) == '_') "__" else char.toString()
-                val top = openMarkers.lastOrNull()
-                if (top != null && top.marker == marker) {
-                    openMarkers.removeLast()
-                } else {
-                    openMarkers.addLast(OpenMarker(marker, sb.length))
-                }
-                index += marker.length
+                var run = 1
+                while (index + run < rendered.length && rendered[index + run] == char) run++
+                matchMarkerRun(openMarkers, char, run, sb.length)
+                index += run
             }
 
             else -> {
@@ -96,6 +93,47 @@ private fun reopenUnmatched(
     open: ArrayDeque<OpenMarker>,
 ) {
     open.asReversed().forEach { sb.insert(it.position, it.marker) }
+}
+
+/**
+ * Matches a run of [count] identical marker characters against the open-marker stack:
+ * each unit first closes the entity on top when its marker matches ('_' closes '_',
+ * '__' takes two; '*' and '~' are single-char), the remainder opens new entities —
+ * '__' as underline, a lone '_' as italic (Telegram's rule that `__` is always
+ * underline). Resolving the run as a whole is what handles adjacency: `_a__b_` (the
+ * render of two italics side by side) reads the first '_' of the run as the closer of
+ * the open italic and the second as the next opener, where the old char-greedy read
+ * took '__' for one underline marker, matched nothing, and re-inserted all three
+ * markers literally. [position] is the output position the run starts at (it emits
+ * nothing itself), shared by every marker the run opens.
+ */
+private fun matchMarkerRun(
+    openMarkers: ArrayDeque<OpenMarker>,
+    marker: Char,
+    count: Int,
+    position: Int,
+) {
+    var remaining = count
+    while (remaining > 0) {
+        val top = openMarkers.lastOrNull()
+        val closeCost =
+            when {
+                top == null -> 0
+                top.marker == "__" && marker == '_' && remaining >= 2 -> 2
+                top.marker == marker.toString() -> 1
+                else -> 0
+            }
+        if (closeCost > 0) {
+            openMarkers.removeLast()
+            remaining -= closeCost
+        } else if (marker == '_' && remaining >= 2) {
+            openMarkers.addLast(OpenMarker("__", position))
+            remaining -= 2
+        } else {
+            openMarkers.addLast(OpenMarker(marker.toString(), position))
+            remaining--
+        }
+    }
 }
 
 private fun isLineStart(
@@ -316,14 +354,10 @@ private fun appendLabelText(
             }
 
             char == '_' || char == '*' || char == '~' -> {
-                val marker = if (char == '_' && rendered.getOrNull(index + 1) == '_') "__" else char.toString()
-                val top = openMarkers.lastOrNull()
-                if (top != null && top.marker == marker) {
-                    openMarkers.removeLast()
-                } else {
-                    openMarkers.addLast(OpenMarker(marker, sb.length))
-                }
-                index += marker.length
+                var run = 1
+                while (index + run < rendered.length && rendered[index + run] == char) run++
+                matchMarkerRun(openMarkers, char, run, sb.length)
+                index += run
             }
 
             else -> {

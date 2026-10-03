@@ -32,6 +32,22 @@ class PlainTextTest {
     }
 
     @Test
+    fun plainTextResolvesAdjacentEmphasisEntities() {
+        // The render of two italics side by side: the old char-greedy read took the glued
+        // __ for one underline marker, matched nothing, and re-inserted every marker
+        // literally instead of resolving the run close-then-open
+        assertEquals("ab", MarkdownV2.toPlainText("_a__b_"))
+        assertEquals("ab", MarkdownV2.toPlainText(MarkdownV2.render("*a*_b_")))
+        // Italic glued to underline, and underline glued to italic
+        assertEquals("ab", MarkdownV2.toPlainText("_a___b__"))
+        assertEquals("ab", MarkdownV2.toPlainText("__a___b_"))
+        // Underline wrapping italic (e.g. <u><i>x</i></u>) renders as a ___ run
+        assertEquals("x", MarkdownV2.toPlainText("___x___"))
+        // Inside a link label the same glued shapes resolve
+        assertEquals("ab (u)", MarkdownV2.toPlainText("[_a__b_](u)"))
+    }
+
+    @Test
     fun plainTextKeepsCodeSpanContentAndUnescapes() {
         // Inside code entities only \` and \\ are escapes
         assertEquals("a `b` c", MarkdownV2.toPlainText("`a \\`b\\` c`"))
