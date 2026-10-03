@@ -40,11 +40,18 @@ import kotlin.test.assertTrue
  * (display width, surrogate pairs).
  */
 class MarkdownV2Test {
-    private val maxMessageLength = 4096
+    private val maxMessageLength = MarkdownV2.MAX_MESSAGE_LENGTH
 
     @Test
     fun shortContentRenderedWithoutTruncation() {
         assertEquals("*hello* world", MarkdownV2.render("**hello** world"))
+    }
+
+    @Test
+    fun maxMessageLengthMatchesTelegramDocumentedLimit() {
+        // Guards the public constant itself: the field above delegates to it, so a silent
+        // drift would otherwise go unnoticed by every test using maxMessageLength
+        assertEquals(4096, MarkdownV2.MAX_MESSAGE_LENGTH)
     }
 
     @Test
@@ -144,6 +151,10 @@ class MarkdownV2Test {
         val rows = (1..1000).joinToString("\n") { "| cell$it | data$it |" }
         val result = MarkdownV2.render("$header\n$rows", maxMessageLength)
         assertTrue(result.length <= maxMessageLength)
+        assertTrue(result.startsWith("```"), "table did not degrade to a code block: ${result.take(20)}")
+        assertTrue(result.contains("col1"), "header row was lost")
+        assertTrue(result.contains("cell1"), "first body row was lost")
+        assertTrue(!result.contains("cell1000"), "truncation kept the last row")
         assertEquals(0, Regex("```").findAll(result).count() % 2)
     }
 
@@ -164,6 +175,7 @@ class MarkdownV2Test {
         assertTrue(result.length <= maxMessageLength)
         assertTrue(result.endsWith("…"))
         val body = removeEscapes(result.dropLast(1))
+        assertTrue(body.startsWith("prefix*bold"), "bold opening was lost: ${body.take(20)}")
         assertEquals(0, body.count { it == '*' } % 2)
     }
 
@@ -181,6 +193,9 @@ class MarkdownV2Test {
         val code = (1..100).joinToString("\n") { "line $it" }
         val result = MarkdownV2.render("```\n$code\n```", 300)
         assertTrue(result.length <= 300)
+        assertTrue(result.startsWith("```"), "code block was dropped: ${result.take(20)}")
+        assertTrue(result.contains("line 1"), "first code line was lost")
+        assertTrue(!result.contains("line 100"), "truncation kept the last line")
         assertEquals(0, Regex("```").findAll(result).count() % 2)
     }
 
@@ -428,6 +443,8 @@ class MarkdownV2Test {
         val result = MarkdownV2.render(content, maxMessageLength)
         assertTrue(result.length <= maxMessageLength)
         assertTrue(result.endsWith("…"))
+        assertTrue(result.startsWith("```\n<div>"), "html block was dropped: ${result.take(20)}")
+        assertTrue(!result.contains("</div>"), "truncation kept the closing tag line")
         assertEquals(0, Regex("```").findAll(result).count() % 2)
     }
 
@@ -505,8 +522,14 @@ class MarkdownV2Test {
     fun nestedAnchorInnerIsRenderedAsLiteral() {
         if (!htmlParsingSupported) return
 
-        // Telegram links cannot nest: the inner anchor and its closing tag escape literally, the outer link stays valid
-        assertEquals("[_b_](u)", MarkdownV2.render("[*b*](u)"))
+        // Telegram links cannot nest: the anchor nested in emphasis inside the Markdown
+        // link's label escapes literally (both its tags), the outer link stays the only
+        // link entity — distinct from the emphasis-free shapes covered by the sibling
+        // anchor-in-link tests
+        assertEquals(
+            """[_<a href\="i"\>b</a\>_](u)""",
+            MarkdownV2.render("[*<a href=\"i\">b</a>*](u)"),
+        )
     }
 
     @Test
@@ -559,6 +582,7 @@ class MarkdownV2Test {
         val content = "*".repeat(2000) + "x" + "*".repeat(2000)
         val result = MarkdownV2.render(content, maxMessageLength)
         assertTrue(result.length <= maxMessageLength)
+        assertEquals(1, result.count { it == 'x' }, "the single text char was lost or duplicated")
     }
 
     @Test
@@ -566,6 +590,7 @@ class MarkdownV2Test {
         val longCell = "w".repeat(5000)
         val result = MarkdownV2.render("| a | b |\n| --- | --- |\n| $longCell | x |")
         assertTrue(result.length <= maxMessageLength)
+        assertTrue(result.startsWith("```"), "table did not degrade to a code block: ${result.take(20)}")
         assertTrue(result.contains("| a"), "header row was lost: ${result.take(60)}")
         assertEquals(0, Regex("```").findAll(result).count() % 2)
     }
@@ -576,6 +601,9 @@ class MarkdownV2Test {
         val result = MarkdownV2.render("> ```\n$code\n> ```", 60)
         assertTrue(result.length <= 60)
         assertTrue(result.endsWith("…"))
+        assertTrue(result.startsWith("> ```"), "code block was dropped: ${result.take(20)}")
+        assertTrue(result.contains("line 1"), "first code line was lost")
+        assertTrue(!result.contains("line 500"), "truncation kept the last line")
         assertEquals(0, Regex("```").findAll(result).count() % 2, "unclosed fence in quote: $result")
     }
 
@@ -712,6 +740,27 @@ class MarkdownV2Test {
         val content = "Text[^1]\n\n[^1]: The note"
         val result = MarkdownV2.render(content, parser = parser)
         assertEquals("Text\n\nThe note", result)
+    }
+
+    @Test
+    fun renderChunkedPassesParserAndOptionsThrough() {
+        val parser =
+            Parser
+                .builder()
+                .extensions(MarkdownV2.defaultExtensions + FootnotesExtension.create())
+                .build()
+        assertEquals(listOf("Text\n\nThe note"), MarkdownV2.renderChunked("Text[^1]\n\n[^1]: The note", parser = parser))
+
+        val table = "| a very long cell |\n| --- |\n| b |"
+        val capped = MarkdownV2.renderChunked(table, options = RenderOptions(maxCellWidth = 5))
+        assertTrue(capped.single().contains("a ve…"), "maxCellWidth was not applied: ${capped.single()}")
+    }
+
+    @Test
+    fun renderNodeOverloadPassesOptionsThrough() {
+        val document = MarkdownV2.defaultParser.parse("| a very long cell |\n| --- |\n| b |")!!
+        val capped = MarkdownV2.render(document, options = RenderOptions(maxCellWidth = 5))
+        assertTrue(capped.contains("a ve…"), "maxCellWidth was not applied: $capped")
     }
 
     @Test
@@ -954,11 +1003,15 @@ class MarkdownV2Test {
 
     @Test
     fun emptyFencedCodeBlockRendersClosed() {
+        // Pins current behavior, knowingly: the empty pre entity is syntactically valid
+        // MarkdownV2, but like every empty entity it is a Telegram-rejection candidate —
+        // a known limitation left unchanged here
         assertEquals("```\n\n```", MarkdownV2.render("```\n```"))
     }
 
     @Test
     fun fencedCodeBlockWithNullLiteralsViaAst() {
+        // Same empty-entity trade-off as emptyFencedCodeBlockRendersClosed
         assertEquals("```\n\n```", MarkdownV2.render(FencedCodeBlock()))
     }
 
@@ -968,6 +1021,9 @@ class MarkdownV2Test {
         val result = MarkdownV2.render(code, 300)
         assertTrue(result.length <= 300)
         assertTrue(result.endsWith("…"))
+        assertTrue(result.startsWith("```"), "code block was dropped: ${result.take(20)}")
+        assertTrue(result.contains("line 1"), "first code line was lost")
+        assertTrue(!result.contains("line 100"), "truncation kept the last line")
         assertEquals(0, Regex("```").findAll(result).count() % 2)
     }
 
@@ -1073,15 +1129,21 @@ class MarkdownV2Test {
         paragraph.appendChild(inline)
         val result = MarkdownV2.render(paragraph, 200_000)
         assertTrue(result.length > 100_000, "literal text should pass through: ${result.length}")
+        assertTrue(
+            removeEscapes(result).startsWith("<b " + "x".repeat(100_000)),
+            "the unmatched tag must pass through as literal text",
+        )
     }
 
     @Test
     fun regexLinearOnAlternatingSlashesInAttributes() {
         // [^>]*? interacting with the optional /: alternating-slash attribute strings must still match linearly
-        val inline = HtmlInline("<b " + "/x".repeat(50_000) + ">")
         val paragraph = Paragraph()
-        paragraph.appendChild(inline)
-        assertEquals("**", MarkdownV2.render(paragraph))
+        paragraph.appendChild(HtmlInline("<b " + "/x".repeat(50_000) + ">"))
+        paragraph.appendChild(Text("y"))
+        // Content after the tag keeps the bold entity non-empty — no pinning of the empty
+        // `**` entity, which Telegram would reject
+        assertEquals("*y*", MarkdownV2.render(paragraph))
     }
 
     @Test
@@ -1561,6 +1623,7 @@ class MarkdownV2Test {
         val result = MarkdownV2.render(content, maxMessageLength)
         assertTrue(result.length <= maxMessageLength)
         assertTrue(result.endsWith("…"))
+        assertTrue(result.startsWith("• _a1"), "first item's emphasis was lost: ${result.take(20)}")
         assertEquals(0, result.count { it == '_' } % 2, "unclosed emphasis: ${result.take(200)}")
     }
 
