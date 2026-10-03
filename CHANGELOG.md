@@ -13,6 +13,16 @@ All notable changes to this project are documented here. The format follows
   against the full test suite): consumers' dependency graphs now resolve the parser
   transitively from the maintainer's coordinates instead
 
+### Fixed
+
+- Output-time completion of an unclosed HTML code entity no longer trims the entity's
+  trailing spaces and tabs away as block-separator junk (`<code>x <!-- c -->` now keeps
+  its code content `x ` — trailing space included — intact); trailing newlines are still
+  cleared, they are separators rather than code the entity displays
+- Chunking keeps a lone flattened piece open for packing: an over-limit list item (or
+  inline node) whose escaped plain text fits in a single piece no longer forces the
+  following content onto its own chunk
+
 ## [1.2.0] — 2026-10-03
 
 ### Changed

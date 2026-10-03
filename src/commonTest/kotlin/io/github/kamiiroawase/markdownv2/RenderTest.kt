@@ -647,6 +647,19 @@ class RenderTest {
     }
 
     @Test
+    fun unclosedHtmlCodeEntityKeepsTrailingWhitespace() {
+        if (!htmlParsingSupported) return
+
+        // The comment tag renders to nothing, so the code entity's content runs to the
+        // paragraph tail — "x " with its trailing space. Output-time completion used to
+        // trimEnd before the closer and eat that space as block-separator junk. Spaces
+        // and tabs are the entity's literal content; only trailing newlines (the
+        // paragraph's block separator) are cleared — unclosedHtmlCodeCompletesWithCodeEscaping
+        // pins the newline half of that rule
+        assertEquals("`x `", MarkdownV2.render("<code>x <!-- c -->"))
+    }
+
+    @Test
     fun nullDestinationLinkRendersChildrenViaAst() {
         val link = Link(destination = null, title = null)
         link.appendChild(Text("t"))

@@ -57,6 +57,19 @@ class ChunkingTest {
     }
 
     @Test
+    fun singleFlattenedPieceStaysOpenForPacking() {
+        // The first item renders past the limit (13 bold pairs — Markdown emphasis, so
+        // plain-text extraction drops the markers) but its escaped plain text fits in
+        // one piece with room to spare — the lone flattened piece used to be completed
+        // outright, forcing the second item onto its own chunk instead of packing after
+        // the flattened text (appendVerbatimChunks already kept its tail open;
+        // flattenWithLead now matches that shape)
+        val pieces = MarkdownV2.renderChunked("- " + "a**b**".repeat(13) + "\n- tail", 50)
+        assertEquals(1, pieces.size)
+        assertTrue(pieces.single().endsWith("\n• tail"), "tail not packed: ${pieces.single()}")
+    }
+
+    @Test
     fun escapeChunksOfEmptyTextIsOneEmptyPiece() {
         // appendVerbatimChunks and flattenWithLead take escaped.first()/last()
         // unconditionally — zero pieces would throw. Unreachable through the public API

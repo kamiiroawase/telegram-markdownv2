@@ -189,8 +189,11 @@ internal class Visitor(
      * closer, real anchors their ](url) — an anchor whose label rendered no visible text
      * rewinds and degrades to the bare escaped URL, the same trade visit(link) makes —
      * while sentinel and href-less anchors emit nothing. Closers append after a trimEnd
-     * that keeps them clear of trailing block separators; a rewind that completed nothing
-     * else returns the rewound text as-is.
+     * that keeps them clear of trailing block separators — except while an HTML code
+     * entity is open: its content's trailing spaces and tabs are literal and stay; only
+     * trailing newlines are cleared (the boundary-completion path completeOpenedAfter
+     * trims nothing). A rewind that completed nothing else returns the rewound text
+     * as-is.
      */
     fun output(): String {
         if (openEntities.isEmpty()) return sb.toString()
@@ -222,11 +225,12 @@ internal class Visitor(
                 }
             }
         }
-        return if (closers.isEmpty()) {
-            sb.toString()
-        } else {
-            sb.toString().trimEnd() + closers.joinToString("")
-        }
+        if (closers.isEmpty()) return sb.toString()
+        // While an HTML code entity is open, trailing spaces and tabs are the entity's
+        // literal content and must survive; only trailing newlines are cleared — they
+        // are block separators (or a dangling <br>), never code the entity displays
+        val body = if (htmlCodeDepth > 0) sb.toString().trimEnd('\n') else sb.toString().trimEnd()
+        return body + closers.joinToString("")
     }
 
     override fun visit(text: Text) {

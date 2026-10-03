@@ -446,14 +446,17 @@ private fun flattenWithLead(
     val limit = maxLength - lead.length
     val keepLead = limit >= 2
     val escaped = escapeChunks(text, if (keepLead) limit else maxLength)
+    acc.current.setLength(0)
+    if (escaped.size == 1) {
+        // The lone piece is also the tail: it stays open as verbatim content for the
+        // caller to pack alongside — the same shape appendVerbatimChunks produces.
+        // Completing it outright used to force the following item onto its own chunk
+        acc.appendVerbatim((if (keepLead) lead else "") + escaped.first())
+        return
+    }
     // No trimming: a piece edge can land on a space of the original text, and trimming
     // it would drop a character the flattening paths promise to preserve
     acc.pieces += (if (keepLead) lead else "") + escaped.first()
     for (i in 1 until escaped.size - 1) acc.pieces += escaped[i]
-    acc.current.setLength(0)
-    if (escaped.size > 1) {
-        acc.appendVerbatim(escaped.last())
-    } else {
-        acc.verbatimTail = false
-    }
+    acc.appendVerbatim(escaped.last())
 }
