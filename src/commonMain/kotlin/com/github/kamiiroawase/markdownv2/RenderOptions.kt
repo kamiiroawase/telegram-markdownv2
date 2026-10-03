@@ -14,7 +14,9 @@ public class RenderOptions(
      * over-long cells are cut to this width (minus the ellipsis) so one huge cell cannot
      * blow the whole table, header included, past the message length limit.
      *
-     * @throws IllegalArgumentException if the value is less than 1.
+     * @throws IllegalArgumentException if the value is less than 1, or if the display
+     * width [displayWidthOf] assigns to the truncation ellipsis (…) exceeds it — every
+     * truncated cell would then overshoot the cap.
      */
     public val maxCellWidth: Int = DEFAULT_MAX_CELL_WIDTH,
     /**
@@ -23,12 +25,21 @@ public class RenderOptions(
      * (CJK, Hangul, kana, fullwidth forms, emoji), 1 otherwise. The default
      * [defaultDisplayWidth] is an approximation of East Asian Width; pass a custom measure
      * to match your target font (e.g. treat Ambiguous characters as wide). Values must be
-     * non-negative — a negative result fails table rendering with an IllegalArgumentException.
+     * non-negative — a negative result fails table rendering with an IllegalArgumentException;
+     * the truncation ellipsis (…) is measured once at construction (see [maxCellWidth]).
      */
     public val displayWidthOf: (codePoint: Int) -> Int = ::defaultDisplayWidth,
 ) {
     init {
         require(maxCellWidth >= 1) { "maxCellWidth must be positive: $maxCellWidth" }
+        // The ellipsis is cell content: a measure that makes it wider than the cap would
+        // push every truncated cell past maxCellWidth — fail fast, the same trade the
+        // render-time negative-width check makes
+        val ellipsisWidth = displayWidthOf(ELLIPSIS_CODE_POINT)
+        require(ellipsisWidth in 0..maxCellWidth) {
+            "maxCellWidth ($maxCellWidth) cannot hold the truncation ellipsis (display width " +
+                "$ellipsisWidth under the supplied displayWidthOf); raise maxCellWidth or narrow the measure"
+        }
     }
 
     /** Default values backing [RenderOptions]. */
@@ -39,6 +50,10 @@ public class RenderOptions(
         public const val DEFAULT_MAX_CELL_WIDTH: Int = 32
     }
 }
+
+// The ellipsis appended to over-long table cells; RenderOptions measures it at
+// construction to keep the truncation budget non-negative
+internal const val ELLIPSIS_CODE_POINT = 0x2026
 
 /**
  * The default display-width measure: 0 for zero-width characters, 2 for wide characters

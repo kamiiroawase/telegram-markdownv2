@@ -11,6 +11,12 @@ import org.commonmark.parser.Parser
  * CommonMark (incl. GFM tables and strikethrough) to Telegram MarkdownV2 converter
  * with structure-preserving truncation.
  *
+ * Platform warning — Kotlin/JS and Kotlin/Wasm: the upstream commonmark-kotlin parser
+ * throws on these platforms for inputs containing an HTML block, an `<a href>` anchor,
+ * or any document that opens with an HTML tag (its `Regex("]]>")` is invalid in the JS
+ * RegExp engine). Wrap calls in try/catch with a plain-text fallback there, or pre-strip
+ * HTML; mid-paragraph inline tags such as `<b>` or `<br>` are not affected.
+ *
  * This file hosts only the public API and top-level flow; the implementation is split by
  * responsibility: full-document rendering in [Visitor](Visitor.kt), over-length truncation
  * (Truncation.kt), escaping (Escape.kt), plain-text extraction (PlainText.kt), table
@@ -47,6 +53,10 @@ public object MarkdownV2 {
      * nothing) degrade to the label text or the bare escaped URL. Rendering knobs that
      * have no single right answer (table cell cap, character display width) live in
      * [options].
+     *
+     * On Kotlin/JS and Kotlin/Wasm this call throws for inputs the upstream parser cannot
+     * handle (HTML blocks, `<a href>` anchors, documents opening with an HTML tag — see
+     * the object-level platform warning); catch and fall back to plain text there.
      */
     public fun render(
         content: String,
@@ -114,6 +124,10 @@ public object MarkdownV2 {
      * 1 or less returns the full render as a single chunk (chunking needs room for at
      * least one escaped character — two chars), and content that renders to nothing
      * yields an empty list.
+     *
+     * On Kotlin/JS and Kotlin/Wasm this call throws for inputs the upstream parser cannot
+     * handle (HTML blocks, `<a href>` anchors, documents opening with an HTML tag — see
+     * the object-level platform warning); catch and fall back to plain text there.
      */
     public fun renderChunked(
         content: String,

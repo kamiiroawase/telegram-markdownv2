@@ -657,6 +657,26 @@ class MarkdownV2Test {
     }
 
     @Test
+    fun quotedGreaterThanSignInHrefValueStaysInTheUrl() {
+        if (!htmlParsingSupported) return
+
+        // Per CommonMark/HTML5 a quoted attribute value may contain '>'; the tag scan must
+        // not close on it (pre-fix the whole anchor degraded to literal escaped text)
+        assertEquals("[t](a>b)", MarkdownV2.render("<a href=\"a>b\">t</a>"))
+        assertEquals("[t](a>b)", MarkdownV2.render("<a href='a>b'>t</a>"))
+    }
+
+    @Test
+    fun quotedGreaterThanSignInNonHrefAttributeStillParses() {
+        if (!htmlParsingSupported) return
+
+        // The '>' lives inside a quoted value: the tag still opens, and a '/' inside a
+        // quoted value still does not read as self-closing
+        assertEquals("*t*", MarkdownV2.render("<b data-x=\"a>b\">t</b>"))
+        assertEquals("_t_", MarkdownV2.render("<i title=\"a/\">t</i>"))
+    }
+
+    @Test
     fun htmlAnchorDataHrefAttrDoesNotShadowHref() {
         if (!htmlParsingSupported) return
 
@@ -1057,9 +1077,20 @@ class MarkdownV2Test {
 
     @Test
     fun malformedHtmlInlineIsEscapedViaAst() {
+        // The unclosed quote makes no well-formed tag: the literal escapes
+        val paragraph = Paragraph()
+        paragraph.appendChild(HtmlInline("<a href=\"x>"))
+        assertEquals("<a href\\=\"x\\>", MarkdownV2.render(paragraph))
+    }
+
+    @Test
+    fun quotedGreaterThanTagWellFormedEmptyLabelDegradesToUrlViaAst() {
+        // Per CommonMark the quoted '>' keeps the tag well-formed, so the anchor path
+        // runs; an anchor whose label renders to nothing degrades to the bare escaped
+        // URL (pre-fix the tag regex rejected the quoted '>' and escaped the whole tag)
         val paragraph = Paragraph()
         paragraph.appendChild(HtmlInline("<a href=\"x>y\">"))
-        assertEquals("<a href\\=\"x\\>y\"\\>", MarkdownV2.render(paragraph))
+        assertEquals("x\\>y", MarkdownV2.render(paragraph))
     }
 
     @Test
@@ -1194,8 +1225,9 @@ class MarkdownV2Test {
     }
 
     @Test
-    fun regexLinearOnHugeUnclosedTag() {
-        // HTML_TAG's lazy [^>]*? expands stepwise at O(n) worst case; catastrophic backtracking would hang this test
+    fun tagScanLinearOnHugeUnclosedTag() {
+        // The manual tag scan walks the string once with no engine recursion; a lazy regex
+        // loop would overflow the stack at this scale, a backtracking one would hang
         val inline = HtmlInline("<b " + "x".repeat(100_000))
         val paragraph = Paragraph()
         paragraph.appendChild(inline)
@@ -1208,8 +1240,9 @@ class MarkdownV2Test {
     }
 
     @Test
-    fun regexLinearOnAlternatingSlashesInAttributes() {
-        // [^>]*? interacting with the optional /: alternating-slash attribute strings must still match linearly
+    fun tagScanLinearOnAlternatingSlashesInAttributes() {
+        // Slashes interleave with attribute characters up to the closing '>'; the scan
+        // stays a single pass and the trailing 'x' keeps the tag open (not self-closing)
         val paragraph = Paragraph()
         paragraph.appendChild(HtmlInline("<b " + "/x".repeat(50_000) + ">"))
         paragraph.appendChild(Text("y"))
@@ -1219,7 +1252,7 @@ class MarkdownV2Test {
     }
 
     @Test
-    fun regexLinearOnHugeHrefValue() {
+    fun tagScanLinearOnHugeHrefValue() {
         // The href attribute scan walks the value once with a single stopping point: 100k-scale values extract linearly
         val paragraph = Paragraph()
         paragraph.appendChild(HtmlInline("<a href=\"" + "x".repeat(100_000) + "\">"))
@@ -1232,7 +1265,7 @@ class MarkdownV2Test {
     }
 
     @Test
-    fun regexLinearOnHugeWhitespaceAroundEquals() {
+    fun tagScanLinearOnHugeWhitespaceAroundEquals() {
         // Whitespace between name, = and value is skipped in one linear pass: 50k-scale gaps match linearly
         val paragraph = Paragraph()
         paragraph.appendChild(HtmlInline("<a href" + " ".repeat(50_000) + "=\"u\">"))
@@ -1658,10 +1691,34 @@ class MarkdownV2Test {
     }
 
     @Test
+    fun ellipsisWiderThanMaxCellWidthIsRejected() {
+        // A measure that renders the ellipsis wider than the cap would push every
+        // truncated cell past maxCellWidth — rejected at construction, the same trade
+        // as the render-time negative-width check
+        assertFailsWith<IllegalArgumentException> {
+            RenderOptions(maxCellWidth = 1, displayWidthOf = { _ -> 2 })
+        }
+    }
+
+    @Test
+    fun tinyMaxCellWidthTruncatesToBareEllipsis() {
+        // With the default measure the ellipsis is width 1, so cap 1 is constructible and
+        // truncates straight to the bare marker
+        val result = MarkdownV2.render("| ああああ |\n| --- |", options = RenderOptions(maxCellWidth = 1))
+        assertTrue(result.contains("…"), "cell not truncated: $result")
+        assertFalse(result.contains("あ"), "wide cell leaked past the cap: $result")
+    }
+
+    @Test
     fun negativeDisplayWidthIsRejected() {
         // A negative width would silently break cell truncation (the cut budget grows
-        // instead of shrinking) — fail fast at the first measured code point instead
-        val options = RenderOptions(displayWidthOf = { _ -> -1 })
+        // instead of shrinking) — fail fast. The ellipsis is measured at construction,
+        // so an everywhere-negative measure fails before any rendering; a measure that
+        // only goes negative on cell content still fails at the first measured code point
+        assertFailsWith<IllegalArgumentException> {
+            RenderOptions(displayWidthOf = { _ -> -1 })
+        }
+        val options = RenderOptions(displayWidthOf = { codePoint -> if (codePoint == 0x2026) 1 else -1 })
         assertFailsWith<IllegalArgumentException> {
             MarkdownV2.render("| a | b |\n| --- | --- |\n| c | d |", options = options)
         }
@@ -1755,7 +1812,33 @@ class MarkdownV2Test {
 
     @Test
     fun renderChunkedSplitsInlineNodes() {
-        assertEquals(listOf("aa", "_b_", "cc", "_d_"), MarkdownV2.renderChunked("aa *b* cc *d*", 4))
+        // Boundary spaces are content — the Text nodes are "aa " and " cc " — so the
+        // pieces carry their edge whitespace instead of trimming it away
+        assertEquals(listOf("aa ", "_b_", " cc ", "_d_"), MarkdownV2.renderChunked("aa *b* cc *d*", 4))
+    }
+
+    @Test
+    fun renderChunkedFlatteningLosesNoWhitespace() {
+        // The last-resort escaped-text flattening must keep every character, spaces
+        // included (pre-fix each piece was trimmed, dropping spaces at piece edges)
+        val content = "x ".repeat(3000)
+        val chunks = MarkdownV2.renderChunked(content, maxLength = 4096)
+        assertTrue(chunks.size > 1)
+        chunks.forEach { assertTrue(it.length <= 4096, "over-long chunk: $it") }
+        assertEquals(3000, chunks.sumOf { chunk -> chunk.count { it == 'x' } })
+        assertEquals(2999, chunks.sumOf { chunk -> chunk.count { it == ' ' } })
+    }
+
+    @Test
+    fun renderChunkedOversizedItemFlatteningKeepsSpaces() {
+        // Same guarantee down the list-item flattening path: every content space survives
+        // ("a b " x200 = 400 spaces, the paragraph-final one is parser-stripped, and the
+        // kept "• " marker adds its own — 399 + 1)
+        val chunks = MarkdownV2.renderChunked("- " + "a b ".repeat(200), 50)
+        assertTrue(chunks.size > 1)
+        chunks.forEach { assertTrue(it.length <= 50, "over-long chunk: $it") }
+        assertEquals(400, chunks.sumOf { chunk -> chunk.count { it == 'a' || it == 'b' } })
+        assertEquals(400, chunks.sumOf { chunk -> chunk.count { it == ' ' } })
     }
 
     @Test

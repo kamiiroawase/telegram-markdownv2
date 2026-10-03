@@ -137,9 +137,10 @@ private fun charWidth(
     options: RenderOptions,
 ): Int = measuredWidth(codePointAt(text, index), options)
 
-// The single consumption point of the user-supplied measure: a negative width would
-// silently break cell truncation (the cut budget grows instead of shrinking), so it fails
-// fast with a clear message instead
+// A render-time consumption point of the user-supplied measure (the other is the
+// construction-time ellipsis check in RenderOptions): a negative width would silently
+// break cell truncation (the cut budget grows instead of shrinking), so it fails fast
+// with a clear message instead
 private fun measuredWidth(
     codePoint: Int,
     options: RenderOptions,
@@ -163,11 +164,12 @@ private fun codePointAt(
         text[index].code
     }
 
-private const val ELLIPSIS_CODE_POINT = 0x2026
+// ELLIPSIS_CODE_POINT lives in RenderOptions.kt next to its construction-time check
 
 /**
  * Truncates by display width (measured via [RenderOptions.displayWidthOf]), appending an
- * ellipsis whose width the same measure supplies.
+ * ellipsis whose width the same measure supplies; the budget stays non-negative because
+ * RenderOptions rejects a measure that makes the ellipsis wider than maxCellWidth.
  */
 private fun truncateDisplay(
     text: String,

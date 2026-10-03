@@ -130,7 +130,7 @@ private fun buildCases(): List<BenchmarkCase> {
     // Beyond 100 levels; triggers deep flattening
     val deepNesting = ">".repeat(200) + " deep quote body " + "x".repeat(100)
 
-    // 100k-scale unclosed tag: linear-backtracking regression for HTML_TAG's lazy match,
+    // 100k-scale unclosed tag: linear-scan regression for the hand-written tag parser,
     // fed as an inline node via the AST
     val maliciousLiteral = "<b " + "x".repeat(100_000)
     val malicious =
@@ -162,7 +162,7 @@ private fun buildCases(): List<BenchmarkCase> {
         stringCase("Inline HTML mix", htmlInline),
         stringCase("Deeply nested quote (200 levels, flattened)", deepNesting),
         BenchmarkCase(
-            "Malicious unclosed tag (regex linearity)",
+            "Malicious unclosed tag (tag-scan linearity)",
             maliciousLiteral.toByteArray(Charsets.UTF_8).size.toLong(),
         ) {
             MarkdownV2.render(malicious, MarkdownV2.MAX_MESSAGE_LENGTH)

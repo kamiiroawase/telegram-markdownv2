@@ -45,14 +45,81 @@ private class OpenAnchor(
     val labelStart: Int,
 )
 
-// Linear-time by construction: the lazy [^>]*? has a single stopping point (>) and no
-// nested quantifiers; the regexLinear* regression tests pin this down at 100k scale
-private val HTML_TAG = Regex("""<(/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*?)(/?)>""")
+// A parsed inline-HTML tag: the lowercased name, the raw attribute string, whether the
+// tag closes, and whether its trailing slash read as self-closing
+private class TagParts(
+    val closing: Boolean,
+    val name: String,
+    val attrs: String,
+    val selfClosing: Boolean,
+)
+
+/**
+ * Parses a complete inline-HTML tag (`<name attrs>`, `</name>`, `<name/>`) in one linear
+ * left-to-right scan — no regex, so no backtracking and no engine recursion whatever the
+ * length; the tagScanLinear* regression tests pin this down at 100k scale (a lazy regex
+ * loop over an attribute alternation overflows the stack there). Quoted attribute values
+ * follow HTML5/CommonMark and may contain `>` and `/`: neither closes the tag nor reads
+ * as self-closing. A slash counts as self-closing only when it directly precedes the
+ * closing `>` after the tag name, whitespace, or a value's closing quote — an unquoted
+ * value swallows its trailing slash (HTML5). An unclosed quote, a missing `>`, or
+ * content after the `>` makes the whole tag unmatched; the caller escapes the literal.
+ */
+private fun parseHtmlTag(tag: String): TagParts? {
+    var index = 0
+    if (index >= tag.length || tag[index] != '<') return null
+    index++
+    val closing = index < tag.length && tag[index] == '/'
+    if (closing) index++
+    val nameStart = index
+    if (index >= tag.length || !tag[index].isAsciiLetter()) return null
+    index++
+    while (index < tag.length && tag[index].isAsciiLetterOrDigit()) index++
+    val name = tag.substring(nameStart, index).lowercase()
+
+    val attrsStart = index
+    while (true) {
+        if (index >= tag.length) return null
+        when (val char = tag[index]) {
+            '>' -> {
+                var attrs = tag.substring(attrsStart, index)
+                var selfClosing = false
+                if (attrs.isNotEmpty() && attrs.last() == '/') {
+                    val before = attrs.getOrNull(attrs.length - 2)
+                    if (before == null || before.isWhitespace() || before == '"' || before == '\'') {
+                        selfClosing = true
+                        attrs = attrs.substring(0, attrs.length - 1)
+                    }
+                }
+                // matchEntire semantics: the closing '>' must end the tag
+                return if (index + 1 == tag.length) {
+                    TagParts(closing, name, attrs, selfClosing)
+                } else {
+                    null
+                }
+            }
+
+            '"', '\'' -> {
+                val close = tag.indexOf(char, index + 1)
+                if (close == -1) return null
+                index = close + 1
+            }
+
+            else -> {
+                index++
+            }
+        }
+    }
+}
+
+private fun Char.isAsciiLetter(): Boolean = this in 'a'..'z' || this in 'A'..'Z'
+
+private fun Char.isAsciiLetterOrDigit(): Boolean = isAsciiLetter() || this in '0'..'9'
 
 // Entity decoding for URL attribute values: the five XML predefined entities plus decimal
 // and hex character references. The full HTML5 named-entity table (~2k names) is
 // deliberately out of scope for URLs; anything unrecognized stays literal. Scanned
-// manually — no regex — so HTML_TAG remains the library's only regex
+// manually — no regex, like every other scanner in this file
 private val NAMED_ENTITIES =
     mapOf(
         "amp" to "&",
@@ -399,27 +466,12 @@ internal class Visitor(
             return ""
         }
 
-        val match = HTML_TAG.matchEntire(tag) ?: return escapeText(tag)
-        val closing = match.groupValues[1].isNotEmpty()
-        val name = match.groupValues[2].lowercase()
-        // The regex's trailing (/?) is attribute-blind: per HTML5 an unquoted attribute
-        // value ends only at whitespace or >, so the slash of <a href=http://x/> belongs
-        // to the value and the tag is not self-closing. A slash counts as self-closing
-        // only when it follows the tag name (no attributes), whitespace, or a value's
-        // closing quote; otherwise it is folded back into the attributes
-        var attrs = match.groupValues[3]
-        var selfClosing = match.groupValues[4].isNotEmpty()
-        val last = attrs.lastOrNull()
-        if (selfClosing && last != null && !last.isWhitespace() && last != '"' && last != '\'') {
-            attrs += "/"
-            selfClosing = false
-        }
-
-        if (name == "br") return "\n"
-        if (name == "a") return renderAnchor(tag, closing, selfClosing, attrs)
+        val parts = parseHtmlTag(tag) ?: return escapeText(tag)
+        if (parts.name == "br") return "\n"
+        if (parts.name == "a") return renderAnchor(tag, parts.closing, parts.selfClosing, parts.attrs)
 
         val marker =
-            when (name) {
+            when (parts.name) {
                 "b", "strong" -> "*"
                 "i", "em" -> "_"
                 "s", "del", "strike" -> "~"
@@ -427,8 +479,8 @@ internal class Visitor(
                 "code", "kbd", "samp", "tt" -> "`"
                 else -> return escapeText(tag)
             }
-        if (selfClosing) return escapeText(tag)
-        if (closing) {
+        if (parts.selfClosing) return escapeText(tag)
+        if (parts.closing) {
             if (openEmphasis.lastOrNull() == marker) {
                 openEmphasis.removeLastOrNull()
                 if (marker == "`") htmlCodeDepth--

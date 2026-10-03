@@ -94,13 +94,14 @@ internal fun chunkBlock(
     }
 
 // Last-resort seam: fully escaped text is valid MarkdownV2 at any atomic cut, so
-// unit-boundary chunking loses no characters (structure degrades, text never does)
+// unit-boundary chunking loses no characters (structure degrades, text never does);
+// the isBlank guard keeps the nothing-content skip, the text itself flattens untrimmed
 private fun plainTextChunks(
     node: Node,
     maxLength: Int,
 ): List<String> {
-    val text = plainText(listOf(node)).trim()
-    if (text.isEmpty()) return emptyList()
+    val text = plainText(listOf(node))
+    if (text.isBlank()) return emptyList()
     return escapeChunks(text, maxLength)
 }
 
@@ -183,8 +184,10 @@ private fun chunkList(
                     if (full.length <= maxLength) {
                         current.append(full)
                     } else {
-                        val text = plainText(listOf(item)).trim()
-                        if (text.isNotEmpty()) flattenWithLead(prefix, text, maxLength, pieces, current)
+                        // Untrimmed: edge whitespace of the item's text is content the
+                        // flattening path must preserve (a trailing code-line space, say)
+                        val text = plainText(listOf(item))
+                        if (text.isNotBlank()) flattenWithLead(prefix, text, maxLength, pieces, current)
                     }
                 }
             }
@@ -224,8 +227,9 @@ private fun chunkQuote(
                 if (prefixed.length <= maxLength) {
                     current.append(prefixed)
                 } else {
-                    val text = plainText(listOf(node)).trim()
-                    if (text.isNotEmpty()) chunkQuotedText(text, maxLength, pieces, current)
+                    // Untrimmed, same trade as the list path above
+                    val text = plainText(listOf(node))
+                    if (text.isNotBlank()) chunkQuotedText(text, maxLength, pieces, current)
                 }
             }
         }
@@ -355,15 +359,19 @@ private fun chunkInlineGroup(
             current.append(rendered)
         } else {
             if (current.length > lead) {
-                // Full trim: inline continuation pieces carry no meaningful edge whitespace
-                pieces += current.toString().trim()
+                // No trimming: edge whitespace at an inline boundary is real text (the
+                // space before an emphasis marker, say), and the chunking paths promise
+                // character losslessness — plain whitespace needs no escaping either
+                pieces += current.toString()
                 current.setLength(0)
             }
             if (current.isEmpty() && rendered.length <= maxLength) {
                 current.append(rendered)
             } else {
-                val text = plainText(listOf(node)).trim()
-                if (text.isNotEmpty()) flattenWithLead(current.toString(), text, maxLength, pieces, current)
+                // isNotBlank keeps the nothing-content skip; a mid-group node's edge
+                // spaces (" c" after an emphasis, say) are content and stay untrimmed
+                val text = plainText(listOf(node))
+                if (text.isNotBlank()) flattenWithLead(current.toString(), text, maxLength, pieces, current)
             }
         }
     }
@@ -387,8 +395,10 @@ private fun flattenWithLead(
     val limit = maxLength - lead.length
     val keepLead = limit >= 2
     val escaped = escapeChunks(text, if (keepLead) limit else maxLength)
-    pieces += ((if (keepLead) lead else "") + escaped.first()).trim()
-    for (i in 1 until escaped.size - 1) pieces += escaped[i].trim()
+    // No trimming: a piece edge can land on a space of the original text, and trimming
+    // it would drop a character the flattening paths promise to preserve
+    pieces += (if (keepLead) lead else "") + escaped.first()
+    for (i in 1 until escaped.size - 1) pieces += escaped[i]
     current.setLength(0)
-    if (escaped.size > 1) current.append(escaped.last().trim())
+    if (escaped.size > 1) current.append(escaped.last())
 }
