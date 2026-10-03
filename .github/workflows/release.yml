@@ -5,10 +5,14 @@
 # and fails loudly when the READMEs' documented version coordinates were not bumped with
 # the tag. Tests are not repeated here; the Build workflow covers them on main pushes.
 #
-# Required repository secrets (Central Portal: https://central.sonatype.com):
-#   MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD — a Portal user token
-#   GPG_PRIVATE_KEY — the ASCII-armored secret key (gpg --export-secret-keys --armor …)
-#   GPG_PASSPHRASE — that key's passphrase
+# Required repository secrets (Central Portal: https://central.sonatype.com) — the same
+# values the commonmark-kotlin repo publishes with; GitHub secrets are per-repository,
+# copy them over:
+#   ORG_GRADLE_PROJECT_mavenCentralUsername / …Password — a Portal user token
+#   ORG_GRADLE_PROJECT_signingInMemoryKey — the ASCII-armored secret key
+#     (gpg --export-secret-keys --armor …)
+#   ORG_GRADLE_PROJECT_signingInMemoryKeyId — the key id
+#   ORG_GRADLE_PROJECT_signingInMemoryKeyPassword — that key's passphrase
 name: Release
 
 on:
@@ -89,10 +93,11 @@ jobs:
       # any third-party config-cache edge cases; the release must not fail on those
       - name: Publish to Maven Central
         env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralUsername }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralPassword }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyId }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyPassword }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKey }}
         run: ./gradlew publishToMavenCentral --no-configuration-cache
 
       # Fresh measurements ship with every release, so the README's table (dated,

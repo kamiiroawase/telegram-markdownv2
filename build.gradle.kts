@@ -174,21 +174,45 @@ apiValidation {
 // API reference from the KDoc: ./gradlew dokkaGeneratePublicationHtml (CI uploads the
 // result as an artifact); configuration is Dokka's multiplatform defaults
 
+// The release workflow supplies the GPG key as ORG_GRADLE_PROJECT_signingInMemoryKey and
+// the plugin wires it into Gradle's signing extension by itself (the same property-based
+// setup the commonmark-kotlin repo publishes with). This gate adds only two things on
+// top: a blank value counts as absent — publishToMavenLocal keeps working without
+// secrets, the Build workflow's artifact verification depends on that — and a non-blank
+// value must be a complete ASCII-armored key, so a missing/misnamed/mangled secret fails
+// with instructions instead of Gradle's cryptic "Could not read PGP secret key"
+val signingKey =
+    providers
+        .gradleProperty("signingInMemoryKey")
+        .orNull
+        ?.replace("\r\n", "\n")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+if (signingKey != null) {
+    require(
+        signingKey.startsWith("-----BEGIN PGP PRIVATE KEY BLOCK-----") &&
+            signingKey.endsWith("-----END PGP PRIVATE KEY BLOCK-----"),
+    ) {
+        "signingInMemoryKey is not a complete ASCII-armored PGP secret key (expected the " +
+            "-----BEGIN/END PGP PRIVATE KEY BLOCK----- lines). Re-export with " +
+            "'gpg --export-secret-keys --armor <key id>' and store the full output in the " +
+            "ORG_GRADLE_PROJECT_signingInMemoryKey secret — a partially copied key or one " +
+            "stored with literal \\n escapes fails to parse"
+    }
+}
+
 // Maven Central publishing via the vanniktech plugin: every KMP target's publication
 // (plus the root Gradle-module publication KMP consumers reference from commonMain) is
 // signed and uploaded to the Central Portal in one `publishToMavenCentral` run. The
 // release workflow supplies the credentials and the GPG key as environment-mapped gradle
 // properties (ORG_GRADLE_PROJECT_mavenCentralUsername/Password,
-// ORG_GRADLE_PROJECT_signingInMemoryKey/KeyPassword); with none of them present — local
-// builds and the PR-time publishToMavenLocal verification — signing stays out of the way
+// ORG_GRADLE_PROJECT_signingInMemoryKey/KeyPassword)
 mavenPublishing {
     // automaticRelease closes and releases the staging deployment right after the upload,
     // so a green tag push needs no manual portal visit
     publishToMavenCentral(automaticRelease = true)
 
-    // Sign only when the key is available: publishToMavenLocal must keep working without
-    // secrets (the Build workflow's artifact verification runs exactly that)
-    if (providers.gradleProperty("signingInMemoryKey").isPresent) {
+    if (signingKey != null) {
         signAllPublications()
     }
 
