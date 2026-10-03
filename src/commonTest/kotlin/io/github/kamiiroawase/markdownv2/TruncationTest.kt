@@ -554,7 +554,12 @@ class TruncationTest {
 
     @Test
     fun truncatedListKeepsItemsAfterMidListEmptyItem() {
-        assertEquals("• a\n• b…", MarkdownV2.render("- a\n-\n- b", 9))
+        // The blank item consumes no budget (it is skipped by every rendering path), so
+        // the item behind it truncates as if it directly followed the first
+        assertEquals("• a\n• bbb…", MarkdownV2.render("- a\n-\n- bbbbbbbb", 10))
+        // And with room for the whole list no truncation marker appears at all — the
+        // blank item no longer pads the render past the limit
+        assertEquals("• a\n• b", MarkdownV2.render("- a\n-\n- b", 9))
     }
 
     @Test

@@ -379,6 +379,11 @@ private fun chunkParagraph(
     for (group in lineGroups(node)) {
         if (group.isEmpty()) continue
         val rendered = renderInlineGroup(group, options)
+        // A group that renders to nothing (a lone comment, an empty-alt empty-URL image)
+        // glues nothing and separates nothing: appending it would only stack separators
+        // between its neighbors (and, first in a heading, strand the lead for the tail
+        // check below to flatten)
+        if (rendered.isEmpty()) continue
         val separator = if (acc.current.length == bare) "" else "\n"
         if (acc.current.length + separator.length + rendered.length <= maxLength) {
             acc.appendRendered(separator + rendered)
@@ -395,6 +400,19 @@ private fun chunkParagraph(
                 bare = 0
             }
         }
+    }
+    // The lead never glued onto any content — an empty heading, or one whose every group
+    // renders to nothing. Within the limit it flushes as rendered structure; an over-limit
+    // lead would flush as an over-limit chunk, and dropping it outright (the trade the
+    // with-content paths may make) would turn the render's visible output into an empty
+    // chunk list — so it flattens at escape-unit boundaries instead, the same shape the
+    // code-line seam takes: every piece valid, within the limit, and joining back to the
+    // full render
+    if (bare > 0 && acc.current.length == bare && prefix.length > maxLength) {
+        val pieces = splitEscapedUnits(prefix.trimEnd(), maxLength)
+        pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)
+        acc.current.setLength(0)
+        acc.appendVerbatim(pieces.last())
     }
 }
 

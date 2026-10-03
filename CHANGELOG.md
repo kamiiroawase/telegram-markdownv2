@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `RenderOptions` is a data class: `equals`/`hashCode`/`toString`/`copy` work as expected,
+  so option sets can be compared, cached and derived (two instances compare equal only
+  when their display-width measures are the same function instance — distinct lambdas
+  are never equal, whatever they compute)
+
+### Fixed
+
+- Chunking no longer emits an over-limit chunk for an empty heading:
+  `renderChunked("###", maxLength = 4)` used to flush the bare `\#\#\#` lead (6 chars) as
+  a single chunk beyond the limit — a lead that nothing glues onto (an empty heading, or
+  one whose every line group renders to nothing) now flattens at escape-unit boundaries,
+  so every piece stays within the limit and the pieces join back to the full render
+- Chunking an over-limit heading whose content all renders to nothing (a lone comment,
+  an empty-alt empty-URL image) no longer returns an empty list while `render` emits the
+  visible `\#` marker: the lead is the whole visible output and now survives — the same
+  trade the 1.3.0 thematic-break fix made for the flatten seam
+- A blank-bodied list item no longer renders a bare `• ` marker line: the full render
+  now skips it exactly as the truncation and chunking walks always have (the marker is
+  still consumed, so ordered numbering keeps the source numbers) — render, truncation and
+  chunking agree on which items exist
+
 ## [1.3.0] — 2026-10-03
 
 ### Changed

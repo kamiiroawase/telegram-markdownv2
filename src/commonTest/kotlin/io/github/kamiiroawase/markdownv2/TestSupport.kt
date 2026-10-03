@@ -42,7 +42,17 @@ internal fun sweepContents(htmlParsingSupported: Boolean): List<String> =
         add("> | h1 | h2 |\n> | --- | --- |\n> | aaaa | bbbb |\n> | cccc | dddd |")
         add("- | h1 | h2 |\n  | --- | --- |\n  | aaaa | bbbb |\n  | cccc | dddd |\n- tail")
         add("# " + "heading ".repeat(20))
+        // Empty headings: no line group ever glues onto the marker lead, so the sweep
+        // crosses the limit below the escaped hashes' length where the lead must flatten
+        add("###")
+        add("######")
+        // A blank-bodied item is skipped by every rendering path alike
+        add("- aaaa\n-\n- bbbb")
+        // A heading whose only content renders to nothing: the marker lead is the whole
+        // visible output (platform-independent twin of the gated comment shape)
+        add("###### ![]()")
         add("para **bold** text [link](https://example.com/path) `code` more text to push length")
         add("😀😀😀 *bold 😀* `code 😀` [😀 link](https://example.com/x)")
         if (htmlParsingSupported) add("<div>\nblock html content\nmore html\n</div>")
+        if (htmlParsingSupported) add("###### <!-- c -->")
     }

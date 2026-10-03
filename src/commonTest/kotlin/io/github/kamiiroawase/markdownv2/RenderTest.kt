@@ -1130,10 +1130,15 @@ class RenderTest {
     }
 
     @Test
-    fun astEmptyListItemRendersBareMarker() {
+    fun astEmptyListItemSkipsLikeThePipelines() {
+        // A blank-bodied item is no-content: the full render skips it exactly as the
+        // truncation and chunking walks do (forEachListItem), the marker consumed so
+        // ordered numbering keeps the source numbers
         val list = BulletList()
         list.appendChild(ListItem())
-        assertEquals("•", MarkdownV2.render(list))
+        assertEquals("", MarkdownV2.render(list))
+        assertEquals("• a\n• b", MarkdownV2.render("- a\n-\n- b"))
+        assertEquals("1\\. a\n3\\. b", MarkdownV2.render("1. a\n2.\n3. b"))
     }
 
     @Test

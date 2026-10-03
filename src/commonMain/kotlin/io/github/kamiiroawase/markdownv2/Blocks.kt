@@ -70,12 +70,13 @@ internal fun listMarkerOf(list: Node): () -> String {
 }
 
 /**
- * Walks a list's items the way both budget-aware pipelines must: non-ListItem children
- * skip, the marker is taken — its number consumed — for every item including ones whose
- * body drops out, and a body that renders to nothing but whitespace is no-content and
- * skips too. [visit] receives each surviving item in document order with its marker and
- * pre-rendered body; returning false stops the walk (truncation drops the items that
- * follow whole — chunking never stops and always returns true).
+ * Walks a list's items the way every rendering path must: non-ListItem children skip, the
+ * marker is taken — its number consumed — for every item including ones whose body drops
+ * out, and a body that renders to nothing but whitespace is no-content and skips too
+ * (Visitor.renderList makes the same walk, so the full render emits exactly the items
+ * this walk visits). [visit] receives each surviving item in document order with its
+ * marker and pre-rendered body; returning false stops the walk (truncation drops the
+ * items that follow whole — chunking never stops and always returns true).
  */
 internal fun forEachListItem(
     list: Node,

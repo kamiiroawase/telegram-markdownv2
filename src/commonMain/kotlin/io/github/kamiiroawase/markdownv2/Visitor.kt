@@ -871,28 +871,20 @@ internal class Visitor(
         inlineDepth--
     }
 
-    // Continuation lines are indented to the marker width so multi-line items stay
-    // visually attached to their marker; the marker factory (listMarkerOf) is shared with
-    // the truncation and chunking pipelines
+    // Continuation lines are indented to the marker width via applyPrefix (shared with
+    // the truncation and chunking pipelines). A blank-bodied item is no-content and skips,
+    // its marker consumed — the same walk forEachListItem makes, so the full render,
+    // truncation and chunking agree on which items exist and how they number
     private fun renderList(list: Node) {
         val marker = listMarkerOf(list)
         var item = list.firstChild
         while (item != null) {
             if (item is ListItem) {
-                val body = renderChild(item)
                 val prefix = marker()
-                val indent = " ".repeat(prefix.length)
-                val lines = body.lines()
-
-                sb.append(prefix).append(lines.first())
-                for (i in 1 until lines.size) {
-                    sb.append('\n')
-                    if (lines[i].isNotEmpty()) {
-                        sb.append(indent)
-                    }
-                    sb.append(lines[i])
+                val body = renderChild(item)
+                if (body.isNotBlank()) {
+                    sb.append(applyPrefix(prefix, body)).append('\n')
                 }
-                sb.append('\n')
             }
             item = item.next
         }

@@ -14,6 +14,13 @@ final class io.github.kamiiroawase.markdownv2/RenderOptions { // io.github.kamii
     final val maxCellWidth // io.github.kamiiroawase.markdownv2/RenderOptions.maxCellWidth|{}maxCellWidth[0]
         final fun <get-maxCellWidth>(): kotlin/Int // io.github.kamiiroawase.markdownv2/RenderOptions.maxCellWidth.<get-maxCellWidth>|<get-maxCellWidth>(){}[0]
 
+    final fun component1(): kotlin/Int // io.github.kamiiroawase.markdownv2/RenderOptions.component1|component1(){}[0]
+    final fun component2(): kotlin/Function1<kotlin/Int, kotlin/Int> // io.github.kamiiroawase.markdownv2/RenderOptions.component2|component2(){}[0]
+    final fun copy(kotlin/Int = ..., kotlin/Function1<kotlin/Int, kotlin/Int> = ...): io.github.kamiiroawase.markdownv2/RenderOptions // io.github.kamiiroawase.markdownv2/RenderOptions.copy|copy(kotlin.Int;kotlin.Function1<kotlin.Int,kotlin.Int>){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kamiiroawase.markdownv2/RenderOptions.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kamiiroawase.markdownv2/RenderOptions.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kamiiroawase.markdownv2/RenderOptions.toString|toString(){}[0]
+
     final object Companion { // io.github.kamiiroawase.markdownv2/RenderOptions.Companion|null[0]
         final const val DEFAULT_MAX_CELL_WIDTH // io.github.kamiiroawase.markdownv2/RenderOptions.Companion.DEFAULT_MAX_CELL_WIDTH|{}DEFAULT_MAX_CELL_WIDTH[0]
             final fun <get-DEFAULT_MAX_CELL_WIDTH>(): kotlin/Int // io.github.kamiiroawase.markdownv2/RenderOptions.Companion.DEFAULT_MAX_CELL_WIDTH.<get-DEFAULT_MAX_CELL_WIDTH>|<get-DEFAULT_MAX_CELL_WIDTH>(){}[0]

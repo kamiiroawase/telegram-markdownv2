@@ -6,9 +6,10 @@ package io.github.kamiiroawase.markdownv2
  *
  * Only table degradation depends on measurement choices (how wide a character is, how much
  * of a huge cell may cost); everything else has a single correct rendering and is not
- * configurable.
+ * configurable. A value object: equality, hashing and [copy] compare both knobs, so
+ * instances work as cache keys and derived variants.
  */
-public class RenderOptions(
+public data class RenderOptions(
     /**
      * Display-width cap for a single table cell when a table degrades to a code block;
      * over-long cells are cut to this width (minus the ellipsis) so one huge cell cannot
@@ -27,6 +28,10 @@ public class RenderOptions(
      * to match your target font (e.g. treat Ambiguous characters as wide). Values must be
      * non-negative — a negative result fails table rendering with an IllegalArgumentException;
      * the truncation ellipsis (…) is measured once at construction (see [maxCellWidth]).
+     *
+     * Equality notes for the data-class members: two instances compare equal only when
+     * their measures are the same function instance — distinct lambdas are never equal,
+     * whatever they compute.
      */
     public val displayWidthOf: (codePoint: Int) -> Int = ::defaultDisplayWidth,
 ) {

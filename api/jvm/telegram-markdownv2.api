@@ -21,8 +21,15 @@ public final class io/github/kamiiroawase/markdownv2/RenderOptions {
 	public fun <init> ()V
 	public fun <init> (ILkotlin/jvm/functions/Function1;)V
 	public synthetic fun <init> (ILkotlin/jvm/functions/Function1;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()Lkotlin/jvm/functions/Function1;
+	public final fun copy (ILkotlin/jvm/functions/Function1;)Lio/github/kamiiroawase/markdownv2/RenderOptions;
+	public static synthetic fun copy$default (Lio/github/kamiiroawase/markdownv2/RenderOptions;ILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lio/github/kamiiroawase/markdownv2/RenderOptions;
+	public fun equals (Ljava/lang/Object;)Z
 	public final fun getDisplayWidthOf ()Lkotlin/jvm/functions/Function1;
 	public final fun getMaxCellWidth ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/github/kamiiroawase/markdownv2/RenderOptions$Companion {

@@ -57,12 +57,73 @@ class ChunkingTest {
     }
 
     @Test
+    fun chunkedEmptyHeadingFlattensOverLimitMarkerLead() {
+        // An empty ATX heading renders to its escaped hashes alone; with a limit below
+        // the lead's length the bare marker used to flush as one over-limit chunk (the
+        // drop-the-lead trade needs a node to keep — an empty heading has none)
+        val pieces = MarkdownV2.renderChunked("###", 4)
+        assertTrue(pieces.isNotEmpty(), "visible render produced no chunks")
+        pieces.forEach { piece ->
+            assertTrue(piece.length <= 4, "over-long piece: $piece")
+            assertTrue(piece.isNotEmpty(), "empty piece: $pieces")
+        }
+        assertEquals(MarkdownV2.render("###"), pieces.joinToString(""))
+
+        val deep = MarkdownV2.renderChunked("######", 5)
+        deep.forEach { piece -> assertTrue(piece.length <= 5, "over-long piece: $piece") }
+        assertEquals(MarkdownV2.render("######"), deep.joinToString(""))
+    }
+
+    @Test
+    fun chunkedCommentOnlyHeadingKeepsTheVisibleRender() {
+        // Every line group renders to nothing (a lone comment), so the lead is the whole
+        // visible output: it used to be dropped outright — an empty chunk list for a
+        // non-empty render (the JS/Wasm parse defect keeps this shape on JVM/Native only)
+        if (!htmlParsingSupported) return
+        val pieces = MarkdownV2.renderChunked("###### <!-- c -->", 10)
+        assertTrue(pieces.isNotEmpty(), "visible render produced no chunks")
+        pieces.forEach { piece -> assertTrue(piece.length <= 10, "over-long piece: $piece") }
+        assertEquals(MarkdownV2.render("###### <!-- c -->"), pieces.joinToString(""))
+    }
+
+    @Test
+    fun chunkedEmptyImageHeadingKeepsTheVisibleRender() {
+        // The platform-independent twin of the comment shape: an image with neither alt
+        // text nor URL renders to nothing inside the heading
+        val pieces = MarkdownV2.renderChunked("###### ![]()", 10)
+        assertTrue(pieces.isNotEmpty(), "visible render produced no chunks")
+        pieces.forEach { piece -> assertTrue(piece.length <= 10, "over-long piece: $piece") }
+        assertEquals(MarkdownV2.render("###### ![]()"), pieces.joinToString(""))
+    }
+
+    @Test
     fun renderChunkedWhitespaceOnlySingleBlockYieldsNoChunksViaAst() {
         // The nothing-content skip covers the single-block entry too: a block whose
         // whole render is whitespace yields no chunk, exactly as the document path's
         // isNotBlank guard drops it from block packing
         val paragraph = Paragraph().apply { appendChild(Text("   ")) }
         assertEquals(emptyList(), MarkdownV2.renderChunked(paragraph, 30))
+    }
+
+    @Test
+    fun chunkedOverLimitListSkipsBlankItemsLikeTheFullRender() {
+        // A blank-bodied item mid-list used to render a bare "• " line in the full
+        // render while the chunking walk skipped it — render, truncation and chunking
+        // now agree it is no-content
+        val content =
+            buildString {
+                repeat(20) { append("- item ").append(it).append(" pad pad pad pad\n") }
+                append("-\n")
+            }
+        val full = MarkdownV2.render(content)
+        assertFalse(full.lines().any { it == "• " || it == "•" }, "full render kept a blank item marker: $full")
+
+        val chunks = MarkdownV2.renderChunked(content, 100)
+        assertTrue(chunks.size > 1, "expected multiple chunks: $chunks")
+        chunks.forEach { chunk ->
+            assertTrue(chunk.length <= 100, "over-long chunk: ${chunk.take(50)}")
+            assertFalse(chunk.lines().any { it == "• " || it == "•" }, "blank item marker leaked into chunk: $chunk")
+        }
     }
 
     @Test
