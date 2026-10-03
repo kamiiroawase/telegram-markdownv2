@@ -4,6 +4,8 @@ One line per change; versions follow `v*` git tags.
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-10-04
+
 ### Added
 
 - `RenderOptions` is a data class (`equals`/`hashCode`/`copy`)

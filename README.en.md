@@ -20,7 +20,7 @@ dependencies {
     // metadata resolves the platform variant); pin a variant by suffix: -android /
     // -jvm / -js / -wasm-js / -linuxx64 / -linuxarm64 / -macosarm64 / -mingwx64 /
     // -iosarm64 / -iosx64 / -iossimulatorarm64
-    implementation("io.github.kamiiroawase:telegram-markdownv2:1.3.0")
+    implementation("io.github.kamiiroawase:telegram-markdownv2:2.0.0")
 }
 ```
 
