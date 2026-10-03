@@ -27,8 +27,6 @@ Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转�
 
 发布于 [Maven Central](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)，版本跟随 `v*` git tag。
 
-> **从 1.1.x 升级**：坐标从 `com.github.kamiiroawase.telegram-markdownv2:…` 改为 `io.github.kamiiroawase:…`，Kotlin 包名从 `com.github.kamiiroawase.markdownv2` 改为 `io.github.kamiiroawase.markdownv2`（import 全部要改），分发由 JitPack 迁至 Maven Central——≤1.1.x 仍可从 JitPack 旧坐标解析。破坏性变更清单见 [CHANGELOG](CHANGELOG.md)。
-
 ```kotlin
 repositories {
     mavenCentral()

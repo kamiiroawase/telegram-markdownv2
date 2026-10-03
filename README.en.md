@@ -27,8 +27,6 @@ Supported platforms: Android (minSdk 23), JVM 11+, JS, Wasm, Linux (x64/Arm64), 
 
 Published on [Maven Central](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2); versions follow `v*` git tags.
 
-> **Upgrading from 1.1.x**: the coordinates moved from `com.github.kamiiroawase.telegram-markdownv2:…` to `io.github.kamiiroawase:…`, the Kotlin package from `com.github.kamiiroawase.markdownv2` to `io.github.kamiiroawase.markdownv2` (every import changes), and distribution moved from JitPack to Maven Central — ≤1.1.x stays resolvable from JitPack's old coordinates. See [CHANGELOG](CHANGELOG.md) for the breaking changes.
-
 ```kotlin
 repositories {
     mavenCentral()
