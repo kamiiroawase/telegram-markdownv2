@@ -296,8 +296,34 @@ class RenderTest {
     }
 
     @Test
-    fun nestedBlockQuoteDoublesPrefix() {
-        assertEquals("> > deep", MarkdownV2.render("> > deep"))
+    fun nestedBlockQuoteGluesMarkers() {
+        // Telegram accepts a nesting run only as glued markers (">>", ">>>"), optionally
+        // followed by one space; the spaced stack "> >" reads as unescaped content and
+        // the Bot API rejects the whole message (verified against the real API)
+        assertEquals(">> deep", MarkdownV2.render("> > deep"))
+    }
+
+    @Test
+    fun threeLevelBlockQuoteGluesThreeMarkers() {
+        assertEquals(">>> triple", MarkdownV2.render(">>> triple"))
+    }
+
+    @Test
+    fun quoteSeparatorStaysBareBeforeANestedQuote() {
+        assertEquals("> a\n>\n>> b", MarkdownV2.render("> a\n>\n> > b"))
+    }
+
+    @Test
+    fun quoteMarkerNeverGluesOntoCodeContentStartingWithGreaterThan() {
+        // A fence line starting with '>' is content inside the pre entity: the marker
+        // keeps its space ("> >xml") — gluing would turn the content's '>' into a quote
+        // marker and change what Telegram displays
+        assertEquals("> ```\n> >xml\n> ```", MarkdownV2.render("> ```\n> >xml\n> ```"))
+    }
+
+    @Test
+    fun nestedQuoteAroundAFenceGluesOnlyTheMarkers() {
+        assertEquals(">> ```\n>> >xml\n>> ```", MarkdownV2.render("> > ```\n> > >xml\n> > ```"))
     }
 
     @Test

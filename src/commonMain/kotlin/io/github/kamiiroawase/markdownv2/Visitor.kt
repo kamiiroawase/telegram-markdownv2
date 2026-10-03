@@ -323,9 +323,22 @@ internal class Visitor(
     }
 
     override fun visit(blockQuote: BlockQuote) {
-        // prefixQuote is the shared quote-prefixing helper (Blocks.kt); blank lines keep
-        // a bare ">": an empty line would terminate the quote entity
-        sb.append(prefixQuote(renderChild(blockQuote)))
+        // Per child: a nested quote renders with its own glued marker run and this level's
+        // marker glues in front of it, every other child's raw lines (code content
+        // included) take the spaced "> " — see prefixQuoteLevel, which pins the Telegram
+        // grammar (nesting runs glue; "> >" is unescaped content). The "\n>\n" separator
+        // keeps the blank line between the quote's paragraphs as a bare marker. An empty
+        // quote keeps a single ">"
+        val pieces = mutableListOf<String>()
+        var child = blockQuote.firstChild
+        while (child != null) {
+            val rendered = renderQuoteChild(child)
+            if (rendered.isNotBlank()) {
+                pieces += prefixQuoteLevel(child is BlockQuote, rendered)
+            }
+            child = child.next
+        }
+        sb.append(if (pieces.isEmpty()) ">" else pieces.joinToString("\n>\n"))
         sb.append("\n\n")
     }
 
@@ -907,6 +920,21 @@ internal class Visitor(
         } else {
             val visitor = Visitor(depth + 1, options)
             visitor.visitChildren(node)
+            visitor.output().trimEnd('\n')
+        }
+
+    // The quote-child variant: the node renders through its own full block shape —
+    // visit(node), not visitChildren(node) — so a nested blockQuote child arrives with
+    // its own marker run for the caller to glue onto (see visit(blockQuote)). Depth
+    // capping and trailing-newline trimming match renderChild
+    private fun renderQuoteChild(node: Node): String =
+        if (depth + 1 >= MAX_RENDER_DEPTH) {
+            val plain = StringBuilder()
+            appendPlainText(plain, node)
+            plain.toString().trimEnd('\n')
+        } else {
+            val visitor = Visitor(depth + 1, options)
+            node.accept(visitor)
             visitor.output().trimEnd('\n')
         }
 }

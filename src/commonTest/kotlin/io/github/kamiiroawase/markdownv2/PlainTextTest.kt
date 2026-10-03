@@ -90,6 +90,11 @@ class PlainTextTest {
     @Test
     fun plainTextStripsQuotePrefixes() {
         assertEquals("a\n\nb", MarkdownV2.toPlainText("> a\n>\n> > b"))
+        // The renderer's own nested-quote shape: glued markers strip per unit, the same
+        // as the spaced hand-made form above
+        assertEquals("a\n\nb", MarkdownV2.toPlainText(MarkdownV2.render("> a\n>\n> > b")))
+        assertEquals("glued", MarkdownV2.toPlainText(">> glued"))
+        assertEquals("a\n\nb", MarkdownV2.toPlainText(">>a\n>>\n>>b"))
         // Mid-line '>' is not a quote marker and stays (as-is, unescaped garbage tolerated)
         assertEquals("a > b", MarkdownV2.toPlainText("a > b"))
     }
@@ -97,8 +102,8 @@ class PlainTextTest {
     @Test
     fun plainTextLabelSpanningLinesInQuoteStripsContinuationPrefixes() {
         // The render of a quote whose link label soft-breaks onto the next line:
-        // prefixQuote marks every line of the body, the label's continuation line
-        // included — its marker belongs to the quote, not the label (pre-fix "> b"
+        // the quote renderer marks every line of the body, the label's continuation
+        // line included — its marker belongs to the quote, not the label (pre-fix "> b"
         // leaked into the plain text)
         assertEquals(
             "a\nb (http://x.com)",

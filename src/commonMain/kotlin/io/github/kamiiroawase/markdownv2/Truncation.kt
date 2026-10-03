@@ -229,7 +229,7 @@ private fun shrinkQuote(
         val remaining = budget - parts.length - separator.length
         if (remaining <= 0) break
 
-        val prefixed = prefixQuote(renderBlock(node, depth + 1, options))
+        val prefixed = prefixQuoteLevel(node is BlockQuote, renderBlock(node, depth + 1, options))
         if (prefixed.length <= remaining) {
             parts.append(separator).append(prefixed)
             node = node.next
@@ -246,8 +246,12 @@ private fun shrinkQuote(
 
 /**
  * Tail blocks of a quote that do not fit: each block is shrunk until it stays ≤ [remaining]
- * after the "> " prefix is applied. The per-line +2 prefix overhead is likewise outside
- * renderBlocks' budget; on overflow, re-shrink with the budget tightened by the excess.
+ * after its quote prefix is applied. The prefix is per child — a nested quote's glued
+ * markers take the outer marker glued, raw lines the spaced "> " (see prefixQuoteLevel) —
+ * which is why this walks the tail's children itself instead of prefixing a joined
+ * renderBlocks string: a code line starting with '>' is content and must never glue onto
+ * the marker run. The per-line +2 prefix overhead is likewise outside the block budget;
+ * on overflow, re-shrink with the budget tightened by the excess.
  * Line-dropping truncation is not allowed — emphasis/link markers closed on continuation
  * lines and code fences would be lost with the line. As with list items, re-shrinking
  * happens only at the top level (nested retries re-render exponentially); a nested level
@@ -265,11 +269,32 @@ private fun shrinkQuoteTail(
 
     var budget = remaining
     while (budget > 0) {
-        val shrunk = renderBlocks(node, budget, depth + 1, retriable = false, options).trim()
-        if (shrunk.isEmpty()) return ""
-        val prefixed = prefixQuote(shrunk)
-        if (prefixed.length <= remaining) return prefixed
-        budget -= prefixed.length - remaining
+        val parts = StringBuilder()
+        var current: Node? = node
+        while (current != null) {
+            val separator = if (parts.isEmpty()) "" else "\n>\n"
+            val remainingHere = budget - parts.length - separator.length
+            if (remainingHere <= 0) break
+
+            val block = renderBlock(current, depth + 1, options)
+            if (block.length <= remainingHere) {
+                // An empty block keeps parts empty, matching renderBlocks' separator
+                // suppression for blank leading blocks
+                if (block.isNotEmpty() || parts.isNotEmpty()) {
+                    parts.append(separator).append(prefixQuoteLevel(current is BlockQuote, block))
+                }
+                current = current.next
+            } else {
+                val shrunk = shrink(current, remainingHere, depth + 1, retriable = false, options)
+                if (shrunk.isNotEmpty()) {
+                    parts.append(separator).append(prefixQuoteLevel(current is BlockQuote, shrunk))
+                }
+                break
+            }
+        }
+        if (parts.isEmpty()) return ""
+        if (parts.length <= remaining) return parts.toString()
+        budget -= parts.length - remaining
     }
     return ""
 }

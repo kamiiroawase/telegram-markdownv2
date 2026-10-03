@@ -116,5 +116,21 @@ internal fun applyPrefix(
         }.joinToString("\n")
 }
 
-// Blank lines keep a bare ">": an empty line would terminate the quote entity
-internal fun prefixQuote(block: String): String = block.lines().joinToString("\n") { if (it.isEmpty()) ">" else "> $it" }
+// One quote level's line prefix over a rendered child of the quote. A nested quote's
+// render already opens every line with its own marker run (inductively: the spaced form
+// prefixes every line, the glued form prepends to lines that start with '>'), so this
+// level's marker glues in front of it — Telegram accepts a nesting run only as glued
+// markers (">>", ">>>" …) optionally followed by one space, and the spaced stack "> > x"
+// makes the inner markers read as unescaped content the Bot API rejects the whole
+// message for. Every other child's lines are raw content: a code line may itself start
+// with '>' (code content cannot be escaped), so those take the spaced "> " and never
+// glue. Blank lines keep a bare ">": an empty line would terminate the quote entity
+internal fun prefixQuoteLevel(
+    nested: Boolean,
+    block: String,
+): String =
+    if (nested) {
+        block.lines().joinToString("\n") { ">" + it }
+    } else {
+        block.lines().joinToString("\n") { if (it.isEmpty()) ">" else "> $it" }
+    }

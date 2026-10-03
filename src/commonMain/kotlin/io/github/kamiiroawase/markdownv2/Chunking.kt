@@ -305,7 +305,7 @@ private fun chunkQuote(
     while (node != null) {
         val rendered = renderBlock(node, depth + 1, options).trim()
         if (rendered.isNotBlank()) {
-            val prefixed = prefixQuote(rendered)
+            val prefixed = prefixQuoteLevel(node is BlockQuote, rendered)
             val separator = if (acc.current.isEmpty()) "" else "\n>\n"
             if (acc.current.length + separator.length + prefixed.length <= maxLength) {
                 acc.appendRendered(separator + prefixed)
