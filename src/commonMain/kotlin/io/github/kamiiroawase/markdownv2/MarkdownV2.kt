@@ -88,8 +88,10 @@ public object MarkdownV2 {
      * valid MarkdownV2; [maxLength] of 0 or less (the default) disables truncation.
      * Use with a custom [Parser] when the default extensions are not enough; unknown
      * block/inline node types contributed by third-party extensions are traversed as
-     * plain content. Rendering knobs that have no single right answer (table cell cap,
-     * character display width) live in [options].
+     * plain content. A non-Document node renders alone — its siblings in the parsed tree
+     * stay out of the call, truncated or not, the same boundary the [renderChunked]
+     * single-block overload draws. Rendering knobs that have no single right answer
+     * (table cell cap, character display width) live in [options].
      */
     public fun render(
         document: Node,
@@ -102,12 +104,17 @@ public object MarkdownV2 {
             return converted
         }
 
-        // A Document starts from its child block chain; a single block node passed in
-        // starts from itself, otherwise truncation would lose the block's own structure
-        // (list markers, table fences and the like)
-        val first = if (document is Document) document.firstChild else document
+        // A Document truncates from its child block chain; a single block node truncates
+        // on its own via truncateBlock — its siblings belong to the caller's document, the
+        // same boundary renderChunked's single-block overload draws — and either way the
+        // block's own structure (list markers, table fences and the like) survives the cut.
         // The budget reserves one character for the trailing ellipsis appended below
-        val truncated = renderBlocks(first, maxLength - 1, 0, retriable = true, options)
+        val truncated =
+            if (document is Document) {
+                renderBlocks(document.firstChild, maxLength - 1, 0, retriable = true, options)
+            } else {
+                truncateBlock(document, maxLength - 1, options)
+            }
 
         if (truncated.isEmpty()) {
             return renderPlainText(document, maxLength)

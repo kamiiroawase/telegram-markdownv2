@@ -490,6 +490,22 @@ class TruncationTest {
     }
 
     @Test
+    fun astTruncatedLoneNodeIgnoresSiblings() {
+        // render(node) sees only the node itself — the siblings around it in the caller's
+        // document are not part of the call, the same boundary renderChunked's single-block
+        // overload draws. The truncation path used to hold that boundary only implicitly
+        // (renderBlocks' sibling walk was unreachable for an over-limit lone node), and the
+        // walk is now structurally absent — truncateBlock — so the exact outputs below pin
+        // both the full render and the cut against any future sibling leak
+        val document = Document()
+        document.appendChild(Paragraph().apply { appendChild(Text("aaaa bbbb cccc dddd")) })
+        document.appendChild(Paragraph().apply { appendChild(Text("zz")) })
+        val node = document.firstChild as Paragraph
+        assertEquals("aaaa bbbb cccc dddd", MarkdownV2.render(node))
+        assertEquals("aaaa bbbb…", MarkdownV2.render(node, 10))
+    }
+
+    @Test
     fun astTruncatedParagraphOpeningWithSoftBreak() {
         val paragraph = Paragraph()
         paragraph.appendChild(SoftLineBreak())

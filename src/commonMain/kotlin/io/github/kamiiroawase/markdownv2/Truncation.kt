@@ -47,6 +47,27 @@ internal fun renderBlocks(
     return parts.toString()
 }
 
+/**
+ * Truncates one block node on its own — the non-Document entry of render(node). Mirrors
+ * renderBlocks' loop body for a lone block (whole when it fits, else shrink) but never
+ * walks node.next: the node's siblings belong to the caller's document, the same boundary
+ * chunkBlock draws on the chunking side. Routing this entry through renderBlocks used to
+ * keep that boundary only implicitly — the sibling walk was unreachable because
+ * convert()'s trim() can never lengthen the output, so a node whose render triggered
+ * truncation always overflows the budget and breaks the walk on its first iteration —
+ * sound reasoning, but one a future change to either trim would silently invalidate.
+ */
+internal fun truncateBlock(
+    node: Node,
+    budget: Int,
+    options: RenderOptions,
+): String {
+    if (budget <= 0) return ""
+    val block = renderBlock(node, 0, options)
+    if (block.length <= budget) return block
+    return shrink(node, budget, 0, retriable = true, options)
+}
+
 // Recursion on the truncation path is structurally bounded: retriable is true only at the
 // top level; a nested level that does not fit degrades to iterative plain text and goes no
 // deeper. Stack safety for deep ASTs is guaranteed by the depth caps in Visitor.renderChild
