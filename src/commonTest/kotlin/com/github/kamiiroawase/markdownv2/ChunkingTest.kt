@@ -341,4 +341,22 @@ class ChunkingTest {
         chunks.forEach { chunk -> assertTrue(chunk.length <= 20, "over-long chunk: $chunk") }
         assertEquals("• " + "a".repeat(3000), chunks.joinToString(""))
     }
+
+    @Test
+    fun chunkLengthBoundHoldsAcrossLimitSweep() {
+        // The per-chunk length bound checked across a sweep of limits, not just the
+        // hand-picked ones (the sibling sweep in TruncationTest covers the render side;
+        // the sweep starts at 2 because 1 and below return the full render as a single
+        // chunk by contract)
+        for (content in sweepContents(htmlParsingSupported)) {
+            for (length in 2..96) {
+                for (chunk in MarkdownV2.renderChunked(content, length)) {
+                    assertTrue(
+                        chunk.length <= length,
+                        "len=$length gave ${chunk.length}: ${chunk.take(50).replace("\n", "\\n")}",
+                    )
+                }
+            }
+        }
+    }
 }

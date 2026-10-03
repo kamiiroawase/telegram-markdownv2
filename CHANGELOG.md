@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Truncation no longer overshoots the limit by one character on a fence-wrapped block
+  (fenced/indented code, table, HTML): the shrink's line-fitting check forgot the
+  newline joining the line, so at exact boundary lengths `render(content, maxLength)`
+  returned `maxLength + 1` characters — a four-column table at limit 23 came back 24
+  long — which the Bot API then rejects as too long, the very failure truncation
+  exists to prevent
 - Truncation no longer stops at a list item whose body renders to nothing: the empty
   item skips (consuming its number on ordered lists, matching the full render's
   numbering) and the items after it still pack with their markers — the same trade the
@@ -18,7 +24,6 @@ All notable changes to this project are documented here. The format follows
   renderer's own filtering: pre-fix only inline `<!--` comments were filtered, so
   declarations and whole comment blocks leaked into flattened chunks as text the
   renderer itself never emits
-
 - Chunking's flattening fallback no longer drops the flattened text's trailing whitespace
   at the flush boundaries: the last escaped piece stayed untrimmed inside the in-progress
   chunk (deliberately — edge whitespace is content), but the next flush trimmed or

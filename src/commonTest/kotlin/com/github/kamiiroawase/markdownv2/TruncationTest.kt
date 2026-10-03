@@ -598,4 +598,21 @@ class TruncationTest {
         assertTrue(result.endsWith("…"))
         assertTrue(result.startsWith("https"), "URL prefix lost: ${result.take(30)}")
     }
+
+    @Test
+    fun lengthBoundHoldsAcrossLimitSweep() {
+        // The exact-output tests pin hand-picked limits; the shrink budget arithmetic only
+        // breaks at specific boundary lengths, which a sweep crosses. Pre-fix the
+        // fence-wrapped line check forgot the newline joining the line, and render
+        // returned maxLength + 1 characters at those lengths (the table shape at 23, say)
+        for (content in sweepContents(htmlParsingSupported)) {
+            for (length in 1..96) {
+                val result = MarkdownV2.render(content, length)
+                assertTrue(
+                    result.length <= length,
+                    "len=$length gave ${result.length}: ${result.take(50).replace("\n", "\\n")}",
+                )
+            }
+        }
+    }
 }

@@ -105,7 +105,13 @@ private fun shrinkRenderedCode(
 
     val sb = StringBuilder(open)
     for (line in lines.subList(1, lines.size - 1)) {
-        if (sb.length + line.length + close.length + 1 > budget) break
+        // Both newlines count toward the budget: the one joining this line and the one
+        // before the closing fence (pre-fix only the latter did, and the result could
+        // overrun the budget by one character)
+        // Both newlines count toward the budget: the one joining this line and the one
+        // before the closing fence (pre-fix only the latter did, and the result could
+        // overrun the budget by one character)
+        if (sb.length + 1 + line.length + 1 + close.length > budget) break
         sb.append('\n').append(line)
     }
     return sb.append('\n').append(close).toString()
