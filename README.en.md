@@ -14,7 +14,7 @@ Kotlin Multiplatform library that converts **CommonMark (incl. GFM tables & stri
 
 In one sentence: Markdown in, Telegram-renderable text out. Hand any CommonMark/GFM content to `MarkdownV2.render(...)` and get back message text ready for the Bot API with `parse_mode = MarkdownV2`:
 
-- Parses with [commonmark-kotlin](https://github.com/darriousliu/commonmark-kotlin) (the Kotlin Multiplatform port of commonmark-java), emits Telegram-flavoured MarkdownV2
+- Parses with [commonmark-kotlin](https://github.com/kamiiroawase/commonmark-kotlin) (the maintainer's fork of [darriousliu/commonmark-kotlin](https://github.com/darriousliu/commonmark-kotlin), the Kotlin Multiplatform port of commonmark-java; pulled in transitively as `io.github.kamiiroawase:commonmark` since 1.3.0), emits Telegram-flavoured MarkdownV2
 - All 19 escapable characters (Telegram's 18 official special characters plus the backslash) escaped; inline code / code blocks / link URLs follow their own escaping rules
 - Optional truncation (a positive `maxLength`; the default 0 renders in full), always staying valid MarkdownV2
 - Lossless chunking of over-length content (`renderChunked`): every piece fits the limit and is independently valid — send in order to deliver the full content

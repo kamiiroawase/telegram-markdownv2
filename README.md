@@ -14,7 +14,7 @@ Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转�
 
 一句话：Markdown 进，Telegram 能直接显示的文本出。把 CommonMark/GFM 内容交给 `MarkdownV2.render(...)`，拿到可直接配合 Bot API `parse_mode = MarkdownV2` 发送的消息文本：
 
-- 基于 [commonmark-kotlin](https://github.com/darriousliu/commonmark-kotlin)（commonmark-java 的 KMP 移植）解析，输出 Telegram 方言的 MarkdownV2
+- 基于 [commonmark-kotlin](https://github.com/kamiiroawase/commonmark-kotlin)（[darriousliu/commonmark-kotlin](https://github.com/darriousliu/commonmark-kotlin)——commonmark-java 的 KMP 移植——的维护者 fork，1.3.0 起以 `io.github.kamiiroawase:commonmark` 坐标传递引入）解析，输出 Telegram 方言的 MarkdownV2
 - 官方 18 个特殊字符加反斜杠共 19 个全量转义；行内代码 / 代码块 / 链接 URL 按各自的规则转义
 - 可选截断（`maxLength` 传正数时启用，默认 0 不截断），截断后仍是合法 MarkdownV2
 - 超长内容无损分片（`renderChunked`）：每段不超过上限且各自合法，按序发送还原全文
