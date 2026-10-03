@@ -4,7 +4,7 @@
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.kamiiroawase/telegram-markdownv2.svg)](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
-Kotlin Multiplatform library that converts **CommonMark (incl. GFM tables & strikethrough) into Telegram MarkdownV2**, with structure-preserving truncation for over-length content (Telegram message limit: 4096 characters). Built for LLM bot output — model replies are arbitrary Markdown of unpredictable structure, frequently containing constructs Telegram cannot render.
+Kotlin Multiplatform library that converts **CommonMark (incl. GFM tables & strikethrough) into Telegram MarkdownV2**, with structure-preserving truncation or lossless chunking for over-length content (Telegram caps messages at 4096 characters; chunks sent in order deliver the full content). Built for LLM bot output — model replies are arbitrary Markdown of unpredictable structure, frequently containing constructs Telegram cannot render.
 
 [中文版](README.md)
 
@@ -19,13 +19,15 @@ In one sentence: Markdown in, Telegram-renderable text out. Hand any CommonMark/
 - Optional truncation (a positive `maxLength`; the default 0 renders in full), always staying valid MarkdownV2
 - Lossless chunking of over-length content (`renderChunked`): every piece fits the limit and is independently valid — send in order to deliver the full content
 - Rejection fallback (`toPlainText`): de-formats rendered MarkdownV2 back to plain text, best-effort on any input without losing characters, and never throws
-- Unsupported constructs degrade gracefully: tables become aligned code blocks, HTML maps to entities or literal text — the degradation and boundary semantics live in "Common pitfalls and known limitations" below
+- Unsupported constructs degrade gracefully: tables become aligned code blocks, HTML maps to entities or literal text — the semantics live in "Degradation and boundary semantics" below, the caveats in "Known limitations and pitfalls"
 
 Supported platforms: Android (minSdk 23), JVM 11+, JS, Wasm, Linux (x64/Arm64), macOS (Arm64), Windows (mingwX64), iOS (device and simulator).
 
 ### Step 1: Add the dependency
 
 Published on [Maven Central](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2); versions follow `v*` git tags.
+
+> **Upgrading from 1.1.x**: the coordinates moved from `com.github.kamiiroawase.telegram-markdownv2:…` to `io.github.kamiiroawase:…`, the Kotlin package from `com.github.kamiiroawase.markdownv2` to `io.github.kamiiroawase.markdownv2` (every import changes), and distribution moved from JitPack to Maven Central — ≤1.1.x stays resolvable from JitPack's old coordinates. See [CHANGELOG](CHANGELOG.md) for the breaking changes.
 
 ```kotlin
 repositories {
@@ -90,9 +92,7 @@ val clipped = MarkdownV2.render(longModelReply, MarkdownV2.MAX_MESSAGE_LENGTH) /
 val clipped100 = MarkdownV2.render(longModelReply, 100)                        // any positive custom limit; <= 0 disables truncation
 ```
 
-> ⚠️ **Heads-up for JS/Wasm**: when the input contains an HTML block, an `<a href>` anchor, or opens with an HTML tag, `render`/`renderChunked` throws at parse time on these platforms (upstream defect, see the first bullet under Known Pitfalls). Wrap calls in try/catch there — on failure, send the original text as plain text — or pre-strip HTML. Mid-paragraph inline tags (`<b>`, `<br>`, …) are not affected.
-
-Render once before editing and re-sending a message; if the result is still rejected by Telegram (theoretically it should not be), de-formatted via `MarkdownV2.toPlainText` and re-sent as plain text is the last resort (see the renderChunked section).
+> ⚠️ **Heads-up for JS/Wasm**: when the input contains an HTML block, an `<a href>` anchor, or opens with an HTML tag, `render`/`renderChunked` throws at parse time on these platforms — always wrap calls in try/catch there. See the first bullet under "Known limitations and pitfalls".
 
 ### Going further: escaping dynamic text when hand-building MarkdownV2 (escape)
 
@@ -117,9 +117,9 @@ val parts = MarkdownV2.renderChunked(longModelReply) // List<String>, each piece
 parts.forEach { part -> sendMessage(chatId, part) }  // delivering in order reproduces the full content
 ```
 
-The splitting and degradation semantics live in "Known limitations and pitfalls" below; a `maxLength` of 1 or less returns the full render as a single-element list (a chunk needs room for at least one escaped character — two chars), and content that renders to nothing yields an empty list.
+The splitting and degradation semantics live in "Degradation and boundary semantics" below; a `maxLength` of 1 or less returns the full render as a single-element list (a chunk needs room for at least one escaped character — two chars), and content that renders to nothing yields an empty list.
 
-When the Bot API rejects a piece (theoretically it should not), `MarkdownV2.toPlainText` de-formats that rendered piece back into the text Telegram would display and you re-send it without parse_mode (the de-formatting rules live in "Known limitations and pitfalls"):
+When the Bot API rejects a piece (theoretically it should not), `MarkdownV2.toPlainText` de-formats that rendered piece back into the text Telegram would display and you re-send it without parse_mode (the de-formatting rules live in "Degradation and boundary semantics"):
 
 ```kotlin
 for (part in parts) {
@@ -163,23 +163,26 @@ val document: Node = parser.parse(content)!!
 val text2 = MarkdownV2.render(document, MarkdownV2.MAX_MESSAGE_LENGTH)
 ```
 
-> Note: the parsing backend of this library is [commonmark-kotlin](https://github.com/darriousliu/commonmark-kotlin), whose HTML block detection is weaker than official commonmark-java (`<!-- -->`, `<!DOCTYPE>` etc. are treated as inline paragraph content). Additionally, **closing HTML tags inside emphasis** (e.g. the `</b>` in `*a<b>x</b>*`) are not recognized as inline HTML — their `>` is merged into the adjacent text (an upstream emphasis/inline-HTML scanning interaction). Inputs relying on this behavior may render differently between the two backends.
+> Note: behavior differences between the parsing backend and official commonmark-java (HTML block detection, closing tags inside emphasis) live under "Known limitations and pitfalls".
 
-### Known limitations and pitfalls
+### Degradation and boundary semantics
 
-- **HTML throws on JS/Wasm (important)**: the upstream commonmark-kotlin parser crashes outright when scanning HTML blocks on these platforms (`Regex("]]>")` is invalid in the JS RegExp engine); `<a href>` anchors and documents opening with an HTML tag trigger it too, pending an upstream fix — inline tags mid-paragraph such as `<b>` and `<br>` are not affected. **Always wrap calls in try/catch on these platforms** (on failure send the original text as plain text), or pre-strip HTML from the input — LLM output is exactly the kind of input that tends to carry HTML
-- **MarkdownV2 is not Markdown**: `__` is underline, not bold; Telegram's 18 official special characters plus the backslash (19 total) must be escaped outside entities — this library handles all of it, but do not post-process the rendered output as regular Markdown
 - **Tables degrade to code blocks**: Telegram has no tables; this library emits monospaced aligned fenced code blocks, cells are truncated at 32 display width, and over-length tables are truncated whole rows at a time. The width table is an East Asian Width approximation (CJK/emoji aligned at double display width, combining marks and variation selectors cost zero columns, Ambiguous characters count as narrow, astral code points always count 2), with both the width measure and the cap customizable via `RenderOptions` — swap in your own measure via `RenderOptions.displayWidthOf` when alignment matters
 - **Inline-HTML degradation and completion semantics**: `<b>`/`<strong>` → `*`, `<i>`/`<em>` → `_`, `<s>`/`<del>`/`<strike>` → `~`, `<u>`/`<ins>` → `__`, `<code>`/`<kbd>`/`<samp>`/`<tt>` → inline code entities (their content escapes with code-entity rules — only the backtick and backslash; Markdown code spans nested inside escape their backticks too, keeping entity boundaries intact), `<br>` → newline, `<a href>` → link, HTML blocks → code blocks. Unmatched closing, self-closing and nested tags are always escaped literally, and a closing tag matches only the innermost open entity — a `</b>` crossing a still-open anchor or matching a Markdown emphasis' own marker escapes literally. Unclosed inline entities (HTML emphasis and `<a>` anchors alike) complete at the nearest container boundary — emphasis, strikethrough, link label — or at output time, latest-opened first (`*<a href="u">x*` → `_[x](u)_`), so the output keeps entities properly nested
 - **Telegram link-entity limits and degradations**: links cannot nest — images/links/anchors nested inside a link degrade to plain text or literal tags; empty-URL links degrade to plain text, and empty link text, image alt text or an empty anchor degrades to the bare escaped URL (Telegram rejects empty-text link entities); HTML entities left unclosed inside a link label complete before the link closes, and a leftover nested anchor never swallows the links that follow
 - **href parsing rules**: the attribute name is case-insensitive, its value may be double-quoted, single-quoted or unquoted (per HTML5 a `>` or `/` inside a quoted value belongs to the value — it never closes the tag early or reads as self-closing — and a trailing `/` in an unquoted value belongs to the value too, never mistaken for a self-closing tag); HTML entities in hrefs (`&amp;`, `&#38;`, `&#x26;`, …) are decoded before linking, unrecognized references (e.g. `&#0;`, whose NUL is not valid message text) stay literal, and an `href=` inside another attribute's value is never mistaken for the real attribute
 - **Truncation preserves structure**: code fences remain closed, unclosed emphasis / links are auto-completed, quote and list prefixes are preserved line by line, escape sequences and surrogate pairs are never split; when no structural content fits, the whole output falls back to escaped plain text
+- **Chunking seam semantics**: blocks are packed whole, and a block that does not fit splits along its natural seams (code lines, list items, quote children, paragraph lines, then inline nodes) with list numbering continuing across pieces; heading `#` prefixes and list markers glue to the first piece and are dropped outright when the limit cannot even fit marker plus text; a seam still exceeding the limit flattens to escaped plain text — structure degrades, not a single character is lost (links keep their `label (url)` shape, so no link target is lost)
+- **toPlainText de-formatting rules**: entity markers drop (runs of glued markers resolve close-then-open: `_a__b_`, the render of two italics side by side, de-formats to `ab`), code content stays (a code block inside a quote strips the per-line quote markers and keeps the code), quote prefixes strip, escapes resolve per context, and `[label](url)` becomes `label (url)` so no link target is lost (an empty label or URL degrades to the non-empty piece); arbitrary input degrades best-effort without losing characters, and the call never throws
+
+### Known limitations and pitfalls
+
+- **HTML throws on JS/Wasm (important)**: the upstream commonmark-kotlin parser crashes outright when scanning HTML blocks on these platforms (`Regex("]]>")` is invalid in the JS RegExp engine); `<a href>` anchors and documents opening with an HTML tag trigger it too, pending an upstream fix — inline tags mid-paragraph such as `<b>` and `<br>` are not affected. **Always wrap calls in try/catch on these platforms** (on failure send the original text as plain text), or pre-strip HTML from the input — LLM output is exactly the kind of input that tends to carry HTML
+- **MarkdownV2 is not Markdown**: `__` is underline, not bold; Telegram's 18 official special characters plus the backslash (19 total) must be escaped outside entities — this library handles all of it, but do not post-process the rendered output as regular Markdown
+- **Behavior differences vs commonmark-java**: the upstream commonmark-kotlin backend detects HTML blocks more weakly than the official one (`<!-- -->`, `<!DOCTYPE>` etc. are treated as inline paragraph content), and **closing HTML tags inside emphasis** (e.g. the `</b>` in `*a<b>x</b>*`) are not recognized as inline HTML — their `>` merges into the adjacent text (an upstream emphasis/inline-HTML scanning interaction). Inputs relying on this behavior may render differently between the two backends
 - **Ultra-deep nesting flattens**: quotes / lists / inline emphasis nested deeper than 100 levels degrade to flattened plain text (guarding against stack overflow on pathological input); when truncated, over-budget deep structures fall back to escaped plain text wholesale instead of being re-shrunk level by level (preventing exponential re-rendering)
 - **Over-length content is rendered twice**: once fully to measure, then block-wise when shrinking; negligible under the 4096-character limit, so no single-pass optimization is made for huge inputs
 - **Truncation converges by retry (worst-case O(n²))**: when a list item or a quote line does not fit, the whole subtree re-renders with the budget tightened by the overflow, again and again — dropping lines outright is forbidden (an entity closer would drop with its line, yielding invalid MarkdownV2); the overflow can be as small as 1 character (the continuation-indent overhead), so boundary-adversarial input advances 1 character per round while each round costs a full subtree render. Retrying happens at the top level only (nested per-level retries would explode exponentially — deep structures degrade to escaped plain text instead) and stays imperceptible under the default 4096 limit; a custom huge `maxLength` combined with adversarial input can amplify this path
-- **Chunking seam semantics**: blocks are packed whole, and a block that does not fit splits along its natural seams (code lines, list items, quote children, paragraph lines, then inline nodes) with list numbering continuing across pieces; heading `#` prefixes and list markers glue to the first piece and are dropped outright when the limit cannot even fit marker plus text; a seam still exceeding the limit flattens to escaped plain text — structure degrades, not a single character is lost (links keep their `label (url)` shape, so no link target is lost)
-- **toPlainText de-formatting rules**: entity markers drop (runs of glued markers resolve close-then-open: `_a__b_`, the render of two italics side by side, de-formats to `ab`), code content stays (a code block inside a quote strips the per-line quote markers and keeps the code), quote prefixes strip, escapes resolve per context, and `[label](url)` becomes `label (url)` so no link target is lost (an empty label or URL degrades to the non-empty piece); arbitrary input degrades best-effort without losing characters, and the call never throws
-- **Version numbers come from git tags (only when HEAD sits exactly on one)**: the release workflow's tag checkout is exactly that shape and takes the tag's version; everything else builds as `0.0.0-SNAPSHOT` — commits past a tag no longer reuse the released version number, so a local `publishToMavenLocal` cannot shadow published artifacts under the same coordinates. CI needs a full clone (`fetch-depth: 0`) to derive the version
 
 ## Part 2: Contributing
 
@@ -236,6 +239,7 @@ Note: `kotlin-js-store/yarn.lock` is outside dependabot's coverage — its npm e
 - **API compatibility**: binary-compatibility-validator snapshots the public API of every target (the `api/` directory); `apiCheck` runs as part of `build`, so a PR that breaks the published API fails outright — change it intentionally via `./gradlew apiDump` and say so in the PR
 - **API docs & changelog**: Dokka generates the API reference from the KDoc (`./gradlew dokkaGeneratePublicationHtml`; CI uploads the HTML); user-visible changes go to the Unreleased section of [CHANGELOG.md](CHANGELOG.md)
 - **CI**: `build.yml` runs all of the above on main pushes and every PR (plus macOS and Windows jobs for the iOS simulator, macOS Arm64 and mingwX64 native tests) and asserts the publishing artifacts; `release.yml` publishes per-platform artifacts as GitHub Release attachments on `v*` tags, attaches the CI benchmark output, and verifies both READMEs' version coordinates and the CHANGELOG's new version section were bumped with the tag (a missing new version or a leftover previous version in a README, or a missing CHANGELOG section, fails the release)
+- **Version numbers come from git tags (only when HEAD sits exactly on one)**: the release workflow's tag checkout is exactly that shape and takes the tag's version; everything else builds as `0.0.0-SNAPSHOT` — commits past a tag no longer reuse the released version number, so a local `publishToMavenLocal` cannot shadow published artifacts under the same coordinates. CI needs a full clone (`fetch-depth: 0`) to derive the version
 
 ### Submitting a PR
 

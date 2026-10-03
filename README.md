@@ -4,7 +4,7 @@
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.kamiiroawase/telegram-markdownv2.svg)](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
-Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转换为 Telegram MarkdownV2**，并对超长内容做保持结构完整的截断（Telegram 消息上限 4096 字符）。为 LLM 机器人输出而生——模型回复是任意长度、任意结构的 Markdown，还经常带 Telegram 渲染不了的构造。
+Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转换为 Telegram MarkdownV2**，并对超长内容做保持结构完整的截断或无损分片（Telegram 消息上限 4096 字符，分片按序发送即还原全文）。为 LLM 机器人输出而生——模型回复是任意长度、任意结构的 Markdown，还经常带 Telegram 渲染不了的构造。
 
 [English version](README.en.md)
 
@@ -19,13 +19,15 @@ Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转�
 - 可选截断（`maxLength` 传正数时启用，默认 0 不截断），截断后仍是合法 MarkdownV2
 - 超长内容无损分片（`renderChunked`）：每段不超过上限且各自合法，按序发送还原全文
 - 拒收兜底（`toPlainText`）：把渲染结果还原为纯文本，任意输入不丢字符、永不抛异常
-- 不支持的构造自动降级：表格转对齐的代码块、HTML 转实体映射或字面文本——降级与边界语义见下文「常见坑与已知限制」
+- 不支持的构造自动降级：表格转对齐的代码块、HTML 转实体映射或字面文本——语义细节见下文「降级与边界语义」，注意事项见「常见坑与已知限制」
 
 支持平台：Android（minSdk 23）、JVM 11+、JS、Wasm、Linux（x64/Arm64）、macOS（Arm64）、Windows（mingwX64）、iOS（设备与模拟器）。
 
 ### 第一步：引入依赖
 
 发布于 [Maven Central](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)，版本跟随 `v*` git tag。
+
+> **从 1.1.x 升级**：坐标从 `com.github.kamiiroawase.telegram-markdownv2:…` 改为 `io.github.kamiiroawase:…`，Kotlin 包名从 `com.github.kamiiroawase.markdownv2` 改为 `io.github.kamiiroawase.markdownv2`（import 全部要改），分发由 JitPack 迁至 Maven Central——≤1.1.x 仍可从 JitPack 旧坐标解析。破坏性变更清单见 [CHANGELOG](CHANGELOG.md)。
 
 ```kotlin
 repositories {
@@ -90,9 +92,7 @@ val clipped = MarkdownV2.render(longModelReply, MarkdownV2.MAX_MESSAGE_LENGTH) /
 val clipped100 = MarkdownV2.render(longModelReply, 100)                        // 任意正数自定义上限；<= 0 一律不截断
 ```
 
-> ⚠️ **JS/Wasm 平台注意**：输入含 HTML 块、`<a href>` 锚点或以 HTML 标签开头时，`render`/`renderChunked` 会在解析阶段直接抛异常（上游缺陷，见「常见坑」第一条）；这两个平台的调用请用 try/catch 包裹、捕获后把原文按纯文本发送兜底，或预先滤除 HTML。段落中间的行内标签（`<b>`、`<br>` 等）不受影响。
-
-编辑消息重发前先 render 一次；若渲染结果仍被 Telegram 拒收（理论上不应发生），用 `MarkdownV2.toPlainText` 把已渲染文本还原成纯文本重发是最后兜底（见 renderChunked 一节）。
+> ⚠️ **JS/Wasm 平台注意**：输入含 HTML 块、`<a href>` 锚点或以 HTML 标签开头时，`render`/`renderChunked` 会在解析阶段直接抛异常，这两个平台的调用务必 try/catch 兜底——详见「常见坑与已知限制」第一条。
 
 ### 进阶：手动拼 MarkdownV2 时转义动态文本（escape）
 
@@ -117,9 +117,9 @@ val parts = MarkdownV2.renderChunked(longModelReply) // List<String>，每段 �
 parts.forEach { part -> sendMessage(chatId, part) }  // 依次发送即还原完整内容
 ```
 
-拆分与退化语义见「常见坑与已知限制」；`maxLength` 传 1 或更小（分片至少要装得下一个转义字符，占两位）时返回整段渲染的单元素列表，内容渲染为空时返回空列表。
+拆分与退化语义见「降级与边界语义」；`maxLength` 传 1 或更小（分片至少要装得下一个转义字符，占两位）时返回整段渲染的单元素列表，内容渲染为空时返回空列表。
 
-某一段被 Bot API 拒收（理论上不应发生）时，用 `MarkdownV2.toPlainText` 把这段已渲染文本还原成 Telegram 显示所见的纯文本、不带 `parse_mode` 重发即可兜底（还原口径见「常见坑与已知限制」）：
+某一段被 Bot API 拒收（理论上不应发生）时，用 `MarkdownV2.toPlainText` 把这段已渲染文本还原成 Telegram 显示所见的纯文本、不带 `parse_mode` 重发即可兜底（还原口径见「降级与边界语义」）：
 
 ```kotlin
 for (part in parts) {
@@ -163,23 +163,26 @@ val document: Node = parser.parse(content)!!
 val text2 = MarkdownV2.render(document, MarkdownV2.MAX_MESSAGE_LENGTH)
 ```
 
-> 注：本库的解析后端是 [commonmark-kotlin](https://github.com/darriousliu/commonmark-kotlin)，其 HTML 块识别比官方 commonmark-java 弱（`<!-- -->`、`<!DOCTYPE>` 等按段落内联处理）；此外**强调内部的闭合 HTML 标签**（如 `*a<b>x</b>*` 中的 `</b>`）不会被识别为行内 HTML，其 `>` 会并入相邻文本（上游 emphasis 与行内 HTML 扫描的交互问题）。依赖此行为的输入在两种后端下渲染结果可能不同。
+> 注：解析后端与官方 commonmark-java 的行为差异（HTML 块识别、强调内的闭合标签）见「常见坑与已知限制」。
 
-### 常见坑与已知限制
+### 降级与边界语义
 
-- **JS/Wasm 上 HTML 会抛异常（重要）**：上游 commonmark-kotlin 在这两个平台扫描 HTML 块时直接崩溃（`Regex("]]>")` 在 JS RegExp 引擎中非法），`<a href>` 锚点与以 HTML 标签开头的文档同样触发，待上游修复；段落中间的 `<b>`、`<br>` 等行内标签不受影响。**这两个平台的调用务必 try/catch 兜底**（捕获后把原文按纯文本发送），或预先滤除输入中的 HTML——LLM 输出恰恰常含 HTML
-- **MarkdownV2 不是 Markdown**：`__` 是下划线不是粗体、官方 18 个特殊字符加反斜杠共 19 个在实体外必须转义——本库已全部处理，但不要把渲染结果再当普通 Markdown 二次加工
 - **表格按代码块降级**：Telegram 没有表格，本库输出等宽对齐的围栏代码块；单元格按 32 个显示宽度截断，截断超长表格时按整行保留。宽度表是 East Asian Width 的近似（CJK/emoji 按两倍显示宽度对齐，组合符、变体选择符等零宽字符按 0 宽计，Ambiguous 字符按窄字符计、星平面码点一律记 2），宽度度量与截断上限可经 `RenderOptions` 自定义，对齐要求高的场景用 `RenderOptions.displayWidthOf` 换成自己的度量
 - **行内 HTML 的降级与补全语义**：`<b>`/`<strong>` → `*`、`<i>`/`<em>` → `_`、`<s>`/`<del>`/`<strike>` → `~`、`<u>`/`<ins>` → `__`、`<code>`/`<kbd>`/`<samp>`/`<tt>` → 行内代码实体（内容按代码实体规则转义，仅转义反引号与反斜杠；内嵌的 Markdown 行内代码同样转义其反引号以免实体边界错乱）、`<br>` → 换行、`<a href>` → 链接、HTML 块转代码块；未配对的闭合、自闭合与嵌套标签一律按字面转义，闭合标签只与最内层未闭实体匹配——跨过未闭合锚点的 `</b>`、匹配到 Markdown 强调自有标记的 `</i>` 按字面转义；未闭合的行内实体（HTML 强调与 `<a>` 锚点）在最近的容器边界——强调、删除线、链接标签——或输出时按后开先闭补全（`*<a href="u">x*` → `_[x](u)_`），输出始终保持实体合法嵌套
 - **Telegram 链接实体的限制与退化**：链接不能嵌套——链接内再嵌套的图片/链接/锚点降级为纯文本或字面标签；空 URL 链接退化为纯文本，空链接文本 / 图片替代文本 / 空锚点退化为转义后的裸 URL（Telegram 拒绝空文本链接实体）；链接标签内未闭合的 HTML 实体在链接闭合前补全、残留的嵌套锚点不会吞掉后续链接
 - **href 的解析口径**：属性名不区分大小写，属性值支持双引号 / 单引号 / 无引号写法（引号值内的 `>` 与 `/` 按 HTML5 计入值本身，无引号值末尾的 `/` 同理，均不会提前闭合标签或误判为自闭合）；href 中的 HTML 实体（`&amp;`、`&#38;`、`&#x26;` 等）先解码再作链接，无法识别的引用（如 `&#0;`，其 NUL 不是合法消息文本）保持字面，其他属性值内部的 `href=` 字样不会被误认
 - **截断的结构保持**：代码围栏保持闭合、未闭合的强调 / 链接自动补全、引用与列表前缀逐行保留、绝不劈开转义序列和代理对；结构化内容完全放不下时回退为转义纯文本
+- **分片的接缝语义**：块整块装填，超限块沿代码行 / 列表项 / 引用子块 / 段落行 / 行内节点的自然接缝拆分，列表编号跨段连续；标题 `#` 前缀与列表标记黏附于首个分片，放不下时宁可丢弃标记也不产出裸标记片；接缝仍放不下时退化为转义纯文本——文本无损，链接保留 `label (url)` 形式，链接目标不丢
+- **toPlainText 的还原口径**：实体标记去除（黏连的标记 run 按先闭后开解析，`_a__b_`——两个斜体相邻的渲染结果——还原为 `ab`）、代码内容保留（引用内的代码块逐行剥除引用标记、代码原样保留）、引用前缀剥除、转义按上下文解开，`[label](url)` 变为 `label (url)` 以保住链接目标（空 label 或空 URL 退化为非空一侧）；任意输入降级为尽力而为且不丢字符，永不抛异常
+
+### 常见坑与已知限制
+
+- **JS/Wasm 上 HTML 会抛异常（重要）**：上游 commonmark-kotlin 在这两个平台扫描 HTML 块时直接崩溃（`Regex("]]>")` 在 JS RegExp 引擎中非法），`<a href>` 锚点与以 HTML 标签开头的文档同样触发，待上游修复；段落中间的 `<b>`、`<br>` 等行内标签不受影响。**这两个平台的调用务必 try/catch 兜底**（捕获后把原文按纯文本发送），或预先滤除输入中的 HTML——LLM 输出恰恰常含 HTML
+- **MarkdownV2 不是 Markdown**：`__` 是下划线不是粗体、官方 18 个特殊字符加反斜杠共 19 个在实体外必须转义——本库已全部处理，但不要把渲染结果再当普通 Markdown 二次加工
+- **解析后端与 commonmark-java 的行为差异**：上游 commonmark-kotlin 的 HTML 块识别比官方弱（`<!-- -->`、`<!DOCTYPE>` 等按段落内联处理）；此外**强调内部的闭合 HTML 标签**（如 `*a<b>x</b>*` 中的 `</b>`）不会被识别为行内 HTML，其 `>` 会并入相邻文本（上游 emphasis 与行内 HTML 扫描的交互问题）。依赖此行为的输入在两种后端下渲染结果可能不同
 - **超深嵌套平铺**：超过 100 层的引用 / 列表 / 行内强调降级为平铺纯文本（防病态输入栈溢出）；截断时放不下的深层结构整体退化为转义纯文本，不逐层重缩（防嵌套重渲染指数膨胀）
 - **超长内容渲染两遍**：先完整渲染判断长度、超限再分块收缩；4096 字符上限下开销可忽略，不为超大输入做单遍渲染优化
 - **截断收缩按重试收敛（最坏 O(n²)）**：列表项或引用行放不下时，整棵子树重渲染、预算减去超出量再试——直接丢行会连实体闭合符一起丢，生成非法 MarkdownV2，故不允许；超出量最小 1 字符（续行缩进开销），精确卡边界的对抗性输入每轮只前进 1 字符而每轮成本是整棵子树。重试仅限顶层（嵌套逐层重试会指数膨胀，深层结构直接退化为转义纯文本），4096 默认上限下无感；自定义超大 `maxLength` 配合对抗性输入可放大此路径
-- **分片的接缝语义**：块整块装填，超限块沿代码行 / 列表项 / 引用子块 / 段落行 / 行内节点的自然接缝拆分，列表编号跨段连续；标题 `#` 前缀与列表标记黏附于首个分片，放不下时宁可丢弃标记也不产出裸标记片；接缝仍放不下时退化为转义纯文本——文本无损，链接保留 `label (url)` 形式，链接目标不丢
-- **toPlainText 的还原口径**：实体标记去除（黏连的标记 run 按先闭后开解析，`_a__b_`——两个斜体相邻的渲染结果——还原为 `ab`）、代码内容保留（引用内的代码块逐行剥除引用标记、代码原样保留）、引用前缀剥除、转义按上下文解开，`[label](url)` 变为 `label (url)` 以保住链接目标（空 label 或空 URL 退化为非空一侧）；任意输入降级为尽力而为且不丢字符，永不抛异常
-- **版本号来自 git tag（仅当 HEAD 恰在 tag 上）**：release 工作流的 tag 检出即此情形，取 tag 版本号；其余一律 `0.0.0-SNAPSHOT`——tag 之后的提交不再复用已发布版本号，本地 `publishToMavenLocal` 也就不会覆盖同名已发布工件。CI 需完整克隆（`fetch-depth: 0`）才能推导版本
 
 ## 二、参与代码贡献
 
@@ -236,6 +239,7 @@ src/
 - **API 兼容性**：binary-compatibility-validator 为全部 target 快照公开 API（`api/` 目录），`apiCheck` 挂在 `build` 上，无意破坏公开 API 的 PR 直接失败；有意变更时跑 `./gradlew apiDump` 更新快照并在 PR 中说明
 - **API 文档与变更记录**：Dokka 从 KDoc 生成 API 参考（`./gradlew dokkaGeneratePublicationHtml`，CI 上传 HTML 产物）；用户可见的行为变化记入 [CHANGELOG.md](CHANGELOG.md) 的 Unreleased 段
 - **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS 与 Windows job 跑 iOS 模拟器、macOS Arm64 与 mingwX64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件，附带当次 CI 复跑的 benchmark 输出，并校验两份 README 的版本坐标与 CHANGELOG 的版本段已随 tag 同步更新（README 缺新版本号或残留上一版本号、CHANGELOG 缺新版本段即失败）
+- **版本号来自 git tag（仅当 HEAD 恰在 tag 上）**：release 工作流的 tag 检出即此情形，取 tag 版本号；其余一律 `0.0.0-SNAPSHOT`——tag 之后的提交不再复用已发布版本号，本地 `publishToMavenLocal` 也就不会覆盖同名已发布工件。CI 需完整克隆（`fetch-depth: 0`）才能推导版本
 
 ### 提交流程
 
