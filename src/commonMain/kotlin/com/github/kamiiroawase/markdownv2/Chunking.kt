@@ -28,31 +28,22 @@ internal fun chunkBlocks(
     depth: Int,
     options: RenderOptions,
 ): List<String> {
-    val chunks = mutableListOf<String>()
-    val current = StringBuilder()
+    val acc = ChunkAccumulator()
     var node = first
     while (node != null) {
         val rendered = renderBlock(node, depth, options)
         if (rendered.isNotBlank()) {
-            val separator = if (current.isEmpty()) "" else "\n\n"
-            if (current.length + separator.length + rendered.length <= maxLength) {
-                current.append(separator).append(rendered)
+            val separator = if (acc.current.isEmpty()) "" else "\n\n"
+            if (acc.current.length + separator.length + rendered.length <= maxLength) {
+                acc.appendRendered(separator + rendered)
             } else {
-                if (current.isNotEmpty()) {
-                    chunks += current.toString().trimEnd()
-                    current.setLength(0)
-                }
-                val pieces = chunkBlock(node, maxLength, depth, options)
-                if (pieces.isNotEmpty()) {
-                    pieces.subList(0, pieces.size - 1).forEach(chunks::add)
-                    current.append(pieces.last())
-                }
+                acc.flush()
+                chunkBlockInto(node, maxLength, depth, options, acc)
             }
         }
         node = node.next
     }
-    if (current.isNotBlank()) chunks += current.toString().trimEnd()
-    return chunks
+    return acc.finish()
 }
 
 internal fun chunkBlock(
@@ -60,73 +51,168 @@ internal fun chunkBlock(
     maxLength: Int,
     depth: Int,
     options: RenderOptions,
-): List<String> =
+): List<String> {
+    val acc = ChunkAccumulator()
+    chunkBlockInto(node, maxLength, depth, options, acc)
+    return acc.finish()
+}
+
+// Appends the node's completed pieces and leaves its last one open in [acc].current, so the
+// caller can pack its own next content alongside — the handoff the old return-a-list shape
+// made via pieces.last()
+private fun chunkBlockInto(
+    node: Node,
+    maxLength: Int,
+    depth: Int,
+    options: RenderOptions,
+    acc: ChunkAccumulator,
+) {
     when (node) {
         is FencedCodeBlock, is IndentedCodeBlock, is TableBlock, is HtmlBlock -> {
-            chunkRenderedCode(node, renderBlock(node, depth, options), maxLength)
+            chunkRenderedCode(node, renderBlock(node, depth, options), maxLength, acc)
         }
 
         is BulletList -> {
-            chunkList(node, maxLength, depth, options) { "• " }
+            chunkList(node, maxLength, depth, options, acc) { "• " }
         }
 
         is OrderedList -> {
             var number = node.markerStartNumber ?: 1
-            chunkList(node, maxLength, depth, options) { "${number++}\\. " }
+            chunkList(node, maxLength, depth, options, acc) { "${number++}\\. " }
         }
 
         is BlockQuote -> {
-            chunkQuote(node, maxLength, depth, options)
+            chunkQuote(node, maxLength, depth, options, acc)
         }
 
         is Heading -> {
-            chunkParagraph(node, maxLength, options, escapeText("#".repeat(node.level)) + " ")
+            chunkParagraph(node, maxLength, options, escapeText("#".repeat(node.level)) + " ", acc)
         }
 
         is Paragraph -> {
-            chunkParagraph(node, maxLength, options, "")
+            chunkParagraph(node, maxLength, options, "", acc)
         }
 
         else -> {
             val rendered = renderBlock(node, depth, options)
-            if (rendered.length <= maxLength) listOf(rendered) else plainTextChunks(node, maxLength)
+            if (rendered.length <= maxLength) {
+                acc.appendRendered(rendered)
+            } else {
+                flattenToPlainText(node, maxLength, acc)
+            }
         }
     }
+}
+
+/**
+ * The chunking pipeline's shared output state: completed pieces plus the in-progress chunk,
+ * flowing through every seam so an oversized block's last piece can stay open for the
+ * caller's next content to pack alongside.
+ *
+ * [verbatimTail] distinguishes the two content kinds that meet here. Rendered structure
+ * flushes trimmed — its trailing whitespace is block-separator junk. Flattened escaped
+ * text flushes raw and is never blank-skipped — its trailing whitespace is content (a
+ * code line's trailing space, say) that the losslessness guarantee forbids dropping;
+ * trimming flushes used to drop exactly those characters at the flatten-to-flush boundary.
+ */
+private class ChunkAccumulator {
+    val pieces: MutableList<String> = mutableListOf()
+    val current: StringBuilder = StringBuilder()
+    var verbatimTail = false
+
+    /** Appends rendered structure: separator whitespace after it stays trimmable. */
+    fun appendRendered(content: String) {
+        current.append(content)
+        verbatimTail = false
+    }
+
+    /** Appends flattened escaped text: everything down to its last character is content. */
+    fun appendVerbatim(content: String) {
+        current.append(content)
+        verbatimTail = true
+    }
+
+    /** Flushes the in-progress chunk, trimmed unless it ends with flattened text. */
+    fun flush() {
+        if (current.isEmpty()) return
+        pieces += if (verbatimTail) current.toString() else current.toString().trimEnd()
+        current.setLength(0)
+        verbatimTail = false
+    }
+
+    /**
+     * Flushes unconditionally raw: the inline seam glues nodes without separators, so even
+     * a rendered tail's trailing whitespace is text there (the space before an emphasis
+     * marker, say).
+     */
+    fun flushRaw() {
+        if (current.isEmpty()) return
+        pieces += current.toString()
+        current.setLength(0)
+        verbatimTail = false
+    }
+
+    /**
+     * The final flush: a blank in-progress chunk of rendered structure is nothing-content
+     * and is skipped, a flattened one is text and is kept however blank it looks.
+     */
+    fun finish(): List<String> {
+        if (current.isNotEmpty() && (verbatimTail || current.isNotBlank())) flush()
+        return pieces
+    }
+}
 
 // Last-resort seam: fully escaped text is valid MarkdownV2 at any atomic cut, so
 // unit-boundary chunking loses no characters (structure degrades, text never does);
 // the isBlank guard keeps the nothing-content skip, the text itself flattens untrimmed
-private fun plainTextChunks(
+private fun flattenToPlainText(
     node: Node,
     maxLength: Int,
-): List<String> {
+    acc: ChunkAccumulator,
+) {
     val text = plainText(listOf(node))
-    if (text.isBlank()) return emptyList()
-    return escapeChunks(text, maxLength)
+    if (text.isBlank()) return
+    appendVerbatimChunks(text, maxLength, acc)
+}
+
+// Every piece but the tail completes; the tail stays open in [acc] as verbatim content
+private fun appendVerbatimChunks(
+    text: String,
+    maxLength: Int,
+    acc: ChunkAccumulator,
+) {
+    val escaped = escapeChunks(text, maxLength)
+    escaped.subList(0, escaped.size - 1).forEach(acc.pieces::add)
+    acc.appendVerbatim(escaped.last())
 }
 
 /**
  * The rendered output of the four fence-wrapped block kinds is always "open\n…\nclose":
  * lines are distributed across chunks, every chunk keeping both fences so it stays valid.
  * A single line longer than the per-line budget splits at escape-unit boundaries into
- * one fenced chunk per segment.
+ * one fenced chunk per segment. The last piece stays open in [acc] — rendered content, it
+ * ends with the closing fence — for the caller to pack alongside.
  */
 private fun chunkRenderedCode(
     node: Node,
     rendered: String,
     maxLength: Int,
-): List<String> {
+    acc: ChunkAccumulator,
+) {
     // The four fence-wrapped kinds render to nothing when their content drops out
     // entirely (comment-only or empty HtmlBlock, row-less TableBlock): nothing to chunk —
     // "".lines() is a single line and the subList below needs at least two
-    if (rendered.isEmpty()) return emptyList()
+    if (rendered.isEmpty()) return
     val lines = rendered.lines()
     val open = lines.first()
     val close = lines.last()
     val middle = lines.subList(1, lines.size - 1)
     // 2 = newline after open and before close; 2 more = one two-char escape unit per line
     val lineBudget = maxLength - open.length - close.length - 2
-    if (lineBudget < 2) return plainTextChunks(node, maxLength)
+    if (lineBudget < 2) {
+        flattenToPlainText(node, maxLength, acc)
+        return
+    }
 
     val pieces = mutableListOf<String>()
     val current = StringBuilder(open)
@@ -149,7 +235,9 @@ private fun chunkRenderedCode(
         }
     }
     if (current.length > open.length) pieces += current.toString() + "\n" + close
-    return pieces
+    if (pieces.isEmpty()) return
+    pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)
+    acc.appendRendered(pieces.last())
 }
 
 /**
@@ -162,10 +250,9 @@ private fun chunkList(
     maxLength: Int,
     depth: Int,
     options: RenderOptions,
+    acc: ChunkAccumulator,
     marker: () -> String,
-): List<String> {
-    val pieces = mutableListOf<String>()
-    val current = StringBuilder()
+) {
     var item = list.firstChild
     while (item != null) {
         if (item is ListItem) {
@@ -173,29 +260,24 @@ private fun chunkList(
             val body = renderBlock(item, depth + 1, options)
             if (body.isNotBlank()) {
                 val full = applyPrefix(prefix, body)
-                val separator = if (current.isEmpty()) "" else "\n"
-                if (current.length + separator.length + full.length <= maxLength) {
-                    current.append(separator).append(full)
+                val separator = if (acc.current.isEmpty()) "" else "\n"
+                if (acc.current.length + separator.length + full.length <= maxLength) {
+                    acc.appendRendered(separator + full)
                 } else {
-                    if (current.isNotEmpty()) {
-                        pieces += current.toString().trimEnd()
-                        current.setLength(0)
-                    }
+                    acc.flush()
                     if (full.length <= maxLength) {
-                        current.append(full)
+                        acc.appendRendered(full)
                     } else {
                         // Untrimmed: edge whitespace of the item's text is content the
                         // flattening path must preserve (a trailing code-line space, say)
                         val text = plainText(listOf(item))
-                        if (text.isNotBlank()) flattenWithLead(prefix, text, maxLength, pieces, current)
+                        if (text.isNotBlank()) flattenWithLead(prefix, text, maxLength, acc)
                     }
                 }
             }
         }
         item = item.next
     }
-    if (current.isNotBlank()) pieces += current.toString().trimEnd()
-    return pieces
 }
 
 /**
@@ -208,35 +290,29 @@ private fun chunkQuote(
     maxLength: Int,
     depth: Int,
     options: RenderOptions,
-): List<String> {
-    val pieces = mutableListOf<String>()
-    val current = StringBuilder()
+    acc: ChunkAccumulator,
+) {
     var node = quote.firstChild
     while (node != null) {
         val rendered = renderBlock(node, depth + 1, options).trim()
         if (rendered.isNotBlank()) {
             val prefixed = prefixQuote(rendered)
-            val separator = if (current.isEmpty()) "" else "\n>\n"
-            if (current.length + separator.length + prefixed.length <= maxLength) {
-                current.append(separator).append(prefixed)
+            val separator = if (acc.current.isEmpty()) "" else "\n>\n"
+            if (acc.current.length + separator.length + prefixed.length <= maxLength) {
+                acc.appendRendered(separator + prefixed)
             } else {
-                if (current.isNotEmpty()) {
-                    pieces += current.toString().trimEnd()
-                    current.setLength(0)
-                }
+                acc.flush()
                 if (prefixed.length <= maxLength) {
-                    current.append(prefixed)
+                    acc.appendRendered(prefixed)
                 } else {
                     // Untrimmed, same trade as the list path above
                     val text = plainText(listOf(node))
-                    if (text.isNotBlank()) chunkQuotedText(text, maxLength, pieces, current)
+                    if (text.isNotBlank()) chunkQuotedText(text, maxLength, acc)
                 }
             }
         }
         node = node.next
     }
-    if (current.isNotBlank()) pieces += current.toString().trimEnd()
-    return pieces
 }
 
 // Escaped text chunked line-wise with "> " prefixes; a line longer than the budget splits at
@@ -245,8 +321,7 @@ private fun chunkQuote(
 private fun chunkQuotedText(
     text: String,
     maxLength: Int,
-    pieces: MutableList<String>,
-    current: StringBuilder,
+    acc: ChunkAccumulator,
 ) {
     val prefixFits = maxLength >= 4
     val budget = if (prefixFits) maxLength - 2 else maxLength
@@ -261,14 +336,13 @@ private fun chunkQuotedText(
                     segment.isEmpty() -> ">"
                     else -> "> $segment"
                 }
-            if (current.isEmpty()) {
-                current.append(prefixed)
-            } else if (current.length + 1 + prefixed.length <= maxLength) {
-                current.append('\n').append(prefixed)
+            if (acc.current.isEmpty()) {
+                acc.appendVerbatim(prefixed)
+            } else if (acc.current.length + 1 + prefixed.length <= maxLength) {
+                acc.appendVerbatim("\n" + prefixed)
             } else {
-                pieces += current.toString().trimEnd()
-                current.setLength(0)
-                current.append(prefixed)
+                acc.flush()
+                acc.appendVerbatim(prefixed)
             }
         }
     }
@@ -287,34 +361,31 @@ private fun chunkParagraph(
     maxLength: Int,
     options: RenderOptions,
     prefix: String,
-): List<String> {
-    val pieces = mutableListOf<String>()
-    val current = StringBuilder(prefix)
+    acc: ChunkAccumulator,
+) {
+    acc.appendRendered(prefix)
     // How much of current is still just the un-glued prefix
     var bare = prefix.length
     for (group in lineGroups(node)) {
         if (group.isEmpty()) continue
         val rendered = renderInlineGroup(group, options)
-        val separator = if (current.length == bare) "" else "\n"
-        if (current.length + separator.length + rendered.length <= maxLength) {
-            current.append(separator).append(rendered)
+        val separator = if (acc.current.length == bare) "" else "\n"
+        if (acc.current.length + separator.length + rendered.length <= maxLength) {
+            acc.appendRendered(separator + rendered)
         } else {
-            if (current.length > bare) {
-                pieces += current.toString().trimEnd()
-                current.setLength(0)
+            if (acc.current.length > bare) {
+                acc.flush()
                 bare = 0
             }
-            if (current.length + rendered.length <= maxLength) {
-                current.append(rendered)
+            if (acc.current.length + rendered.length <= maxLength) {
+                acc.appendRendered(rendered)
             } else {
                 // chunkInlineGroup consumes the still-un-glued prefix, if any
-                chunkInlineGroup(group, maxLength, options, pieces, current)
+                chunkInlineGroup(group, maxLength, options, acc)
                 bare = 0
             }
         }
     }
-    if (current.isNotBlank()) pieces += current.toString().trimEnd()
-    return pieces
 }
 
 // Soft/hard breaks delimit line groups; consecutive breaks cannot occur in CommonMark
@@ -341,7 +412,7 @@ private fun lineGroups(node: Node): List<List<Node>> {
  * the message flattens to escaped text. Each node renders with its entities completed by
  * its own visitor, so a boundary between nodes never splits an entity (pathological HTML
  * pairs spanning nodes degrade to literal closers — the same trade as the depth-flattening
- * paths in Visitor). [current] arrives either empty or holding only a heading prefix (the
+ * paths in Visitor). [acc].current arrives either empty or holding only a heading prefix (the
  * lead): content packs after the lead, and the lead never becomes a standalone piece — it
  * stays glued to whichever node flattens next.
  */
@@ -349,29 +420,24 @@ private fun chunkInlineGroup(
     nodes: List<Node>,
     maxLength: Int,
     options: RenderOptions,
-    pieces: MutableList<String>,
-    current: StringBuilder,
+    acc: ChunkAccumulator,
 ) {
-    val lead = current.length
+    val lead = acc.current.length
     for (node in nodes) {
         val rendered = renderInlineGroup(listOf(node), options)
-        if (current.length + rendered.length <= maxLength) {
-            current.append(rendered)
+        if (acc.current.length + rendered.length <= maxLength) {
+            acc.appendRendered(rendered)
         } else {
-            if (current.length > lead) {
-                // No trimming: edge whitespace at an inline boundary is real text (the
-                // space before an emphasis marker, say), and the chunking paths promise
-                // character losslessness — plain whitespace needs no escaping either
-                pieces += current.toString()
-                current.setLength(0)
+            if (acc.current.length > lead) {
+                acc.flushRaw()
             }
-            if (current.isEmpty() && rendered.length <= maxLength) {
-                current.append(rendered)
+            if (acc.current.isEmpty() && rendered.length <= maxLength) {
+                acc.appendRendered(rendered)
             } else {
                 // isNotBlank keeps the nothing-content skip; a mid-group node's edge
                 // spaces (" c" after an emphasis, say) are content and stay untrimmed
                 val text = plainText(listOf(node))
-                if (text.isNotBlank()) flattenWithLead(current.toString(), text, maxLength, pieces, current)
+                if (text.isNotBlank()) flattenWithLead(acc.current.toString(), text, maxLength, acc)
             }
         }
     }
@@ -379,26 +445,31 @@ private fun chunkInlineGroup(
 
 /**
  * Last-resort flattening of an oversized item or inline node to escaped text: [lead] (a
- * list marker, a heading prefix, or whatever content still sits in [current]) stays glued
+ * list marker, a heading prefix, or whatever content still sits in [acc].current) stays glued
  * to the first piece while maxLength leaves room for it plus one escape unit — the ≥2
  * limit escapeChunks is promised; otherwise the lead is dropped, because chunk validity
  * and text losslessness take precedence over the marker (the same trade chunkQuotedText
- * makes for its "> " prefix). Consumes [current] and leaves only the final piece in it.
+ * makes for its "> " prefix). Consumes [acc].current and leaves only the final piece in it,
+ * as verbatim content — its edge whitespace is flattened text, which the trimming and
+ * blank-skipping flushes must not touch.
  */
 private fun flattenWithLead(
     lead: String,
     text: String,
     maxLength: Int,
-    pieces: MutableList<String>,
-    current: StringBuilder,
+    acc: ChunkAccumulator,
 ) {
     val limit = maxLength - lead.length
     val keepLead = limit >= 2
     val escaped = escapeChunks(text, if (keepLead) limit else maxLength)
     // No trimming: a piece edge can land on a space of the original text, and trimming
     // it would drop a character the flattening paths promise to preserve
-    pieces += (if (keepLead) lead else "") + escaped.first()
-    for (i in 1 until escaped.size - 1) pieces += escaped[i]
-    current.setLength(0)
-    if (escaped.size > 1) current.append(escaped.last())
+    acc.pieces += (if (keepLead) lead else "") + escaped.first()
+    for (i in 1 until escaped.size - 1) acc.pieces += escaped[i]
+    acc.current.setLength(0)
+    if (escaped.size > 1) {
+        acc.appendVerbatim(escaped.last())
+    } else {
+        acc.verbatimTail = false
+    }
 }

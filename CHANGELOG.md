@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Chunking's flattening fallback no longer drops the flattened text's trailing whitespace
+  at the flush boundaries: the last escaped piece stayed untrimmed inside the in-progress
+  chunk (deliberately — edge whitespace is content), but the next flush trimmed or
+  blank-skipped it anyway. Code content is the realistic trigger (fenced blocks keep
+  trailing spaces where prose cannot): `renderChunked` of an oversized list item / quote
+  child / inline node whose text ends in spaces used to drop them, and a whitespace-only
+  tail piece was dropped outright
 - Chunking and truncation no longer drop the content of an empty-label link/image whose
   bare-URL degradation exceeds the limit: the plain-text fallback paths now extract the
   destination like the renderer does (`renderChunked("![](<URL longer than the limit>)")`

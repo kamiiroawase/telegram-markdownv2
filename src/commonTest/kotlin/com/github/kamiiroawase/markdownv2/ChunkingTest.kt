@@ -100,6 +100,47 @@ class ChunkingTest {
     }
 
     @Test
+    fun renderChunkedOversizedItemKeepsFlattenedTrailingWhitespace() {
+        // Code content keeps its trailing spaces where prose cannot (the parser strips
+        // EOL spaces in paragraphs, fenced blocks do not), so the flattened item's text
+        // ends in " \n" — the tail piece flushes raw, never trimmed (pre-fix the final
+        // trimEnd dropped both characters)
+        val chunks = MarkdownV2.renderChunked("- ```\n  aaaa \n  bbbb \n  ```", 10)
+        assertEquals(listOf("• aaaa \nbb", "bb \n"), chunks)
+        chunks.forEach { chunk -> assertTrue(chunk.length <= 10, "over-long chunk: $chunk") }
+    }
+
+    @Test
+    fun renderChunkedOversizedQuoteChildKeepsFlattenedTrailingWhitespace() {
+        // Same guarantee down the quote-child flattening path: "> aaaa " keeps its
+        // trailing space when it flushes mid-quote (pre-fix trimmed to "> aaaa"); the
+        // text's trailing newline degrades to the bare ">" continuation line
+        val chunks = MarkdownV2.renderChunked("> ```\n> aaaa \n> bbbb \n> ```", 12)
+        assertEquals(listOf("> aaaa ", "> bbbb \n>"), chunks)
+        chunks.forEach { chunk -> assertTrue(chunk.length <= 12, "over-long chunk: $chunk") }
+    }
+
+    @Test
+    fun renderChunkedOversizedInlineNodeKeepsFlattenedTrailingWhitespace() {
+        // A code span's literal may end in spaces (CommonMark strips a leading/trailing
+        // pair only when both ends are spaced); the flattened tail piece keeps them
+        // (pre-fix the paragraph's final trimEnd dropped the two trailing spaces)
+        val chunks = MarkdownV2.renderChunked("`" + "a".repeat(20) + "  `", 8)
+        assertEquals(listOf("aaaaaaaa", "aaaaaaaa", "aaaa  "), chunks)
+        chunks.forEach { chunk -> assertTrue(chunk.length <= 8, "over-long chunk: $chunk") }
+    }
+
+    @Test
+    fun renderChunkedKeepsWhitespaceOnlyTailPiece() {
+        // The flattening may leave a tail piece that is nothing but whitespace (a code
+        // span's trailing spaces again) — it is text, so the final flush must emit it
+        // however blank it looks (pre-fix the isNotBlank skip dropped it outright)
+        val chunks = MarkdownV2.renderChunked("`" + "a".repeat(9) + " ".repeat(9) + "`", 9)
+        assertEquals(listOf("aaaaaaaaa", " ".repeat(9)), chunks)
+        chunks.forEach { chunk -> assertTrue(chunk.length <= 9, "over-long chunk: $chunk") }
+    }
+
+    @Test
     fun renderChunkedSplitsCodeBlockLines() {
         assertEquals(
             listOf("```\naaaa\n```", "```\nbbbb\n```", "```\ncccc\n```"),

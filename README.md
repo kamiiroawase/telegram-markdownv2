@@ -215,7 +215,7 @@ src/
 
 ### 构建与测试
 
-248 个行为级测试（输入/输出断言，与 AST 无关），覆盖全部转义规则、每种块的渲染、截断与分片路径、代理对与转义边界（含 10 万级恶意输入的线性扫描回归测试——行内 HTML 标签解析为手写单遍扫描，全库不使用正则，从设计上不存在回溯与栈溢出风险）。注意：其中 35 个依赖 HTML 解析的测试在 JS/Wasm 上因上游 commonmark-kotlin 的解析缺陷而空跑（静默通过，见测试类 KDoc 与 `htmlParsingSupported`），待上游修复后自动生效。CI 中：JVM、Android 单元测试与 JS、Wasm（Node）、Linux x64 原生测试在 ubuntu job 执行；iOS 模拟器与 macOS Arm64 测试在 macOS job 执行；Windows（mingwX64）测试在 windows job 执行；Linux Arm64 仅交叉编译验证——Kotlin/Native 官方不支持 Linux ARM64 作为构建/测试宿主（见 [宿主支持表](https://kotlinlang.org/docs/native-target-support.html)），上游支持后可补宿主 job：
+252 个行为级测试（输入/输出断言，与 AST 无关），覆盖全部转义规则、每种块的渲染、截断与分片路径、代理对与转义边界（含 10 万级恶意输入的线性扫描回归测试——行内 HTML 标签解析为手写单遍扫描，全库不使用正则，从设计上不存在回溯与栈溢出风险）。注意：其中 35 个依赖 HTML 解析的测试在 JS/Wasm 上因上游 commonmark-kotlin 的解析缺陷而空跑（静默通过，见测试类 KDoc 与 `htmlParsingSupported`），待上游修复后自动生效。CI 中：JVM、Android 单元测试与 JS、Wasm（Node）、Linux x64 原生测试在 ubuntu job 执行；iOS 模拟器与 macOS Arm64 测试在 macOS job 执行；Windows（mingwX64）测试在 windows job 执行；Linux Arm64 仅交叉编译验证——Kotlin/Native 官方不支持 Linux ARM64 作为构建/测试宿主（见 [宿主支持表](https://kotlinlang.org/docs/native-target-support.html)），上游支持后可补宿主 job：
 
 ```bash
 ./gradlew build             # 编译全部 target + 宿主可执行的测试 + 格式检查
