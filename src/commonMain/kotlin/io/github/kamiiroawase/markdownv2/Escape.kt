@@ -72,13 +72,16 @@ internal fun appendEscapedTruncated(
  * counterpart of [appendEscapedTruncated]: instead of stopping at the budget, it keeps
  * going, so no character is lost. Escape sequences (\ + special char) and complete surrogate
  * pairs advance as atomic units and are never split; [limit] must be at least 2 (the cost of
- * one escaped special character), which guarantees every piece makes progress. The
- * concatenation of all pieces equals escapeText(text).
+ * one escaped special character, which guarantees every piece makes progress) and is checked.
+ * The concatenation of all pieces equals escapeText(text).
  */
 internal fun escapeChunks(
     text: String,
     limit: Int,
 ): List<String> {
+    // A smaller limit cannot hold even one escaped special character — fail fast rather than
+    // emit over-limit or empty pieces downstream
+    require(limit >= 2) { "limit must be at least 2: $limit" }
     // Empty text is one empty piece, not zero: callers take escaped.first()/last()
     // unconditionally (appendVerbatimChunks, flattenWithLead), and listOf("") keeps the
     // concatenation invariant — "" joins to ""
@@ -113,13 +116,14 @@ internal fun escapeChunks(
 /**
  * Splits already-escaped MarkdownV2 ([escapeText] or [escapeCode] output, where a backslash
  * can only start an escape sequence) into pieces of at most [limit] chars without splitting
- * escape sequences or surrogate pairs. [limit] must be at least 2; the caller is responsible
- * for guaranteeing that.
+ * escape sequences or surrogate pairs. [limit] must be at least 2 and is checked.
  */
 internal fun splitEscapedUnits(
     text: String,
     limit: Int,
 ): List<String> {
+    // The same floor escapeChunks enforces: below it a piece could not hold one escape unit
+    require(limit >= 2) { "limit must be at least 2: $limit" }
     val pieces = mutableListOf<String>()
     var start = 0
     var end = 0

@@ -33,7 +33,7 @@ internal fun chunkBlocks(
                 acc.appendRendered(separator + rendered)
             } else {
                 acc.flush()
-                chunkBlockInto(node, maxLength, depth, options, acc)
+                chunkBlockInto(node, rendered, maxLength, depth, options, acc)
             }
         }
         node = node.next
@@ -48,16 +48,19 @@ internal fun chunkBlock(
     options: RenderOptions,
 ): List<String> {
     val acc = ChunkAccumulator()
-    chunkBlockInto(node, maxLength, depth, options, acc)
+    chunkBlockInto(node, renderBlock(node, depth, options), maxLength, depth, options, acc)
     return acc.finish()
 }
 
 // Appends the node's completed pieces and leaves its last one open in [acc].current, so the
 // caller can pack its own next content alongside — the handoff the old return-a-list shape
-// made via pieces.last(). The block-shape classification (fence-wrapped kinds, lists,
-// headings) is shared with the truncation pipeline — see Blocks.kt
+// made via pieces.last(). [rendered] is the node's own renderBlock output, supplied by the
+// caller (the packing fit check or the single-block entry), so the block renders exactly
+// once. The block-shape classification (fence-wrapped kinds, lists, headings) is shared with
+// the truncation pipeline — see Blocks.kt
 private fun chunkBlockInto(
     node: Node,
+    rendered: String,
     maxLength: Int,
     depth: Int,
     options: RenderOptions,
@@ -65,7 +68,7 @@ private fun chunkBlockInto(
 ) {
     when {
         node.isFenceWrappedBlock() -> {
-            chunkRenderedCode(node, renderBlock(node, depth, options), maxLength, depth, options, acc)
+            chunkRenderedCode(node, rendered, maxLength, depth, options, acc)
         }
 
         node is BulletList || node is OrderedList -> {
@@ -85,7 +88,6 @@ private fun chunkBlockInto(
         }
 
         else -> {
-            val rendered = renderBlock(node, depth, options)
             if (rendered.length <= maxLength) {
                 acc.appendRendered(rendered)
             } else {

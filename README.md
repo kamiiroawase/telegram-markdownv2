@@ -44,6 +44,7 @@ val fallback = MarkdownV2.toPlainText(rejectedPart)                    // 被拒
 
 - 解析后端与 commonmark-java 的行为差异：HTML 块识别较弱（`<!-- -->`、`<!DOCTYPE>` 按段落内联处理）；强调内部的闭合 HTML 标签（如 `*a<b>x</b>*` 中的 `</b>`）不被识别为行内 HTML
 - 超过 100 层的引用 / 列表 / 行内强调平铺为纯文本（防病态输入栈溢出）
+- 病态深嵌套的主要耗时在上游解析器：数千层嵌套列表（约 4MB 输入）端到端秒级，九成在 commonmark-kotlin 解析；接受不可信输入的服务应自行限制输入规模
 - 超长内容先完整渲染再收缩（两遍策略）；截断收缩按重试收敛，最坏 O(n²)——4096 默认上限下无感
 - MarkdownV2 不是普通 Markdown：`__` 是下划线不是粗体，不要把渲染结果再当普通 Markdown 二次加工
 

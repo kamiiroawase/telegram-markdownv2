@@ -45,6 +45,7 @@ val fallback = MarkdownV2.toPlainText(rejectedPart)                    // de-for
 
 - Parser differences vs commonmark-java: weaker HTML block detection (`<!-- -->`, `<!DOCTYPE>` treated as inline paragraph content); a closing HTML tag inside emphasis (the `</b>` in `*a<b>x</b>*`) is not recognized as inline HTML
 - Quote/list/inline-emphasis nesting beyond 100 levels flattens to plain text (stack safety on pathological input)
+- Pathologically deep nesting spends its time in the upstream parser: a multi-thousand-level nested list (~4MB input) takes seconds end to end, ~90% of it inside commonmark-kotlin parsing; services accepting untrusted input should cap input size themselves
 - Over-length content renders fully first, then shrinks (two passes); the shrink retry loop is worst-case O(n²) — negligible at the default 4096 limit
 - MarkdownV2 is not plain Markdown: `__` is underline, not bold; don't post-process rendered output as ordinary Markdown
 
