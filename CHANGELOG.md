@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The commonmark-kotlin dependency moved from `io.github.darriousliu` to this
+  maintainer's published fork `io.github.kamiiroawase` (same 0.26.0 code line, verified
+  against the full test suite): consumers' dependency graphs now resolve the parser
+  transitively from the maintainer's coordinates instead
+
 ## [1.2.0] — 2026-10-03
 
 ### Changed

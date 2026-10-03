@@ -8,10 +8,10 @@ dokka = "2.2.0"
 vanniktechMavenPublish = "0.37.0"
 
 [libraries]
-commonmark = { module = "io.github.darriousliu:commonmark", version.ref = "commonmarkKotlin" }
-commonmark-ext-footnotes = { module = "io.github.darriousliu:commonmark-ext-footnotes", version.ref = "commonmarkKotlin" }
-commonmark-ext-gfm-strikethrough = { module = "io.github.darriousliu:commonmark-ext-gfm-strikethrough", version.ref = "commonmarkKotlin" }
-commonmark-ext-gfm-tables = { module = "io.github.darriousliu:commonmark-ext-gfm-tables", version.ref = "commonmarkKotlin" }
+commonmark = { module = "io.github.kamiiroawase:commonmark", version.ref = "commonmarkKotlin" }
+commonmark-ext-footnotes = { module = "io.github.kamiiroawase:commonmark-ext-footnotes", version.ref = "commonmarkKotlin" }
+commonmark-ext-gfm-strikethrough = { module = "io.github.kamiiroawase:commonmark-ext-gfm-strikethrough", version.ref = "commonmarkKotlin" }
+commonmark-ext-gfm-tables = { module = "io.github.kamiiroawase:commonmark-ext-gfm-tables", version.ref = "commonmarkKotlin" }
 
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 
