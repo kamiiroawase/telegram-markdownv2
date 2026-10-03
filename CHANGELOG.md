@@ -44,6 +44,14 @@ All notable changes to this project are documented here. The format follows
 - Chunking keeps a lone flattened piece open for packing: an over-limit list item (or
   inline node) whose escaped plain text fits in a single piece no longer forces the
   following content onto its own chunk
+- Chunking no longer drops a thematic break whose rendered em-dash line exceeds the
+  limit: a bare `---` — or one inside a quote, or a lone break as a list item — flattened
+  through plain-text extraction, which reads the break as no-content, so
+  `renderChunked("---", maxLength = 2)` returned an empty list while `render` emits
+  `———`. The flatten seam now falls back to the de-formatted render when a node extracts
+  to no plain text, keeping every character the render emits (and staying in sync with
+  the renderer by construction); truncation keeps its text-first fallback, where the
+  break's decoration yielding to real text is the intended cut
 
 ## [1.2.0] — 2026-10-03
 

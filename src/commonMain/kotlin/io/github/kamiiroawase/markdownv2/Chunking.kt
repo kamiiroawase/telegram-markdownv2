@@ -65,7 +65,7 @@ private fun chunkBlockInto(
 ) {
     when {
         node.isFenceWrappedBlock() -> {
-            chunkRenderedCode(node, renderBlock(node, depth, options), maxLength, acc)
+            chunkRenderedCode(node, renderBlock(node, depth, options), maxLength, depth, options, acc)
         }
 
         node is BulletList || node is OrderedList -> {
@@ -89,7 +89,7 @@ private fun chunkBlockInto(
             if (rendered.length <= maxLength) {
                 acc.appendRendered(rendered)
             } else {
-                flattenToPlainText(node, maxLength, acc)
+                flattenToPlainText(node, maxLength, depth, options, acc)
             }
         }
     }
@@ -153,15 +153,36 @@ private class ChunkAccumulator {
     }
 }
 
+// The flatten seam's text source: the node's plain text when it carries any, otherwise
+// the de-formatted render — a thematic break renders a visible em-dash line but extracts
+// to no plain text, so a plain-text-only source skipped it as no-content and an
+// over-limit break chunked to zero pieces. Deriving the fallback from the render keeps
+// the two in sync by construction; the de-format resolves the render's entities and
+// escapes losslessly, and never throws. Truncation keeps its plain-text-only fallback:
+// it drops by design, and there the break's decoration yielding to real text is the
+// better cut (the full document's text fills the budget in document order)
+private fun flattenTextOf(
+    node: Node,
+    depth: Int,
+    options: RenderOptions,
+): String {
+    val text = plainText(listOf(node))
+    if (text.isNotBlank()) return text
+    val rendered = renderBlock(node, depth, options)
+    return if (rendered.isBlank()) text else deformat(rendered)
+}
+
 // Last-resort seam: fully escaped text is valid MarkdownV2 at any atomic cut, so
 // unit-boundary chunking loses no characters (structure degrades, text never does);
 // the isBlank guard keeps the nothing-content skip, the text itself flattens untrimmed
 private fun flattenToPlainText(
     node: Node,
     maxLength: Int,
+    depth: Int,
+    options: RenderOptions,
     acc: ChunkAccumulator,
 ) {
-    val text = plainText(listOf(node))
+    val text = flattenTextOf(node, depth, options)
     if (text.isBlank()) return
     appendVerbatimChunks(text, maxLength, acc)
 }
@@ -188,6 +209,8 @@ private fun chunkRenderedCode(
     node: Node,
     rendered: String,
     maxLength: Int,
+    depth: Int,
+    options: RenderOptions,
     acc: ChunkAccumulator,
 ) {
     // The four fence-wrapped kinds render to nothing when their content drops out
@@ -201,7 +224,7 @@ private fun chunkRenderedCode(
     // 2 = newline after open and before close; 2 more = one two-char escape unit per line
     val lineBudget = maxLength - open.length - close.length - 2
     if (lineBudget < 2) {
-        flattenToPlainText(node, maxLength, acc)
+        flattenToPlainText(node, maxLength, depth, options, acc)
         return
     }
 
@@ -255,8 +278,10 @@ private fun chunkList(
                 acc.appendRendered(full)
             } else {
                 // Untrimmed: edge whitespace of the item's text is content the
-                // flattening path must preserve (a trailing code-line space, say)
-                val text = plainText(listOf(item))
+                // flattening path must preserve (a trailing code-line space, say).
+                // flattenTextOf: an item whose text extracts to nothing but renders
+                // visible output (a lone thematic break) still flattens from the render
+                val text = flattenTextOf(item, depth + 1, options)
                 if (text.isNotBlank()) flattenWithLead(prefix, text, maxLength, acc)
             }
         }
@@ -289,8 +314,9 @@ private fun chunkQuote(
                 if (prefixed.length <= maxLength) {
                     acc.appendRendered(prefixed)
                 } else {
-                    // Untrimmed, same trade as the list path above
-                    val text = plainText(listOf(node))
+                    // Untrimmed, same trade as the list path above; flattenTextOf for
+                    // the same renders-but-extracts-to-nothing shapes (a lone break)
+                    val text = flattenTextOf(node, depth + 1, options)
                     if (text.isNotBlank()) chunkQuotedText(text, maxLength, acc)
                 }
             }

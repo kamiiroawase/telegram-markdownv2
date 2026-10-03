@@ -410,6 +410,23 @@ class ChunkingTest {
     }
 
     @Test
+    fun chunkedThematicBreakFlattensInsteadOfVanishing() {
+        // A break renders to "———" but extracted to no plain text, so the flatten seam
+        // skipped it as no-content: an over-limit bare "---" chunked to zero pieces
+        // while the full render emits visible output (pre-fix renderChunked("---", 2)
+        // returned an empty list)
+        assertEquals(listOf("——", "—"), MarkdownV2.renderChunked("---", 2))
+    }
+
+    @Test
+    fun chunkedQuotedThematicBreakFlattensInsteadOfVanishing() {
+        // The same gap through the quote seam: "> ———" over the limit flattened to
+        // nothing and the whole quote chunked away (pre-fix renderChunked("> ---", 4)
+        // returned an empty list)
+        assertEquals(listOf("> ——", "> —"), MarkdownV2.renderChunked("> ---", 4))
+    }
+
+    @Test
     fun chunkLengthBoundHoldsAcrossLimitSweep() {
         // The per-chunk length bound checked across a sweep of limits, not just the
         // hand-picked ones (the sibling sweep in TruncationTest covers the render side;
