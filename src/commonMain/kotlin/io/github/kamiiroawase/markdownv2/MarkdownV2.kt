@@ -17,6 +17,14 @@ import org.commonmark.parser.Parser
  * RegExp engine). Wrap calls in try/catch with a plain-text fallback there, or pre-strip
  * HTML; mid-paragraph inline tags such as `<b>` or `<br>` are not affected.
  *
+ * Thread safety: every member is safe to call concurrently from multiple threads. The
+ * object holds no mutable state, and [defaultParser] — a commonmark parser — keeps all
+ * parse-time state inside each parse call (a fresh document parser per invocation), so
+ * a shared instance never carries state across calls. [RenderOptions] carries the same
+ * guarantee as an immutable value object; only user-supplied collaborators (a custom
+ * [parser], a custom display-width measure capturing mutable state) bring their own
+ * thread-safety obligations.
+ *
  * This file hosts only the public API and top-level flow; the implementation is split by
  * responsibility: full-document rendering in [Visitor](Visitor.kt), the block-level kernel
  * shared by the truncation and chunking pipelines (Blocks.kt), over-length truncation

@@ -7,7 +7,10 @@ package io.github.kamiiroawase.markdownv2
  * Only table degradation depends on measurement choices (how wide a character is, how much
  * of a huge cell may cost); everything else has a single correct rendering and is not
  * configurable. A value object: equality, hashing and [copy] compare both knobs, so
- * instances work as cache keys and derived variants.
+ * instances work as cache keys and derived variants. Immutable and safe to share across
+ * threads; the one user-owned piece is [displayWidthOf] — a custom measure capturing
+ * mutable state brings its own thread-safety obligation (the default
+ * [defaultDisplayWidth] is a pure function).
  */
 public data class RenderOptions(
     /**
