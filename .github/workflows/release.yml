@@ -3,7 +3,9 @@
 # the GitHub Release attachments (aar/jar/klib plus pom/module/sources files, creating
 # the Release when it does not exist), attaches the CI benchmark output for that release,
 # and fails loudly when the READMEs' documented version coordinates were not bumped with
-# the tag. Tests are not repeated here; the Build workflow covers them on main pushes.
+# the tag. The full build gate (compile, host tests, format and API checks) runs on the
+# tag itself before anything is published — a tag may point at a commit that never went
+# through the Build workflow, and a Central publication cannot be undone.
 #
 # Required repository secrets (Central Portal: https://central.sonatype.com) — the same
 # values the commonmark-kotlin repo publishes with; GitHub secrets are per-repository,
@@ -72,6 +74,12 @@ jobs:
             gradle/libs.versions.toml
             gradle/wrapper/gradle-wrapper.properties
             **/*.gradle.kts
+
+      # Same gate the Build workflow runs on main: the tag may point at a commit that
+      # never went through CI (pushed from a feature branch, say), and publishing to
+      # Central is irreversible — verify before anything is published
+      - name: Build and test
+        run: chmod +x gradlew && ./gradlew build
 
       - name: Publish to local Maven
         run: chmod +x gradlew && ./gradlew publishToMavenLocal

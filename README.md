@@ -238,7 +238,7 @@ src/
 - **API**：commonMain 启用 `explicitApi()`，公开声明必须显式写可见性修饰符并附 KDoc
 - **API 兼容性**：binary-compatibility-validator 为全部 target 快照公开 API（`api/` 目录），`apiCheck` 挂在 `build` 上，无意破坏公开 API 的 PR 直接失败；有意变更时跑 `./gradlew apiDump` 更新快照并在 PR 中说明
 - **API 文档与变更记录**：Dokka 从 KDoc 生成 API 参考（`./gradlew dokkaGeneratePublicationHtml`，CI 上传 HTML 产物）；用户可见的行为变化记入 [CHANGELOG.md](CHANGELOG.md) 的 Unreleased 段
-- **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS 与 Windows job 跑 iOS 模拟器、macOS Arm64 与 mingwX64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件，附带当次 CI 复跑的 benchmark 输出，并校验两份 README 的版本坐标与 CHANGELOG 的版本段已随 tag 同步更新（README 缺新版本号或残留上一版本号、CHANGELOG 缺新版本段即失败）
+- **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS 与 Windows job 跑 iOS 模拟器、macOS Arm64 与 mingwX64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时先跑与 main 相同的完整构建与测试（tag 可能指向未经 CI 的提交，而 Central 发布不可撤回），再把各平台产物发布为 GitHub Release 附件，附带当次 CI 复跑的 benchmark 输出，并校验两份 README 的版本坐标与 CHANGELOG 的版本段已随 tag 同步更新（README 缺新版本号或残留上一版本号、CHANGELOG 缺新版本段即失败）
 - **版本号来自 git tag（仅当 HEAD 恰在 tag 上）**：release 工作流的 tag 检出即此情形，取 tag 版本号；其余一律 `0.0.0-SNAPSHOT`——tag 之后的提交不再复用已发布版本号，本地 `publishToMavenLocal` 也就不会覆盖同名已发布工件。CI 需完整克隆（`fetch-depth: 0`）才能推导版本
 
 ### 提交流程
