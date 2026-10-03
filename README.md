@@ -182,7 +182,7 @@ src/
 
 ### 构建与测试
 
-222 个行为级测试（输入/输出断言，与 AST 无关），覆盖全部转义规则、每种块的渲染、截断与分片路径、代理对与转义边界（含 10 万级恶意输入的线性回溯回归测试——本库仅有的正则保持线性复杂度，无灾难性回溯）。注意：其中 28 个依赖 HTML 解析的测试在 JS/Wasm 上因上游 commonmark-kotlin 的解析缺陷而空跑（静默通过，见测试类 KDoc 与 `htmlParsingSupported`），待上游修复后自动生效。CI 中：JVM、Android 单元测试与 JS、Wasm（Node）、Linux x64 原生测试在 ubuntu job 执行；iOS 模拟器与 macOS Arm64 测试在 macOS job 执行；Windows 与 Linux Arm64 原生测试分别在 windows 与 arm64 Linux job 执行——所有原生目标均有 CI 测试覆盖：
+222 个行为级测试（输入/输出断言，与 AST 无关），覆盖全部转义规则、每种块的渲染、截断与分片路径、代理对与转义边界（含 10 万级恶意输入的线性回溯回归测试——本库仅有的正则保持线性复杂度，无灾难性回溯）。注意：其中 28 个依赖 HTML 解析的测试在 JS/Wasm 上因上游 commonmark-kotlin 的解析缺陷而空跑（静默通过，见测试类 KDoc 与 `htmlParsingSupported`），待上游修复后自动生效。CI 中：JVM、Android 单元测试与 JS、Wasm（Node）、Linux x64 原生测试在 ubuntu job 执行；iOS 模拟器与 macOS Arm64 测试在 macOS job 执行；Windows（mingwX64）测试在 windows job 执行；Linux Arm64 仅交叉编译验证——Kotlin/Native 官方不支持 Linux ARM64 作为构建/测试宿主（见 [宿主支持表](https://kotlinlang.org/docs/native-target-support.html)），上游支持后可补宿主 job：
 
 ```bash
 ./gradlew build             # 编译全部 target + 宿主可执行的测试 + 格式检查
@@ -193,7 +193,7 @@ src/
 
 - **格式**：Spotless + ktlint 挂在 `build` 上检查；提交前跑 `./gradlew spotlessApply` 一键格式化
 - **API**：commonMain 启用 `explicitApi()`，公开声明必须显式写可见性修饰符并附 KDoc
-- **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS、Windows 与 arm64 Linux job 跑 iOS 模拟器、macOS Arm64、mingwX64 与 Linux Arm64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件，附带当次 CI 复跑的 benchmark 输出，并校验两份 README 的版本坐标已随 tag 同步更新（缺新版本号或残留上一版本号即失败）
+- **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS 与 Windows job 跑 iOS 模拟器、macOS Arm64 与 mingwX64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件，附带当次 CI 复跑的 benchmark 输出，并校验两份 README 的版本坐标已随 tag 同步更新（缺新版本号或残留上一版本号即失败）
 
 ### 提交流程
 

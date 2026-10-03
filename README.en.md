@@ -182,7 +182,7 @@ src/
 
 ### Build and test
 
-222 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — the library's only regex stays linear-time with no catastrophic backtracking). Caveat: 28 of them depend on HTML parsing and silently no-op on JS/Wasm due to an upstream commonmark-kotlin parser defect (see the test class KDoc and `htmlParsingSupported`); they activate automatically once the upstream fix lands. In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows and Linux Arm64 native tests run in their own host jobs — every native target has CI test coverage:
+222 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — the library's only regex stays linear-time with no catastrophic backtracking). Caveat: 28 of them depend on HTML parsing and silently no-op on JS/Wasm due to an upstream commonmark-kotlin parser defect (see the test class KDoc and `htmlParsingSupported`); they activate automatically once the upstream fix lands. In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows (mingwX64) tests run in a windows job; Linux Arm64 stays cross-compile only — Kotlin/Native does not support Linux ARM64 as a build/test host (see the [host support table](https://kotlinlang.org/docs/native-target-support.html)), so a host job can follow once upstream supports it:
 
 ```bash
 ./gradlew build             # compile all targets + host-runnable tests + format check
@@ -193,7 +193,7 @@ src/
 
 - **Formatting**: Spotless + ktlint run as part of `build`; run `./gradlew spotlessApply` to auto-format before committing
 - **API**: commonMain uses `explicitApi()`; public declarations need explicit visibility modifiers and KDoc
-- **CI**: `build.yml` runs all of the above on main pushes and every PR (plus macOS, Windows and arm64 Linux jobs for the iOS simulator, macOS Arm64, mingwX64 and Linux Arm64 native tests) and asserts the publishing artifacts; `release.yml` publishes per-platform artifacts as GitHub Release attachments on `v*` tags, attaches the CI benchmark output, and verifies both READMEs' version coordinates were bumped with the tag (a missing new version or a leftover previous version fails the release)
+- **CI**: `build.yml` runs all of the above on main pushes and every PR (plus macOS and Windows jobs for the iOS simulator, macOS Arm64 and mingwX64 native tests) and asserts the publishing artifacts; `release.yml` publishes per-platform artifacts as GitHub Release attachments on `v*` tags, attaches the CI benchmark output, and verifies both READMEs' version coordinates were bumped with the tag (a missing new version or a leftover previous version fails the release)
 
 ### Submitting a PR
 
