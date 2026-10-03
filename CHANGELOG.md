@@ -15,6 +15,28 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Code-family HTML tags and Markdown code spans can no longer emit glued backticks, in
+  any shape:
+  - a tag nested inside an open code entity (`<code><code>x</code></code>`) merges into
+    it — it used to render as `` ``x`` ``, an empty code entity Telegram rejects, and a
+    third nesting level as ```` ```x``` ````, which Telegram re-parses as a pre fence
+    (nested code displays exactly as single code)
+  - a tag — or code span — whose delimiter would glue onto a just-closed entity's
+    backtick (`<code>a</code><code>b</code>`, `` `a`<code>b</code> ``) degrades to its
+    escaped plain text: `` `a``b` ``` is a reserved-character run Telegram cannot parse.
+    The chunking node seam passes the preceding backtick state into each node's fresh
+    render, so two code spans separated only by a nothing-rendering tag pair do not
+    glue across the seam either
+  - a pair with no visible content (`<code></code>`, or one holding only a comment)
+    vanishes outright — matched, unclosed at the paragraph tail, and completed at an
+    emphasis boundary alike; its closer used to glue onto its opener as an empty pair (`` rendered by two invisible tags)
+  - an entity left open across a block boundary completes before the following
+    fence-wrapped block (code block, table, HTML block), ahead of the block separator —
+    it used to swallow the fence markers as its content and its closer glued onto the
+    closing fence as a four-backtick run
+- Chunking drops a heading's `\#` lead when the first inline node fits the limit only
+  without it, instead of flattening the node to escaped plain text just to keep the
+  marker — a bare `\#` piece remains the shape never produced either way
 - Output-time completion of an unclosed HTML code entity no longer trims the entity's
   trailing spaces and tabs away as block-separator junk (`<code>x <!-- c -->` now keeps
   its code content `x ` — trailing space included — intact); trailing newlines are still

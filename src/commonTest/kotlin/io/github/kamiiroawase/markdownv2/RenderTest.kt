@@ -195,6 +195,90 @@ class RenderTest {
     }
 
     @Test
+    fun nestedHtmlCodeTagsMergeIntoOneEntity() {
+        // Nested code-family tags must not emit glued backticks: ``x`` reads as an empty
+        // code entity Telegram rejects, and a third level (```x```) re-parses as a pre
+        // fence — the nested span renders as part of the outer entity instead (nested
+        // code displays exactly as single code)
+        assertEquals("a `xy` b", MarkdownV2.render("a <code>x<code>y</code></code> b"))
+        assertEquals("a `xy` b", MarkdownV2.render("a <code><code>x</code>y</code> b"))
+        assertEquals("a `xy` b", MarkdownV2.render("a <code><kbd>x</kbd>y</code> b"))
+        assertEquals("a `xy` b", MarkdownV2.render("a <code><code><code>x</code></code>y</code> b"))
+        // Unclosed inner tags complete merged as well
+        assertEquals("a `x`", MarkdownV2.render("a <code><code>x"))
+    }
+
+    @Test
+    fun unclosedNestedCodeTagsCompleteMergedAtEmphasisBoundary() {
+        // The emphasis boundary completes the unclosed pair latest-opened first; a merged
+        // entry completes with no backtick, so no glued `` appears at the boundary
+        // (pre-fix: _a``xy``_)
+        assertEquals("_a`xy`_", MarkdownV2.render("*a<code><code>xy*"))
+    }
+
+    @Test
+    fun adjacentCodeEntitiesDegradeInsteadOfGluing() {
+        // A backtick delimiter gluing onto a just-closed entity's backtick is a
+        // reserved-character run Telegram cannot parse (`a``b`): the second span — HTML
+        // tag or Markdown code span alike — degrades to escaped plain text, content
+        // kept, formatting dropped
+        assertEquals("a `x`y b", MarkdownV2.render("a <code>x</code><code>y</code> b"))
+        assertEquals("a `x`y b", MarkdownV2.render("a `x`<code>y</code> b"))
+        assertEquals("a `x`y b", MarkdownV2.render("a <code>x</code>`y` b"))
+        // Unclosed glued tag: completion emits no delimiter either
+        assertEquals("a `x`y", MarkdownV2.render("a <code>x</code><code>y"))
+    }
+
+    @Test
+    fun escapedBacktickBeforeCodeTagStillOpensEntity() {
+        // The backtick ending the text is escaped (\` — a literal), not a delimiter:
+        // the following entity still opens — the glue check must read the escape
+        // parity, not the raw last character
+        assertEquals("a \\``y`", MarkdownV2.render("a \\`<code>y</code>"))
+    }
+
+    @Test
+    fun emptyHtmlCodePairVanishes() {
+        // A pair with no visible content (empty, or a lone comment) emits no delimiters:
+        // its opener and closer would glue into `` — an empty code entity Telegram
+        // rejects. Whitespace content is real content and keeps the entity
+        assertEquals("a b", MarkdownV2.render("a <code></code>b"))
+        assertEquals("a b", MarkdownV2.render("a <kbd></kbd>b"))
+        assertEquals("a b", MarkdownV2.render("a <code><!-- c --></code>b"))
+        assertEquals("a b", MarkdownV2.render("a <code><code></code></code>b"))
+        assertEquals("a ` ` b", MarkdownV2.render("a <code> </code> b"))
+    }
+
+    @Test
+    fun unclosedEmptyCodeEntityVanishes() {
+        // The same trade at the completion points: a dangling tag that emitted nothing
+        // rewinds its opener instead of gluing the closer onto it — at output time
+        // (trailing newlines are block separators, not content) and at an emphasis
+        // boundary alike
+        assertEquals("a", MarkdownV2.render("a <kbd>"))
+        assertEquals("_f_", MarkdownV2.render("*f*<code>"))
+        assertEquals("_a_", MarkdownV2.render("*a<code>*"))
+    }
+
+    @Test
+    fun unclosedCodeEntityClosesBeforeFencedBlock() {
+        // Left open across a block boundary the entity would swallow the fence markers
+        // and its closer would glue onto them (a four-backtick run); it completes
+        // before the fence instead, ahead of the block separator. An empty one simply
+        // vanishes (see unclosedEmptyCodeEntityVanishes)
+        assertEquals("a `x`\n\n```c\ny\n```", MarkdownV2.render("a <kbd>x\n\n```c\ny\n```"))
+        assertEquals("a\n\n```c\nx\n```", MarkdownV2.render("a<kbd>\n\n```c\nx\n```"))
+        assertEquals("a\n\n```\n| h   |\n| --- |\n| c   |\n```", MarkdownV2.render("a<kbd>\n\n| h |\n| - |\n| c |"))
+    }
+
+    @Test
+    fun unclosedCodeEntityClosesBeforeHtmlBlock() {
+        if (!htmlParsingSupported) return
+
+        assertEquals("a `x`\n\n```\n<div>\ny\n</div>\n```", MarkdownV2.render("a <kbd>x\n\n<div>\ny\n</div>"))
+    }
+
+    @Test
     fun htmlAnchorMapsToLink() {
         if (!htmlParsingSupported) return
 

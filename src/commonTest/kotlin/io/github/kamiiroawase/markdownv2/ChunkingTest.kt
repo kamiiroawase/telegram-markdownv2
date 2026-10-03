@@ -45,6 +45,42 @@ class ChunkingTest {
     }
 
     @Test
+    fun chunkedHeadingPrefixDroppedWhenFirstNodeFitsWithoutIt() {
+        // The heading's first inline node fits the limit only without its "\# " lead:
+        // dropping the lead and keeping the node's rendered structure beats flattening
+        // the node to escaped text just to keep the marker (a bare "\#" piece remains
+        // the shape never produced either way)
+        val pieces = MarkdownV2.renderChunked("# *abcdefghij* " + "z".repeat(30), 12)
+        assertEquals("_abcdefghij_", pieces.first())
+        assertEquals(" " + "z".repeat(30), pieces.drop(1).joinToString(""))
+        pieces.forEach { piece -> assertTrue(piece.length <= 12, "over-long piece: $piece") }
+    }
+
+    @Test
+    fun renderChunkedWhitespaceOnlySingleBlockYieldsNoChunksViaAst() {
+        // The nothing-content skip covers the single-block entry too: a block whose
+        // whole render is whitespace yields no chunk, exactly as the document path's
+        // isNotBlank guard drops it from block packing
+        val paragraph = Paragraph().apply { appendChild(Text("   ")) }
+        assertEquals(emptyList(), MarkdownV2.renderChunked(paragraph, 30))
+    }
+
+    @Test
+    fun chunkedCodeSpansAcrossNodeSeamDoNotGlue() {
+        // Two code spans separated only by a tag pair that renders to nothing would
+        // pack directly against each other at the per-node seam; the seam state passes
+        // into each node's fresh visitor, so the second span degrades to escaped text
+        // instead of gluing `` (pre-fix the chunk carried `c``d`)
+        val content = "`c`<kbd>`d`</kbd>" + " tail".repeat(10)
+        val pieces = MarkdownV2.renderChunked(content, 16)
+        pieces.forEach { piece ->
+            assertTrue(piece.length <= 16, "over-long piece: $piece")
+            assertFalse(piece.contains("``"), "glued backticks in piece: $piece")
+        }
+        assertTrue(pieces.joinToString("").run { 'c' in this && 'd' in this }, "content lost: $pieces")
+    }
+
+    @Test
     fun chunkedListItemMarkerDroppedWhenLimitTooSmall() {
         // No room for the marker plus one escape unit: text wins, the marker is dropped
         // instead of a bare "1\." piece or an escapeChunks limit below its promised ≥2

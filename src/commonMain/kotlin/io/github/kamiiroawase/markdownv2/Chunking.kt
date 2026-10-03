@@ -398,7 +398,9 @@ private fun lineGroups(node: Node): List<List<Node>> {
  * pairs spanning nodes degrade to literal closers — the same trade as the depth-flattening
  * paths in Visitor). [acc].current arrives either empty or holding only a heading prefix (the
  * lead): content packs after the lead, and the lead never becomes a standalone piece — it
- * stays glued to whichever node flattens next.
+ * stays glued to whichever node flattens next, or is dropped outright when the first node
+ * fits the limit only without it (a bare marker piece is the wrong shape either way, and
+ * keeping the node's rendered structure beats keeping the marker).
  */
 private fun chunkInlineGroup(
     nodes: List<Node>,
@@ -407,15 +409,26 @@ private fun chunkInlineGroup(
     acc: ChunkAccumulator,
 ) {
     val lead = acc.current.length
+    // Only the first node can meet the entry lead still intact in current — after any
+    // append or flatten the content there is real output the drop must not touch
+    var first = true
     for (node in nodes) {
-        val rendered = renderInlineGroup(listOf(node), options)
+        // A fresh visitor renders each node, so the glue this chunk's trailing backtick
+        // would form with the node's opening one is invisible to it — pass the seam
+        // state in (`x` packed directly against `y` would glue ``)
+        val seamGlue = acc.current.isNotEmpty() && endsWithUnescapedBacktick(acc.current)
+        val rendered = renderInlineGroup(listOf(node), options, seamGlue)
         if (acc.current.length + rendered.length <= maxLength) {
             acc.appendRendered(rendered)
         } else {
             if (acc.current.length > lead) {
                 acc.flushRaw()
+            } else if (first && rendered.length <= maxLength) {
+                // current is exactly the un-glued lead: the node fits once the lead is
+                // dropped, so drop it rather than flatten the node to escaped text
+                acc.current.setLength(0)
             }
-            if (acc.current.isEmpty() && rendered.length <= maxLength) {
+            if (rendered.length <= maxLength && acc.current.isEmpty()) {
                 acc.appendRendered(rendered)
             } else {
                 // isNotBlank keeps the nothing-content skip; a mid-group node's edge
@@ -424,6 +437,7 @@ private fun chunkInlineGroup(
                 if (text.isNotBlank()) flattenWithLead(acc.current.toString(), text, maxLength, acc)
             }
         }
+        first = false
     }
 }
 

@@ -47,13 +47,31 @@ private sealed interface OpenEntity {
     val seq: Int
 }
 
+// How an HTML code entity emits its backtick delimiter. LOUD opens and closes with one.
+// MERGED is a code-family tag nested inside an already-open code entity: the nested span
+// renders as part of the outer entity — no delimiter, content stays code-escaped (nested
+// code is exactly single code). SUPPRESSED is a tag whose delimiter would glue onto a
+// just-closed entity's backtick (`<code>a</code><code>b</code>`, `` `md`<code>x</code> ``):
+// `` is an empty entity Telegram rejects, ``` re-parses as a pre fence — so the span
+// degrades to escaped plain text with no delimiter at all. LOUD and MERGED entries own a
+// htmlCodeDepth unit; a SUPPRESSED one does not (its content escapes as text)
+private enum class CodeDelimiter {
+    LOUD,
+    MERGED,
+    SUPPRESSED,
+}
+
 // marker: the MarkdownV2 closer; html: pushed by an HTML tag rather than by this
 // visitor's own emphasis visits — only html-owned markers may be matched and popped by
-// a closing tag, so a Markdown emphasis' own entry can never be stolen from under it
+// a closing tag, so a Markdown emphasis' own entry can never be stolen from under it.
+// openPosition: for a LOUD code entry, the output position right after its opening
+// backtick (everything the entity emitted sits at or after it; -1 otherwise)
 private class OpenEmphasisMarker(
     val marker: String,
     val html: Boolean,
+    val codeDelimiter: CodeDelimiter = CodeDelimiter.LOUD,
     override val seq: Int,
+    val openPosition: Int = -1,
 ) : OpenEntity
 
 // An open HTML anchor: its URL ("" when href-less, the NESTED_LITERAL_ANCHOR sentinel
@@ -137,6 +155,22 @@ private fun Char.isAsciiLetter(): Boolean = this in 'a'..'z' || this in 'A'..'Z'
 
 private fun Char.isAsciiLetterOrDigit(): Boolean = isAsciiLetter() || this in '0'..'9'
 
+// Whether [output] ends with a backtick that is not the tail of an escape sequence:
+// content backticks always escape (\`), so an unescaped trailing one is a just-closed
+// entity's delimiter. Parity settles escaped tails: escapes pair every backslash with
+// the character after it, so an odd number of backslashes before the backtick means
+// the last one belongs to an escape. Shared with the chunking node seam
+internal fun endsWithUnescapedBacktick(output: CharSequence): Boolean {
+    if (output.isEmpty() || output.last() != '`') return false
+    var backslashes = 0
+    var index = output.length - 2
+    while (index >= 0 && output[index] == '\\') {
+        backslashes++
+        index--
+    }
+    return backslashes % 2 == 0
+}
+
 // Entity decoding for URL attribute values: the five XML predefined entities plus decimal
 // and hex character references. The full HTML5 named-entity table (~2k names) is
 // deliberately out of scope for URLs; anything unrecognized stays literal. Scanned
@@ -155,10 +189,16 @@ private val NAMED_ENTITIES =
  * anchors alike — complete at the nearest container boundary (an emphasis, strikethrough,
  * or link/image label that closes over them) or at output time, always latest-opened first
  * so the output stays properly nested; tables degrade to aligned text via [renderTableLines].
+ *
+ * [precededByBacktick] tells the visitor that the output it produces will sit directly
+ * behind an unescaped backtick of the caller's already-emitted content (the chunking
+ * node seam): a code entity opening first in such a render would glue its delimiter
+ * onto that backtick and takes the suppressed degradation instead.
  */
 internal class Visitor(
     private val depth: Int = 0,
     private val options: RenderOptions = RenderOptions(),
+    private val precededByBacktick: Boolean = false,
 ) : AbstractVisitor() {
     private val sb = StringBuilder()
 
@@ -201,7 +241,33 @@ internal class Visitor(
         while (openEntities.isNotEmpty()) {
             when (val entity = openEntities.removeLast()) {
                 is OpenEmphasisMarker -> {
-                    closers += entity.marker
+                    when {
+                        entity.codeDelimiter != CodeDelimiter.LOUD -> {
+                            // MERGED and SUPPRESSED code entries never emit their
+                            // backtick — completing them must not either, or the glue
+                            // they avoided at open time reappears at the completion point
+                        }
+
+                        entity.marker == "`" && sb.substring(entity.openPosition).trimEnd('\n').isEmpty() -> {
+                            // An empty code entity (an unclosed <code> with no content,
+                            // or one whose only content dropped out — a lone comment):
+                            // emitting the closer would glue `` against the opener, an
+                            // empty entity Telegram rejects — rewind the opener instead;
+                            // the tags carried no visible text, so nothing is lost. The
+                            // depth unit goes back too, so the trim below stops honoring
+                            // a code entity that no longer exists. Trailing newlines are
+                            // block separators appended after the children (never code
+                            // the entity displays), so they do not count as content —
+                            // unlike the matched-close and boundary paths, which run
+                            // mid-children and compare positions exactly
+                            htmlCodeDepth--
+                            sb.setLength(entity.openPosition - 1)
+                        }
+
+                        else -> {
+                            closers += entity.marker
+                        }
+                    }
                 }
 
                 is OpenAnchor -> {
@@ -290,12 +356,14 @@ internal class Visitor(
                 .trim()
                 .filter { it.isLetterOrDigit() || it == '-' || it == '+' }
                 .take(32)
+        completeOpenCodeEntities()
         sb.append("```").append(language).append('\n')
         sb.append(escapeCode(fencedCodeBlock.literal.orEmpty().trimEnd('\n')))
         sb.append("\n```\n\n")
     }
 
     override fun visit(indentedCodeBlock: IndentedCodeBlock) {
+        completeOpenCodeEntities()
         sb.append("```\n")
         sb.append(escapeCode(indentedCodeBlock.literal.trimEnd('\n')))
         sb.append("\n```\n\n")
@@ -307,6 +375,14 @@ internal class Visitor(
             // the entity's delimiters and garble the span boundaries — keep them, escaped
             // (\` renders as a literal backtick inside a code entity)
             sb.append("\\`").append(escapeCode(code.literal)).append("\\`")
+        } else if (code.literal.isEmpty()) {
+            // An empty span's delimiters would glue into an empty code entity; the
+            // parser never produces one, this covers hand-built ASTs
+        } else if (atCodeGlue()) {
+            // The span's opener would glue onto a just-closed entity's backtick — the
+            // same reserved-character run the HTML tag path suppresses: degrade to
+            // escaped plain text, content preserved, formatting dropped
+            sb.append(escapeText(code.literal))
         } else {
             sb.append('`').append(escapeCode(code.literal)).append('`')
         }
@@ -318,7 +394,7 @@ internal class Visitor(
             return
         }
         val seq = nextSeq++
-        openEntities.addLast(OpenEmphasisMarker("_", html = false, seq))
+        openEntities.addLast(OpenEmphasisMarker("_", html = false, seq = seq))
         sb.append('_')
         visitChildren(emphasis)
         completeOpenedAfter(seq)
@@ -333,7 +409,7 @@ internal class Visitor(
             return
         }
         val seq = nextSeq++
-        openEntities.addLast(OpenEmphasisMarker("*", html = false, seq))
+        openEntities.addLast(OpenEmphasisMarker("*", html = false, seq = seq))
         sb.append('*')
         visitChildren(strongEmphasis)
         completeOpenedAfter(seq)
@@ -350,7 +426,7 @@ internal class Visitor(
                     return
                 }
                 val seq = nextSeq++
-                openEntities.addLast(OpenEmphasisMarker("~", html = false, seq))
+                openEntities.addLast(OpenEmphasisMarker("~", html = false, seq = seq))
                 sb.append('~')
                 visitChildren(customNode)
                 completeOpenedAfter(seq)
@@ -380,8 +456,23 @@ internal class Visitor(
         while (openEntities.isNotEmpty() && openEntities.last().seq > seq) {
             when (val entity = openEntities.removeLast()) {
                 is OpenEmphasisMarker -> {
-                    if (entity.marker == "`") htmlCodeDepth--
-                    sb.append(entity.marker)
+                    // Only LOUD and MERGED code entries own a depth unit (see
+                    // CodeDelimiter); completing a SUPPRESSED one must not drop the
+                    // count below the entities really open around it
+                    if (entity.marker == "`" && entity.codeDelimiter != CodeDelimiter.SUPPRESSED) htmlCodeDepth--
+                    when {
+                        entity.codeDelimiter != CodeDelimiter.LOUD -> {}
+
+                        entity.marker == "`" && sb.length == entity.openPosition -> {
+                            // See output(): an empty code entity rewinds its opener
+                            // instead of gluing `` at the completion point
+                            sb.setLength(entity.openPosition - 1)
+                        }
+
+                        else -> {
+                            sb.append(entity.marker)
+                        }
+                    }
                 }
 
                 is OpenAnchor -> {
@@ -404,6 +495,27 @@ internal class Visitor(
         }
     }
 
+    /**
+     * Completes every open inline code entity (and everything opened inside it) before a
+     * fence-wrapped block emits its ```` ``` ````: left open, the entity would swallow the
+     * fence markers as its content and its closer would glue onto the closing fence
+     * (a four-backtick run Telegram cannot parse). Code entities cannot meaningfully span
+     * blocks anyway; emphasis and anchors left open keep the documented complete-at-output
+     * behavior. The closers land before the trailing block separator — appended after it
+     * they would glue onto the fence instead, so the separator is lifted and re-emitted
+     * (the same trade the output-time completion's trim makes).
+     */
+    private fun completeOpenCodeEntities() {
+        val outermostCode =
+            openEntities.firstOrNull { it is OpenEmphasisMarker && it.marker == "`" } as? OpenEmphasisMarker
+                ?: return
+        var separatorLength = 0
+        while (separatorLength < sb.length && sb[sb.length - 1 - separatorLength] == '\n') separatorLength++
+        sb.setLength(sb.length - separatorLength)
+        completeOpenedAfter(outermostCode.seq - 1)
+        repeat(separatorLength) { sb.append('\n') }
+    }
+
     override fun visit(customBlock: CustomBlock) {
         if (customBlock is TableBlock) {
             visitTable(customBlock)
@@ -418,6 +530,7 @@ internal class Visitor(
             return
         }
 
+        completeOpenCodeEntities()
         sb.append("```\n")
         sb.append(escapeCode(lines.joinToString("\n")))
         sb.append("\n```\n\n")
@@ -504,6 +617,7 @@ internal class Visitor(
             return
         }
 
+        completeOpenCodeEntities()
         sb.append("```\n").append(escapeCode(literal)).append("\n```\n\n")
     }
 
@@ -545,15 +659,50 @@ internal class Visitor(
         if (parts.closing) {
             val top = openEntities.lastOrNull()
             if (top is OpenEmphasisMarker && top.html && top.marker == marker) {
+                // An empty code pair (<code></code>, or one whose only content dropped
+                // out — a lone comment) rewinds its opener: emitting the closer would
+                // glue `` — an empty entity Telegram rejects; the tags carried no
+                // visible text, so nothing is lost (see output() for the same trade at
+                // completion points)
+                if (marker == "`" && top.codeDelimiter == CodeDelimiter.LOUD && sb.length == top.openPosition) {
+                    openEntities.removeLast()
+                    htmlCodeDepth--
+                    sb.setLength(top.openPosition - 1)
+                    return ""
+                }
                 openEntities.removeLast()
-                if (marker == "`") htmlCodeDepth--
-                return marker
+                // LOUD and MERGED entries own a depth unit; a SUPPRESSED one never took
+                // one (and a non-code marker has none to give back either)
+                if (marker == "`" && top.codeDelimiter != CodeDelimiter.SUPPRESSED) htmlCodeDepth--
+                return if (top.codeDelimiter == CodeDelimiter.LOUD) marker else ""
             }
             return escapeText(tag)
         }
-        openEntities.addLast(OpenEmphasisMarker(marker, html = true, nextSeq++))
-        if (marker == "`") htmlCodeDepth++
-        return marker
+        // A code-family tag never emits a second backtick in a row: nested inside an
+        // open code entity it merges into it (nested code renders exactly as single
+        // code), and directly behind a closed entity's backtick the delimiter would
+        // glue into a reserved-character run — the span degrades to escaped plain text
+        val delimiter =
+            if (marker == "`" && htmlCodeDepth > 0) {
+                CodeDelimiter.MERGED
+            } else if (marker == "`" && atCodeGlue()) {
+                CodeDelimiter.SUPPRESSED
+            } else {
+                CodeDelimiter.LOUD
+            }
+        // For a LOUD code entry, the opener backtick lands at sb.length once the caller
+        // appends this method's return — openPosition is the position right after it
+        openEntities.addLast(
+            OpenEmphasisMarker(
+                marker,
+                html = true,
+                delimiter,
+                nextSeq++,
+                openPosition = if (marker == "`" && delimiter == CodeDelimiter.LOUD) sb.length + 1 else -1,
+            ),
+        )
+        if (delimiter != CodeDelimiter.SUPPRESSED && marker == "`") htmlCodeDepth++
+        return if (delimiter == CodeDelimiter.LOUD) marker else ""
     }
 
     private fun renderAnchor(
@@ -703,6 +852,14 @@ internal class Visitor(
     // label had opened would have emitted a non-whitespace character, so a blank region
     // guarantees nothing was left open inside it
     private fun labelIsBlank(labelStart: Int): Boolean = sb.substring(labelStart).isBlank()
+
+    // Whether the output ends with a backtick that is not the tail of an escape
+    // sequence. Content backticks always escape (\`), so at code-depth zero an
+    // unescaped trailing one is necessarily a just-closed entity's delimiter — the
+    // glue a new code opener must not touch. Parity settles escaped tails: escapes
+    // pair every backslash with the character after it, so an odd number of
+    // backslashes before the backtick means the last one belongs to an escape
+    private fun atCodeGlue(): Boolean = if (sb.isEmpty()) precededByBacktick else endsWithUnescapedBacktick(sb)
 
     private fun enterInline(): Boolean {
         if (inlineDepth >= MAX_RENDER_DEPTH) return false
