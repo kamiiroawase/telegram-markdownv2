@@ -246,23 +246,25 @@ Reproducible via `./gradlew benchmark` (implementation: [Benchmark.kt](src/jvmTe
 
 | Scenario | Input | Median (best round) | Throughput |
 | --- | --- | --- | --- |
-| Short text (typical chat message) | 0.1 KB | ~8 µs | ~13 MB/s |
-| Typical reply (headings/lists/code/table) | 2.0 KB | ~90 µs | ~23 MB/s |
-| Plain paragraph near the limit (no truncation) | 3.6 KB | ~19 µs | ~190 MB/s |
-| Overlong multi-paragraph (structure-preserving truncation to 4096) | 42.7 KB | ~0.4 ms | ~105 MB/s |
-| Overlong single line (escaped plain-text fallback) | 50.0 KB | ~0.54 ms | ~93 MB/s |
-| Large table (60 rows × 4 cols, degraded alignment) | 3.2 KB | ~0.13 ms | ~24 MB/s |
-| Large code block (500 lines, truncated) | 21.3 KB | ~0.1 ms | ~220 MB/s |
-| Inline HTML mix | 4.7 KB | ~0.1 ms | ~47 MB/s |
-| Deeply nested quote (200 levels, flattened) | 0.3 KB | ~45 µs | ~7.1 MB/s |
-| 100k-scale unclosed tag (tag-scan linearity regression) | 100 KB | ~0.9 ms | ~110 MB/s |
-| Huge document (1M characters, render-twice strategy) | 1.0 MB | ~10 ms | ~100 MB/s |
-| De-format rendered output (toPlainText fallback) | 64.0 KB | ~0.3 ms | ~210 MB/s |
+| Short text (typical chat message) | 0.1 KB | ~6 µs | ~17 MB/s |
+| Typical reply (headings/lists/code/table) | 2.0 KB | ~0.1 ms | ~20 MB/s |
+| Plain paragraph near the limit (no truncation) | 3.6 KB | ~18 µs | ~200 MB/s |
+| Overlong multi-paragraph (structure-preserving truncation to 4096) | 42.7 KB | ~0.39 ms | ~109 MB/s |
+| Overlong single line (escaped plain-text fallback) | 50.0 KB | ~0.49 ms | ~102 MB/s |
+| Large table (60 rows × 4 cols, degraded alignment) | 3.2 KB | ~0.14 ms | ~23 MB/s |
+| Large code block (500 lines, truncated) | 21.3 KB | ~0.1 ms | ~211 MB/s |
+| Inline HTML mix | 4.7 KB | ~97 µs | ~48 MB/s |
+| Unclosed inline entities (boundary completion) | 2.7 KB | ~53 µs | ~50 MB/s |
+| Deeply nested quote (200 levels, flattened) | 0.3 KB | ~47 µs | ~6.8 MB/s |
+| 100k-scale unclosed tag (tag-scan linearity regression) | 100 KB | ~0.86 ms | ~116 MB/s |
+| Huge document (1M characters, render-twice strategy) | 1.0 MB | ~9.4 ms | ~107 MB/s |
+| De-format rendered output (toPlainText fallback) | 64.0 KB | ~0.24 ms | ~267 MB/s |
 
 Reading notes:
 
 - Typical messages (≤ 4096 chars) render mostly within a 0.1 ms order of magnitude — negligible on a bot's send path
 - Fragmented structure costs: per byte, documents dense in headings/lists/tables parse and render several times slower than a single plain paragraph
+- Boundary completion of unclosed inline entities (anchors across emphasis, crossing closers, whole paragraphs left open) costs the same order as rendering well-formed tags — pre-fix these shapes emitted crossed entities or crashed
 - Adversarial input (100k-char unclosed tag) stays linear (~0.9 ms) — inline-HTML tags parse via a hand-written single-pass linear scanner and the library uses no regex at all, so catastrophic backtracking and engine stack overflow are impossible by construction
 - Huge documents pay the render-full-then-shrink strategy (see known limitations): ~10 ms per million characters
 

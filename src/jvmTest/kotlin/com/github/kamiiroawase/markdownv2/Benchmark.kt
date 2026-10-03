@@ -127,6 +127,17 @@ private fun buildCases(): List<BenchmarkCase> {
                 "<a href=\"https://example.com/x\">link</a>\n\n"
         ).repeat(20)
 
+    // Unclosed and crossing inline entities — a closer crossing a still-open anchor, an
+    // anchor opened inside emphasis, tags left open to complete at output time — the
+    // boundary-completion machinery (pre-fix these shapes emitted crossed entities, and
+    // the crossed closer crashed); the render stays within 4096
+    val unclosedHtml =
+        (
+            "x<b>bold <a href=\"https://example.com/u\">label</b> tail " + "body ".repeat(12) + "\n\n" +
+                "*head <a href=\"https://example.com/v\">link " + "text ".repeat(12) + "end*\n\n" +
+                "y<i>ital <a href=\"https://example.com/w\">label " + "more ".repeat(12) + "\n\n"
+        ).repeat(8)
+
     // Beyond 100 levels; triggers deep flattening
     val deepNesting = ">".repeat(200) + " deep quote body " + "x".repeat(100)
 
@@ -173,6 +184,7 @@ private fun buildCases(): List<BenchmarkCase> {
         stringCase("Large table (60 rows x 4 cols, degraded)", table),
         stringCase("Large code block (500 lines, truncated)", code),
         stringCase("Inline HTML mix", htmlInline),
+        stringCase("Unclosed inline entities (completion)", unclosedHtml),
         stringCase("Deeply nested quote (200 levels, flattened)", deepNesting),
         BenchmarkCase(
             "Malicious unclosed tag (tag-scan linearity)",
