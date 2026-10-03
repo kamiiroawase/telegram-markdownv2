@@ -16,13 +16,25 @@ internal fun escapeText(text: String): String =
         }
     }
 
-// Inside code entities (pre/code) Telegram only requires escaping the backslash and backtick.
-// The chained replaces allocate two intermediate strings per call — an accepted cost at
-// message scale; escapeText (the hottest path, every Text node) keeps a single-pass loop
-internal fun escapeCode(text: String): String = text.replace("\\", "\\\\").replace("`", "\\`")
+// Inside code entities (pre/code) Telegram only requires escaping the backslash and
+// backtick — single-pass, the same shape as escapeText
+internal fun escapeCode(text: String): String =
+    buildString(text.length + 16) {
+        for (char in text) {
+            if (char == '\\' || char == '`') append('\\')
+            append(char)
+        }
+    }
 
-// Inside the (...) part of link entities Telegram only requires escaping the backslash and ')'
-internal fun escapeUrl(url: String): String = url.replace("\\", "\\\\").replace(")", "\\)")
+// Inside the (...) part of link entities Telegram only requires escaping the backslash
+// and ')' — single-pass, the same shape as escapeText
+internal fun escapeUrl(url: String): String =
+    buildString(url.length + 16) {
+        for (char in url) {
+            if (char == '\\' || char == ')') append('\\')
+            append(char)
+        }
+    }
 
 /**
  * Escapes char by char and truncates to [maxLength]; shared by all truncation fallback paths.

@@ -841,7 +841,7 @@ internal class Visitor(
         if (codePoint <= 0 || codePoint > 0x10FFFF || codePoint in 0xD800..0xDFFF) return null
         if (codePoint <= 0xFFFF) return codePoint.toChar().toString()
         val offset = codePoint - 0x10000
-        return Char(0xD800 + (offset shr 10)).toString() + Char(0xDC00 + (offset and 0x3FF))
+        return (0xD800 + (offset shr 10)).toChar().toString() + (0xDC00 + (offset and 0x3FF)).toChar()
     }
 
     private fun linkEntityOpen(): Boolean = openEntities.any { it is OpenAnchor } || openMarkdownLinks > 0
@@ -851,7 +851,12 @@ internal class Visitor(
     // so the region runs exactly to the end of the current output; any entity marker a
     // label had opened would have emitted a non-whitespace character, so a blank region
     // guarantees nothing was left open inside it
-    private fun labelIsBlank(labelStart: Int): Boolean = sb.substring(labelStart).isBlank()
+    private fun labelIsBlank(labelStart: Int): Boolean {
+        for (index in labelStart until sb.length) {
+            if (!sb[index].isWhitespace()) return false
+        }
+        return true
+    }
 
     // Whether the output ends with a backtick that is not the tail of an escape
     // sequence. Content backticks always escape (\`), so at code-depth zero an
