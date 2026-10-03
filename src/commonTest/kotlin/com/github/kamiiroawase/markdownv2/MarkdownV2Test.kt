@@ -809,8 +809,11 @@ class MarkdownV2Test {
     }
 
     @Test
-    fun emptyLinkTextKeepsCurrentSyntax() {
-        assertEquals("[](u)", MarkdownV2.render("[](u)"))
+    fun emptyLinkTextDegradesToBareUrl() {
+        // Telegram rejects link entities with empty text — keep the destination visible
+        assertEquals("u", MarkdownV2.render("[](u)"))
+        assertEquals("https://example\\.com", MarkdownV2.render("[](https://example.com)"))
+        assertEquals("u", MarkdownV2.render("![](u)"))
     }
 
     @Test

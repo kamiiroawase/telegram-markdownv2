@@ -274,27 +274,46 @@ internal class Visitor(
             visitChildren(link)
             return
         }
+        val openBracket = sb.length
         sb.append('[')
         openMarkdownLinks++
+        val labelStart = sb.length
         visitChildren(link)
         openMarkdownLinks--
+        // Telegram also rejects link entities with empty text: a label that renders to
+        // nothing (no children, or children like a lone HTML comment) degrades to the bare
+        // escaped URL. Rewinding is safe — inside a label every pushed entity marker is
+        // accompanied by output, so an empty label left nothing open on the stacks
+        if (sb.length == labelStart) {
+            sb.setLength(openBracket)
+            sb.append(escapeText(destination))
+            return
+        }
         sb.append("](").append(escapeUrl(destination)).append(')')
     }
 
     // Telegram MarkdownV2 has no images in message text: degrade to a plain link on the
-    // alt text. Nested inside another link (the README badge shape [![alt](img)](target))
-    // only the alt text survives, keeping the outer link single-level — Telegram links
-    // cannot nest
+    // alt text; an alt that renders to nothing degrades to the bare escaped URL (see
+    // visit(link)). Nested inside another link (the README badge shape
+    // [![alt](img)](target)) only the alt text survives, keeping the outer link
+    // single-level — Telegram links cannot nest
     override fun visit(image: Image) {
         val destination = image.destination.orEmpty()
         if (destination.isEmpty() || linkEntityOpen()) {
             visitChildren(image)
             return
         }
+        val openBracket = sb.length
         sb.append('[')
         openMarkdownLinks++
+        val labelStart = sb.length
         visitChildren(image)
         openMarkdownLinks--
+        if (sb.length == labelStart) {
+            sb.setLength(openBracket)
+            sb.append(escapeText(destination))
+            return
+        }
         sb.append("](").append(escapeUrl(destination)).append(')')
     }
 
