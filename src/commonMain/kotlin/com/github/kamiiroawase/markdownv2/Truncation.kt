@@ -1,13 +1,9 @@
 package com.github.kamiiroawase.markdownv2
 
-import org.commonmark.ext.gfm.tables.TableBlock
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
-import org.commonmark.node.FencedCodeBlock
 import org.commonmark.node.HardLineBreak
 import org.commonmark.node.Heading
-import org.commonmark.node.HtmlBlock
-import org.commonmark.node.IndentedCodeBlock
 import org.commonmark.node.ListItem
 import org.commonmark.node.Node
 import org.commonmark.node.OrderedList
@@ -51,22 +47,12 @@ internal fun renderBlocks(
     return parts.toString()
 }
 
-// Depth capping is handled by Visitor.renderChild; the truncation path only calls this at
-// small depths
-internal fun renderBlock(
-    node: Node,
-    depth: Int,
-    options: RenderOptions,
-): String {
-    val visitor = Visitor(depth, options)
-    node.accept(visitor)
-    return visitor.output().trimEnd('\n')
-}
-
 // Recursion on the truncation path is structurally bounded: retriable is true only at the
 // top level; a nested level that does not fit degrades to iterative plain text and goes no
 // deeper. Stack safety for deep ASTs is guaranteed by the depth caps in Visitor.renderChild
-// and enterInline, so no extra depth guard is needed here
+// and enterInline, so no extra depth guard is needed here. The block-shape classification
+// (fence-wrapped kinds, lists, headings) is shared with the chunking pipeline — see
+// Blocks.kt
 private fun shrink(
     node: Node,
     budget: Int,
@@ -74,29 +60,24 @@ private fun shrink(
     retriable: Boolean,
     options: RenderOptions,
 ): String =
-    when (node) {
-        is FencedCodeBlock, is IndentedCodeBlock, is TableBlock, is HtmlBlock -> {
+    when {
+        node.isFenceWrappedBlock() -> {
             shrinkRenderedCode(renderBlock(node, depth, options), budget)
         }
 
-        is BulletList -> {
-            shrinkList(node, budget, depth, retriable, options) { "• " }
+        node is BulletList || node is OrderedList -> {
+            shrinkList(node, budget, depth, retriable, options)
         }
 
-        is OrderedList -> {
-            var number = node.markerStartNumber ?: 1
-            shrinkList(node, budget, depth, retriable, options) { "${number++}\\. " }
-        }
-
-        is BlockQuote -> {
+        node is BlockQuote -> {
             shrinkQuote(node, budget, depth, retriable, options)
         }
 
-        is Heading -> {
-            shrinkParagraph(node, budget, options, escapeText("#".repeat(node.level)) + " ")
+        node is Heading -> {
+            shrinkParagraph(node, budget, options, headingPrefixOf(node))
         }
 
-        is Paragraph -> {
+        node is Paragraph -> {
             shrinkParagraph(node, budget, options, "")
         }
 
@@ -131,38 +112,39 @@ private fun shrinkRenderedCode(
 }
 
 // Truncation stops at the first item that does not fit — later items are dropped whole,
-// keeping the surviving prefix's numbering contiguous
+// keeping the surviving prefix's numbering contiguous. The walk itself (marker
+// consumption, blank-body skip) is forEachListItem, shared with the chunking side
 private fun shrinkList(
     list: Node,
     budget: Int,
     depth: Int,
     retriable: Boolean,
     options: RenderOptions,
-    marker: () -> String,
 ): String {
     val items = StringBuilder()
-    var item = list.firstChild
-    while (item != null) {
-        if (item is ListItem) {
-            val separator = if (items.isEmpty()) "" else "\n"
-            val remaining = budget - items.length - separator.length
-            val prefix = marker()
-            val content = fitListItem(item, prefix, remaining, depth, retriable, options) ?: break
+    forEachListItem(list, depth, options) { item, prefix, body ->
+        val separator = if (items.isEmpty()) "" else "\n"
+        val remaining = budget - items.length - separator.length
+        val content = fitListItem(item, body, prefix, remaining, depth, retriable, options)
+        if (content == null) {
+            false
+        } else {
             items.append(separator).append(content)
+            true
         }
-        item = item.next
     }
     return items.toString()
 }
 
 /**
- * Fits list-item content into [remaining] by its actual length after prefixing (first-line
- * marker, continuation indent); returns null when it does not fit. The continuation-indent
- * overhead added by applyPrefix is outside renderBlocks' budget, so a shrunk result may
- * still overflow it — dropping lines is not a viable fallback: emphasis/link markers closed
- * on a continuation line would be lost with the line, leaving unclosed entities Telegram
- * rejects. Instead re-shrink with the budget tightened by the overflow; once the budget
- * shrinks to a single line it always fits, so the loop converges.
+ * Fits the item's pre-rendered, known-non-blank [body] into [remaining] by its actual
+ * length after prefixing (first-line marker, continuation indent); returns null when it
+ * does not fit. The continuation-indent overhead added by applyPrefix is outside
+ * renderBlocks' budget, so a shrunk result may still overflow it — dropping lines is not
+ * a viable fallback: emphasis/link markers closed on a continuation line would be lost
+ * with the line, leaving unclosed entities Telegram rejects. Instead re-shrink with the
+ * budget tightened by the overflow; once the budget shrinks to a single line it always
+ * fits, so the loop converges.
  *
  * Re-shrinking is allowed only at the top level: each retry re-renders the whole subtree,
  * and per-level retries in nested contexts explode exponentially (deeply nested lists can
@@ -172,6 +154,7 @@ private fun shrinkList(
  */
 private fun fitListItem(
     item: ListItem,
+    body: String,
     prefix: String,
     remaining: Int,
     depth: Int,
@@ -179,8 +162,6 @@ private fun fitListItem(
     options: RenderOptions,
 ): String? {
     if (prefix.length >= remaining) return null
-    val body = renderBlock(item, depth + 1, options)
-    if (body.isEmpty()) return null
     val full = applyPrefix(prefix, body)
     if (full.length <= remaining) return full
     if (!retriable) return plainListItem(item, prefix, remaining)
@@ -208,23 +189,6 @@ private fun plainListItem(
     val sb = StringBuilder(prefix)
     appendEscapedTruncated(sb, plain.toString().trim(), remaining - prefix.length)
     return sb.toString()
-}
-
-// Blank lines stay bare — indenting them would only add trailing whitespace
-internal fun applyPrefix(
-    prefix: String,
-    body: String,
-): String {
-    val indent = " ".repeat(prefix.length)
-    return body
-        .lines()
-        .mapIndexed { index, line ->
-            when {
-                index == 0 -> prefix + line
-                line.isEmpty() -> line
-                else -> indent + line
-            }
-        }.joinToString("\n")
 }
 
 private fun shrinkQuote(
@@ -285,9 +249,6 @@ private fun shrinkQuoteTail(
     return ""
 }
 
-// Blank lines keep a bare ">": an empty line would terminate the quote entity
-internal fun prefixQuote(block: String): String = block.lines().joinToString("\n") { if (it.isEmpty()) ">" else "> $it" }
-
 private fun shrinkParagraph(
     node: Node,
     budget: Int,
@@ -343,21 +304,4 @@ private fun appendGroup(
         appendEscapedTruncated(sb, plainText(group), remaining)
     }
     return false
-}
-
-// A fresh visitor per group: entities left unclosed within the group are completed by its
-// own output(), never leaking into the next group
-internal fun renderInlineGroup(
-    nodes: List<Node>,
-    options: RenderOptions,
-): String {
-    val visitor = Visitor(options = options)
-    nodes.forEach { it.accept(visitor) }
-    return visitor.output()
-}
-
-internal fun plainText(nodes: List<Node>): String {
-    val sb = StringBuilder()
-    nodes.forEach { appendPlainText(sb, it) }
-    return sb.toString()
 }

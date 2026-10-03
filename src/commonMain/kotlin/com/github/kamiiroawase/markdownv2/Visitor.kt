@@ -206,28 +206,26 @@ internal class Visitor(
     }
 
     // MarkdownV2 has no heading entity: the level is spelled out as escaped hashes
+    // (headingPrefixOf, shared with the truncation and chunking pipelines)
     override fun visit(heading: Heading) {
-        sb.append(escapeText("#".repeat(heading.level))).append(' ')
+        sb.append(headingPrefixOf(heading))
         visitChildren(heading)
         sb.append("\n\n")
     }
 
     override fun visit(blockQuote: BlockQuote) {
-        val body = renderChild(blockQuote)
-        // Blank lines keep a bare ">": an empty line would terminate the quote entity
-        sb.append(
-            body.lines().joinToString("\n") { if (it.isEmpty()) ">" else "> $it" },
-        )
+        // prefixQuote is the shared quote-prefixing helper (Blocks.kt); blank lines keep
+        // a bare ">": an empty line would terminate the quote entity
+        sb.append(prefixQuote(renderChild(blockQuote)))
         sb.append("\n\n")
     }
 
     override fun visit(bulletList: BulletList) {
-        renderList(bulletList) { "• " }
+        renderList(bulletList)
     }
 
     override fun visit(orderedList: OrderedList) {
-        var number = orderedList.markerStartNumber ?: 1
-        renderList(orderedList) { "${number++}\\. " }
+        renderList(orderedList)
     }
 
     // MarkdownV2 has no thematic break entity; em dashes render cleanly without escaping,
@@ -648,11 +646,10 @@ internal class Visitor(
     }
 
     // Continuation lines are indented to the marker width so multi-line items stay
-    // visually attached to their marker
-    private fun renderList(
-        list: Node,
-        marker: () -> String,
-    ) {
+    // visually attached to their marker; the marker factory (listMarkerOf) is shared with
+    // the truncation and chunking pipelines
+    private fun renderList(list: Node) {
+        val marker = listMarkerOf(list)
         var item = list.firstChild
         while (item != null) {
             if (item is ListItem) {

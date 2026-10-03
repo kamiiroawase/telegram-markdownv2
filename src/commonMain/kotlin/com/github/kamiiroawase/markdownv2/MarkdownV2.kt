@@ -18,7 +18,8 @@ import org.commonmark.parser.Parser
  * HTML; mid-paragraph inline tags such as `<b>` or `<br>` are not affected.
  *
  * This file hosts only the public API and top-level flow; the implementation is split by
- * responsibility: full-document rendering in [Visitor](Visitor.kt), over-length truncation
+ * responsibility: full-document rendering in [Visitor](Visitor.kt), the block-level kernel
+ * shared by the truncation and chunking pipelines (Blocks.kt), over-length truncation
  * (Truncation.kt), lossless chunking (Chunking.kt), de-formatting rendered output back to
  * plain text (Deformat.kt), escaping (Escape.kt), plain-text extraction (PlainText.kt),
  * table degradation (TableRenderer.kt), and customizable rendering knobs (RenderOptions.kt).

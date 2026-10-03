@@ -1,14 +1,9 @@
 package com.github.kamiiroawase.markdownv2
 
-import org.commonmark.ext.gfm.tables.TableBlock
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
-import org.commonmark.node.FencedCodeBlock
 import org.commonmark.node.HardLineBreak
 import org.commonmark.node.Heading
-import org.commonmark.node.HtmlBlock
-import org.commonmark.node.IndentedCodeBlock
-import org.commonmark.node.ListItem
 import org.commonmark.node.Node
 import org.commonmark.node.OrderedList
 import org.commonmark.node.Paragraph
@@ -59,7 +54,8 @@ internal fun chunkBlock(
 
 // Appends the node's completed pieces and leaves its last one open in [acc].current, so the
 // caller can pack its own next content alongside — the handoff the old return-a-list shape
-// made via pieces.last()
+// made via pieces.last(). The block-shape classification (fence-wrapped kinds, lists,
+// headings) is shared with the truncation pipeline — see Blocks.kt
 private fun chunkBlockInto(
     node: Node,
     maxLength: Int,
@@ -67,29 +63,24 @@ private fun chunkBlockInto(
     options: RenderOptions,
     acc: ChunkAccumulator,
 ) {
-    when (node) {
-        is FencedCodeBlock, is IndentedCodeBlock, is TableBlock, is HtmlBlock -> {
+    when {
+        node.isFenceWrappedBlock() -> {
             chunkRenderedCode(node, renderBlock(node, depth, options), maxLength, acc)
         }
 
-        is BulletList -> {
-            chunkList(node, maxLength, depth, options, acc) { "• " }
+        node is BulletList || node is OrderedList -> {
+            chunkList(node, maxLength, depth, options, acc)
         }
 
-        is OrderedList -> {
-            var number = node.markerStartNumber ?: 1
-            chunkList(node, maxLength, depth, options, acc) { "${number++}\\. " }
-        }
-
-        is BlockQuote -> {
+        node is BlockQuote -> {
             chunkQuote(node, maxLength, depth, options, acc)
         }
 
-        is Heading -> {
-            chunkParagraph(node, maxLength, options, escapeText("#".repeat(node.level)) + " ", acc)
+        node is Heading -> {
+            chunkParagraph(node, maxLength, options, headingPrefixOf(node), acc)
         }
 
-        is Paragraph -> {
+        node is Paragraph -> {
             chunkParagraph(node, maxLength, options, "", acc)
         }
 
@@ -243,7 +234,8 @@ private fun chunkRenderedCode(
 /**
  * Items are packed whole; numbering runs across chunks (a chunk containing items 4–6 starts
  * at "4\\."). An item larger than the limit alone flattens to escaped text, the marker kept
- * on its first piece only.
+ * on its first piece only. The walk itself (marker consumption, blank-body skip) is
+ * forEachListItem, shared with the truncation side.
  */
 private fun chunkList(
     list: Node,
@@ -251,32 +243,24 @@ private fun chunkList(
     depth: Int,
     options: RenderOptions,
     acc: ChunkAccumulator,
-    marker: () -> String,
 ) {
-    var item = list.firstChild
-    while (item != null) {
-        if (item is ListItem) {
-            val prefix = marker()
-            val body = renderBlock(item, depth + 1, options)
-            if (body.isNotBlank()) {
-                val full = applyPrefix(prefix, body)
-                val separator = if (acc.current.isEmpty()) "" else "\n"
-                if (acc.current.length + separator.length + full.length <= maxLength) {
-                    acc.appendRendered(separator + full)
-                } else {
-                    acc.flush()
-                    if (full.length <= maxLength) {
-                        acc.appendRendered(full)
-                    } else {
-                        // Untrimmed: edge whitespace of the item's text is content the
-                        // flattening path must preserve (a trailing code-line space, say)
-                        val text = plainText(listOf(item))
-                        if (text.isNotBlank()) flattenWithLead(prefix, text, maxLength, acc)
-                    }
-                }
+    forEachListItem(list, depth, options) { item, prefix, body ->
+        val full = applyPrefix(prefix, body)
+        val separator = if (acc.current.isEmpty()) "" else "\n"
+        if (acc.current.length + separator.length + full.length <= maxLength) {
+            acc.appendRendered(separator + full)
+        } else {
+            acc.flush()
+            if (full.length <= maxLength) {
+                acc.appendRendered(full)
+            } else {
+                // Untrimmed: edge whitespace of the item's text is content the
+                // flattening path must preserve (a trailing code-line space, say)
+                val text = plainText(listOf(item))
+                if (text.isNotBlank()) flattenWithLead(prefix, text, maxLength, acc)
             }
         }
-        item = item.next
+        true
     }
 }
 

@@ -196,6 +196,7 @@ src/
 ├── commonMain/kotlin/com/github/kamiiroawase/markdownv2/
 │   ├── MarkdownV2.kt      public API and top-level flow (render / escape / default parser)
 │   ├── Visitor.kt         full AST → MarkdownV2 rendering (inline-HTML mapping, entity completion)
+│   ├── Blocks.kt          block-level kernel shared by truncation and chunking (single-block rendering, block-shape classification, list markers and the item walk, line/quote prefixes)
 │   ├── Truncation.kt      structure-preserving truncation of over-length content
 │   ├── Chunking.kt        lossless chunking of over-length content (renderChunked)
 │   ├── Deformat.kt        de-formatting rendered MarkdownV2 back to plain text (toPlainText fallback)
@@ -215,7 +216,7 @@ src/
 
 ### Build and test
 
-252 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — inline-HTML tags parse via a hand-written single-pass scanner, the library uses no regex at all, so catastrophic backtracking and engine stack overflow are impossible by construction). Caveat: 35 of them depend on HTML parsing and silently no-op on JS/Wasm due to an upstream commonmark-kotlin parser defect (see the test class KDoc and `htmlParsingSupported`); they activate automatically once the upstream fix lands. In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows (mingwX64) tests run in a windows job; Linux Arm64 stays cross-compile only — Kotlin/Native does not support Linux ARM64 as a build/test host (see the [host support table](https://kotlinlang.org/docs/native-target-support.html)), so a host job can follow once upstream supports it:
+257 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — inline-HTML tags parse via a hand-written single-pass scanner, the library uses no regex at all, so catastrophic backtracking and engine stack overflow are impossible by construction). Caveat: 35 of them depend on HTML parsing and silently no-op on JS/Wasm due to an upstream commonmark-kotlin parser defect (see the test class KDoc and `htmlParsingSupported`); they activate automatically once the upstream fix lands. In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows (mingwX64) tests run in a windows job; Linux Arm64 stays cross-compile only — Kotlin/Native does not support Linux ARM64 as a build/test host (see the [host support table](https://kotlinlang.org/docs/native-target-support.html)), so a host job can follow once upstream supports it:
 
 ```bash
 ./gradlew build             # compile all targets + host-runnable tests + format check

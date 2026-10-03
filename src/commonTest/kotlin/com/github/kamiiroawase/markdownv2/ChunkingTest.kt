@@ -2,7 +2,10 @@ package com.github.kamiiroawase.markdownv2
 
 import org.commonmark.ext.footnotes.FootnotesExtension
 import org.commonmark.ext.gfm.tables.TableBlock
+import org.commonmark.node.BulletList
 import org.commonmark.node.HtmlBlock
+import org.commonmark.node.HtmlInline
+import org.commonmark.node.ListItem
 import org.commonmark.node.Paragraph
 import org.commonmark.node.Text
 import org.commonmark.parser.Parser
@@ -296,5 +299,46 @@ class ChunkingTest {
             chunks.forEach { chunk -> assertTrue(chunk.length <= 4096, "over-long chunk: ${chunk.take(60)}") }
             assertEquals(MarkdownV2.escape(url), chunks.joinToString(""), "text lost for: ${content.take(20)}")
         }
+    }
+
+    @Test
+    fun renderChunkedFlattenedItemDropsInvisibleInlineMarkup() {
+        // The flattening fallback's plain text must agree with the renderer: "<!"/"<?"
+        // inline markup drops (pre-fix only "<!--" was filtered, so declarations leaked
+        // into the flattened chunks)
+        val item =
+            ListItem().apply {
+                appendChild(
+                    Paragraph().apply {
+                        appendChild(Text("a".repeat(3000)))
+                        appendChild(HtmlInline("<!D decl>"))
+                        appendChild(Text("b".repeat(3000)))
+                    },
+                )
+            }
+        val list = BulletList().apply { appendChild(item) }
+        val chunks = MarkdownV2.renderChunked(list, 20)
+        chunks.forEach { chunk -> assertTrue(chunk.length <= 20, "over-long chunk: $chunk") }
+        assertEquals("• " + "a".repeat(3000) + "b".repeat(3000), chunks.joinToString(""))
+    }
+
+    @Test
+    fun renderChunkedFlattenedItemDropsInvisibleBlock() {
+        // Same agreement for comment/declaration HTML blocks: the renderer drops them
+        // (visit(htmlBlock)), so the flattened text cannot carry them either (pre-fix the
+        // block literal leaked in verbatim)
+        val item =
+            ListItem().apply {
+                appendChild(
+                    HtmlBlock().apply {
+                        literal = "<!-- hidden -->\n<!DOCTYPE doc>\n"
+                    },
+                )
+                appendChild(Paragraph().apply { appendChild(Text("a".repeat(3000))) })
+            }
+        val list = BulletList().apply { appendChild(item) }
+        val chunks = MarkdownV2.renderChunked(list, 20)
+        chunks.forEach { chunk -> assertTrue(chunk.length <= 20, "over-long chunk: $chunk") }
+        assertEquals("• " + "a".repeat(3000), chunks.joinToString(""))
     }
 }

@@ -48,9 +48,11 @@ internal fun appendPlainText(
             }
 
             is HtmlInline -> {
-                // HTML comments carry no visible text — drop them, keep every other tag
-                // literally
-                if (!current.literal.trimStart().startsWith("<!--")) {
+                // Comments, declarations and processing instructions carry no visible
+                // text — the same "<!"/"<?" prefixes the renderer drops
+                // (renderHtmlInline); every other tag stays literal
+                val literal = current.literal.trimStart()
+                if (!literal.startsWith("<!") && !literal.startsWith("<?")) {
                     sb.append(current.literal)
                 }
             }
@@ -66,8 +68,13 @@ internal fun appendPlainText(
             is HtmlBlock -> {
                 // Same leaf-with-literal shape as the code blocks: without this branch the
                 // plain-text fallbacks (truncation, chunking, deep flattening) would drop
-                // the block's content entirely
-                sb.append(current.literal.orEmpty())
+                // the block's content entirely. Comment/declaration/PI blocks skip like
+                // visit(htmlBlock) does, so the fallback cannot resurrect markup the
+                // renderer itself never emits
+                val literal = current.literal.orEmpty().trim()
+                if (literal.isNotEmpty() && !literal.startsWith("<!") && !literal.startsWith("<?")) {
+                    sb.append(current.literal.orEmpty())
+                }
             }
 
             is Link -> {
@@ -91,6 +98,14 @@ private class UrlFallback(
     val url: String,
     val start: Int,
 )
+
+// Multi-node convenience over [appendPlainText] for the truncation and chunking fallback
+// paths, which flatten whole nodes or node groups
+internal fun plainText(nodes: List<Node>): String {
+    val sb = StringBuilder()
+    nodes.forEach { appendPlainText(sb, it) }
+    return sb.toString()
+}
 
 private fun openLink(
     destination: String?,

@@ -4,6 +4,7 @@ import org.commonmark.ext.footnotes.FootnotesExtension
 import org.commonmark.node.BulletList
 import org.commonmark.node.Document
 import org.commonmark.node.FencedCodeBlock
+import org.commonmark.node.HtmlInline
 import org.commonmark.node.IndentedCodeBlock
 import org.commonmark.node.ListItem
 import org.commonmark.node.OrderedList
@@ -247,6 +248,24 @@ class TruncationTest {
         val plain = removeEscapes(result.dropLast(1))
         assertTrue(plain.startsWith("a<b>"), "html tag should remain as plain text: ${plain.take(20)}")
         assertFalse(plain.contains("hidden"), "html comment should be dropped")
+    }
+
+    @Test
+    fun truncatedGroupWithInlineDeclarationFallsBackToPlainText() {
+        // Same guarantee for the other invisible inline markup the renderer drops
+        // (renderHtmlInline's "<!"/"<?" prefixes): the plain-text fallback must not
+        // resurrect it (pre-fix only "<!--" was filtered there)
+        val paragraph =
+            Paragraph().apply {
+                appendChild(HtmlInline("<!D hidden-decl>"))
+                appendChild(Text("b".repeat(5000)))
+            }
+        val result = MarkdownV2.render(paragraph, maxMessageLength)
+        assertTrue(result.length <= maxMessageLength)
+        assertTrue(result.endsWith("…"))
+        val plain = removeEscapes(result.dropLast(1))
+        assertTrue(plain.startsWith("bbbb"), "text lost: ${plain.take(20)}")
+        assertFalse(plain.contains("hidden-decl"), "declaration leaked into the fallback")
     }
 
     @Test
@@ -521,9 +540,25 @@ class TruncationTest {
     }
 
     @Test
-    fun truncatedListStopsAtEmptyItem() {
+    fun truncatedListSkipsEmptyItem() {
+        // The empty item carries no content: it skips instead of ending the surviving
+        // prefix, so the following item keeps its marker (pre-fix the structural path
+        // gave up at the empty item and the document-level plain-text fallback lost the
+        // marker: "zzzzzzzzz…")
         val content = "-\n- " + "z".repeat(50)
-        assertEquals("z".repeat(9) + "…", MarkdownV2.render(content, 10))
+        assertEquals("• zzzzzzz…", MarkdownV2.render(content, 10))
+    }
+
+    @Test
+    fun truncatedListKeepsItemsAfterMidListEmptyItem() {
+        assertEquals("• a\n• b…", MarkdownV2.render("- a\n-\n- b", 9))
+    }
+
+    @Test
+    fun truncatedOrderedListConsumesNumberOfSkippedItem() {
+        // The blank first item skips but consumes its number, so the survivor carries the
+        // number the full render gives it ("1\. \n2\. zzz…"), not a renumbered "1\."
+        assertEquals("2\\. zzzzz…", MarkdownV2.render("1.\n1. " + "z".repeat(50), 10))
     }
 
     @Test

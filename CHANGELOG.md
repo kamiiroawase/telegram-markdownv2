@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Truncation no longer stops at a list item whose body renders to nothing: the empty
+  item skips (consuming its number on ordered lists, matching the full render's
+  numbering) and the items after it still pack with their markers — the same trade the
+  chunking path always made. Pre-fix `render("-\n- zzz…", 10)` gave up on the structural
+  path entirely and fell back to plain text, losing the bullet markers
+- The plain-text extraction behind the truncation/chunking fallbacks and table cells now
+  drops `<!`/`<?` inline markup and comment/declaration/PI HTML blocks, matching the
+  renderer's own filtering: pre-fix only inline `<!--` comments were filtered, so
+  declarations and whole comment blocks leaked into flattened chunks as text the
+  renderer itself never emits
+
 - Chunking's flattening fallback no longer drops the flattened text's trailing whitespace
   at the flush boundaries: the last escaped piece stayed untrimmed inside the in-progress
   chunk (deliberately — edge whitespace is content), but the next flush trimmed or
