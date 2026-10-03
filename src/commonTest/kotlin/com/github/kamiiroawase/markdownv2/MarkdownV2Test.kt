@@ -1153,6 +1153,15 @@ class MarkdownV2Test {
     }
 
     @Test
+    fun anchorUnquotedHrefTrailingSlashIsNotSelfClosing() {
+        if (!htmlParsingSupported) return
+
+        // HTML5: an unquoted attribute value ends only at whitespace or >, so the slash
+        // belongs to the URL — the anchor links, and the URL keeps its trailing slash
+        assertEquals("[x](http://e.com/)", MarkdownV2.render("<a href=http://e.com/>x</a>"))
+    }
+
+    @Test
     fun fencedLanguageKeepsHyphen() {
         assertEquals("```my-lang\nc\n```", MarkdownV2.render("```my-lang\nc\n```"))
     }

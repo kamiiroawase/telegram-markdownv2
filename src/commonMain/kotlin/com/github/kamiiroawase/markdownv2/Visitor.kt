@@ -355,9 +355,19 @@ internal class Visitor(
 
         val match = HTML_TAG.matchEntire(tag) ?: return escapeText(tag)
         val closing = match.groupValues[1].isNotEmpty()
-        val selfClosing = match.groupValues[4].isNotEmpty()
-        val attrs = match.groupValues[3]
         val name = match.groupValues[2].lowercase()
+        // The regex's trailing (/?) is attribute-blind: per HTML5 an unquoted attribute
+        // value ends only at whitespace or >, so the slash of <a href=http://x/> belongs
+        // to the value and the tag is not self-closing. A slash counts as self-closing
+        // only when it follows the tag name (no attributes), whitespace, or a value's
+        // closing quote; otherwise it is folded back into the attributes
+        var attrs = match.groupValues[3]
+        var selfClosing = match.groupValues[4].isNotEmpty()
+        val last = attrs.lastOrNull()
+        if (selfClosing && last != null && !last.isWhitespace() && last != '"' && last != '\'') {
+            attrs += "/"
+            selfClosing = false
+        }
 
         if (name == "br") return "\n"
         if (name == "a") return renderAnchor(tag, closing, selfClosing, attrs)
