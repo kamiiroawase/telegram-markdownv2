@@ -22,6 +22,19 @@ jobs:
           # clone misses the nearest tag
           fetch-depth: 0
 
+      # Both READMEs quote the exact behavior-level test count; a PR that adds or removes
+      # tests without bumping it ships a stale number to every reader. Same spirit as the
+      # release workflow's version-coordinate check, on the suite size instead. The @Test
+      # annotations in commonTest count one per test method, matching the number the
+      # platforms execute
+      - name: Check README test counts match the suite
+        run: |
+          COUNT=$(grep -h "@Test" src/commonTest/kotlin/io/github/kamiiroawase/markdownv2/*.kt | wc -l | tr -d ' ')
+          test "$COUNT" -gt 0
+          grep -q "$COUNT 个行为级测试" README.md || { echo "README.md test count is stale — the suite has $COUNT"; exit 1; }
+          grep -q "$COUNT behavior-level tests" README.en.md || { echo "README.en.md test count is stale — the suite has $COUNT"; exit 1; }
+          echo "README test counts match: $COUNT"
+
       - uses: gradle/actions/wrapper-validation@v6
 
       - uses: actions/setup-java@v6

@@ -4,8 +4,8 @@ import org.commonmark.node.HtmlInline
 import org.commonmark.node.Paragraph
 import java.util.Locale
 
-// JVM rendering performance benchmark, the data source of the README performance section:
-// ./gradlew benchmark — the full suite repeats ROUNDS times with the cases interleaved,
+// JVM rendering performance benchmark: ./gradlew benchmark — the full suite repeats ROUNDS
+// times with the cases interleaved,
 // and each scenario keeps its best (minimum) round median; single-threaded, iterations
 // sized by input after warm-up. Timing covers the full commonmark parse plus
 // MarkdownV2 render/truncate pipeline. Interference like CPU frequency scaling or thermal
@@ -66,8 +66,8 @@ fun main() {
 }
 
 // Input data is English throughout except the table case: wide characters are exactly
-// what display-width alignment measures, so the table cells deliberately keep CJK — the
-// README figures were measured with these exact inputs, do not translate that content
+// what display-width alignment measures, so the table cells deliberately keep CJK — do
+// not translate that content
 private fun buildCases(): List<BenchmarkCase> {
     val short =
         listOf(

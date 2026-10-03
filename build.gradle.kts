@@ -77,7 +77,10 @@ kotlin {
     // Android uses AGP's KMP library plugin (kotlin { android { } } — no top-level android
     // block, no androidTarget)
     android {
-        namespace = "io.github.kamiiroawase.telegram-markdownv2"
+        // A valid Java package name matching the library's Kotlin package (a hyphen is
+        // not; AGP currently tolerates one, but generated R/BuildConfig classes and
+        // ecosystem tooling assume package-valid names — don't lean on the tolerance)
+        namespace = "io.github.kamiiroawase.markdownv2"
         compileSdk = 37
         minSdk = 23
 
@@ -149,11 +152,12 @@ kotlin {
     explicitApi()
 }
 
-// JVM rendering performance benchmark (the data source of the README performance section):
-// ./gradlew benchmark — single-threaded, median of size-scaled iterations after warm-up
+// JVM rendering performance benchmark: ./gradlew benchmark — single-threaded, median of
+// size-scaled iterations after warm-up; the release workflow attaches the output to
+// every GitHub Release as the current reference numbers
 tasks.register<JavaExec>("benchmark") {
     group = "verification"
-    description = "Runs the JVM rendering benchmarks backing the README performance table."
+    description = "Runs the JVM rendering benchmarks (the release workflow attaches the output to GitHub Releases)."
     val testCompilation =
         kotlin.targets
             .named<KotlinJvmTarget>("jvm")

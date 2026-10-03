@@ -34,7 +34,7 @@ jobs:
           # Full clone: the version derives from the nearest v* tag; a shallow clone misses it
           fetch-depth: 0
 
-      # The READMEs document the released coordinates 13 times each; a forgotten bump
+      # The READMEs document the released coordinates; a forgotten bump
       # ships stale versions to every reader until someone notices. Fail the release
       # instead: the tag version must be present, the previous tag's version must be gone,
       # and CHANGELOG.md must carry the tag's version section (history keeps old versions,
@@ -108,8 +108,8 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKey }}
         run: ./gradlew publishToMavenCentral --no-configuration-cache
 
-      # Fresh measurements ship with every release, so the README's table (dated,
-      # desktop-measured) can always be compared against recent CI data
+      # Fresh measurements ship with every release as the GitHub Release attachment, so
+      # the reference numbers stay comparable against recent CI data
       - name: Run JVM rendering benchmark
         run: |
           chmod +x gradlew
