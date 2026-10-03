@@ -51,7 +51,7 @@ dependencies {
 }
 ```
 
-Per-platform variant coordinates (JitPack lacks common metadata, so the **root coordinate is unusable** — reference variants):
+Per-platform variant coordinates (as observed at v1.1.0, 2026-10: JitPack lacks common metadata, so the **root coordinate is unusable** — reference variants; if JitPack fixes this, the root coordinate becomes usable):
 
 | Platform | Coordinate |
 | --- | --- |
@@ -67,7 +67,7 @@ Per-platform variant coordinates (JitPack lacks common metadata, so the **root c
 | iOS x64 (simulator) | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iosx64:1.1.0` |
 | iOS arm64 (simulator) | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iossimulatorarm64:1.1.0` |
 
-KMP consumers cannot reference this library's API from commonMain directly (JitPack has no common metadata); reference per-platform variants in each source set, or self-host the GitHub Release attachments as a Maven repository:
+KMP consumers cannot reference this library's API from commonMain directly (same v1.1.0 observation: JitPack has no common metadata); reference per-platform variants in each source set, or self-host the GitHub Release attachments as a Maven repository:
 
 ```kotlin
 kotlin {
@@ -193,7 +193,7 @@ src/
 
 - **Formatting**: Spotless + ktlint run as part of `build`; run `./gradlew spotlessApply` to auto-format before committing
 - **API**: commonMain uses `explicitApi()`; public declarations need explicit visibility modifiers and KDoc
-- **CI**: `build.yml` runs all of the above on main pushes and every PR (plus macOS, Windows and arm64 Linux jobs for the iOS simulator, macOS Arm64, mingwX64 and Linux Arm64 native tests) and asserts the publishing artifacts; `release.yml` publishes per-platform artifacts as GitHub Release attachments on `v*` tags
+- **CI**: `build.yml` runs all of the above on main pushes and every PR (plus macOS, Windows and arm64 Linux jobs for the iOS simulator, macOS Arm64, mingwX64 and Linux Arm64 native tests) and asserts the publishing artifacts; `release.yml` publishes per-platform artifacts as GitHub Release attachments on `v*` tags, attaches the CI benchmark output, and verifies both READMEs' version coordinates were bumped with the tag (a missing new version or a leftover previous version fails the release)
 
 ### Submitting a PR
 
@@ -204,7 +204,7 @@ src/
 
 ## Part 3: Performance
 
-Reproducible via `./gradlew benchmark` (implementation: [Benchmark.kt](src/jvmTest/kotlin/com/github/kamiiroawase/markdownv2/Benchmark.kt) — single-threaded JVM, global warm-up, median of size-scaled timed iterations; figures cover the full commonmark parse + render/truncate pipeline, throughput counted in UTF-8 bytes). Reference measurements on Windows 11 / JDK 21 / Intel x86-64 (2026-10); absolute values vary per machine — treat them as order-of-magnitude:
+Reproducible via `./gradlew benchmark` (implementation: [Benchmark.kt](src/jvmTest/kotlin/com/github/kamiiroawase/markdownv2/Benchmark.kt) — single-threaded JVM, global warm-up, median of size-scaled timed iterations; figures cover the full commonmark parse + render/truncate pipeline, throughput counted in UTF-8 bytes). Reference measurements on Windows 11 / JDK 21 / Intel x86-64 (2026-10); absolute values vary per machine — treat them as order-of-magnitude. To keep the table from silently aging, every release from now on attaches the CI's (ubuntu runner) fresh benchmark output (`benchmark.txt`) to the GitHub Release, ready for order-of-magnitude comparison against the table:
 
 | Scenario | Input | Median | Throughput |
 | --- | --- | --- | --- |

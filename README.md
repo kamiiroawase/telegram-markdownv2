@@ -51,7 +51,7 @@ dependencies {
 }
 ```
 
-各平台变体坐标（JitPack 缺少 common metadata，**根坐标不可用**，须按变体引用）：
+各平台变体坐标（截至 v1.1.0（2026-10）实测：JitPack 缺少 common metadata，**根坐标不可用**，须按变体引用；若 JitPack 修复该问题，可直接改用根坐标）：
 
 | 平台 | 坐标 |
 | --- | --- |
@@ -67,7 +67,7 @@ dependencies {
 | iOS x64（模拟器） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iosx64:1.1.0` |
 | iOS arm64（模拟器） | `com.github.kamiiroawase.telegram-markdownv2:telegram-markdownv2-iossimulatorarm64:1.1.0` |
 
-KMP 消费方在 commonMain 中无法直接引用本库 API（JitPack 无 common metadata）；可按 source set 引用各平台变体，或把 GitHub Release 附件搭成自建 Maven 仓库解决：
+KMP 消费方在 commonMain 中无法直接引用本库 API（同为上述 v1.1.0 时点观察：JitPack 无 common metadata）；可按 source set 引用各平台变体，或把 GitHub Release 附件搭成自建 Maven 仓库解决：
 
 ```kotlin
 kotlin {
@@ -193,7 +193,7 @@ src/
 
 - **格式**：Spotless + ktlint 挂在 `build` 上检查；提交前跑 `./gradlew spotlessApply` 一键格式化
 - **API**：commonMain 启用 `explicitApi()`，公开声明必须显式写可见性修饰符并附 KDoc
-- **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS、Windows 与 arm64 Linux job 跑 iOS 模拟器、macOS Arm64、mingwX64 与 Linux Arm64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件
+- **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS、Windows 与 arm64 Linux job 跑 iOS 模拟器、macOS Arm64、mingwX64 与 Linux Arm64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件，附带当次 CI 复跑的 benchmark 输出，并校验两份 README 的版本坐标已随 tag 同步更新（缺新版本号或残留上一版本号即失败）
 
 ### 提交流程
 
@@ -204,7 +204,7 @@ src/
 
 ## 三、性能测试数据
 
-`./gradlew benchmark` 可复跑（实现见 [Benchmark.kt](src/jvmTest/kotlin/com/github/kamiiroawase/markdownv2/Benchmark.kt)：JVM 单线程，先全局预热再按输入规模迭代计时取中位数；计时覆盖 commonmark 解析与渲染/截断全程，吞吐按 UTF-8 字节计）。下表为 Windows 11 / JDK 21 / Intel x86-64 上的实测参考值（2026-10），绝对值随机器浮动，量级更有参考意义：
+`./gradlew benchmark` 可复跑（实现见 [Benchmark.kt](src/jvmTest/kotlin/com/github/kamiiroawase/markdownv2/Benchmark.kt)：JVM 单线程，先全局预热再按输入规模迭代计时取中位数；计时覆盖 commonmark 解析与渲染/截断全程，吞吐按 UTF-8 字节计）。下表为 Windows 11 / JDK 21 / Intel x86-64 上的实测参考值（2026-10），绝对值随机器浮动，量级更有参考意义。为防表格静默老化，后续每次发版都会在 GitHub Release 附件附带当次 CI（ubuntu runner）复跑的完整输出（`benchmark.txt`），随时可与下表核对量级：
 
 | 场景 | 输入 | 耗时（中位数） | 吞吐 |
 | --- | --- | --- | --- |

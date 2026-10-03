@@ -1,6 +1,8 @@
 # Triggered on v* tag pushes: publishes the KMP module artifacts (aar/jar/klib plus
 # pom/module/sources files) as GitHub Release attachments, creating the Release when it
-# does not exist. Tests are not repeated here; the Build workflow covers them on main pushes.
+# does not exist, attaches the CI benchmark output for that release, and fails loudly
+# when the READMEs' documented version coordinates were not bumped with the tag.
+# Tests are not repeated here; the Build workflow covers them on main pushes.
 name: Release
 
 on:
@@ -20,6 +22,27 @@ jobs:
           # Full clone: the version derives from the nearest v* tag; a shallow clone misses it
           fetch-depth: 0
 
+      # The READMEs document the released coordinates 13 times each; a forgotten bump
+      # ships stale versions to every reader until someone notices. Fail the release
+      # instead: the tag version must be present, the previous tag's version must be gone
+      - name: Check README version coordinates match the tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          test -n "$VERSION"
+          for doc in README.md README.en.md; do
+            grep -qF "$VERSION" "$doc" || { echo "$doc does not mention version $VERSION"; exit 1; }
+          done
+          PREV_TAG="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          if [ -n "$PREV_TAG" ]; then
+            PREV_VERSION="${PREV_TAG#v}"
+            for doc in README.md README.en.md; do
+              if grep -qF "$PREV_VERSION" "$doc"; then
+                echo "$doc still mentions the previous version $PREV_VERSION — bump the documented coordinates"
+                exit 1
+              fi
+            done
+          fi
+
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -32,6 +55,14 @@ jobs:
 
       - name: Publish to local Maven
         run: chmod +x gradlew && ./gradlew publishToMavenLocal
+
+      # Fresh measurements ship with every release, so the README's table (dated,
+      # desktop-measured) can always be compared against recent CI data
+      - name: Run JVM rendering benchmark
+        run: |
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew benchmark --console=plain 2>&1 | tee benchmark.txt
 
       - name: Collect release assets
         run: |
@@ -58,5 +89,7 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: release-assets/*
+          files: |
+            release-assets/*
+            benchmark.txt
           generate_release_notes: true
