@@ -182,7 +182,7 @@ src/
 
 ### Build and test
 
-210 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — the library's only regex stays linear-time with no catastrophic backtracking). In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; the remaining native targets (Windows, Linux Arm64) are cross-compiled only — run `mingwX64Test` / `linuxArm64Test` on a matching host:
+212 behavior-level tests (input/output assertions, AST-agnostic), covering all escaping rules, rendering, truncation and chunking paths of every block type, surrogate-pair and escape boundaries (including linearity regression tests feeding 100k-scale adversarial inputs — the library's only regex stays linear-time with no catastrophic backtracking). In CI: JVM and Android unit tests plus JS, Wasm (Node) and Linux x64 native tests run in the ubuntu job; iOS simulator and macOS Arm64 tests run in the macOS job; Windows and Linux Arm64 native tests run in their own host jobs — every native target has CI test coverage:
 
 ```bash
 ./gradlew build             # compile all targets + host-runnable tests + format check
@@ -193,7 +193,7 @@ src/
 
 - **Formatting**: Spotless + ktlint run as part of `build`; run `./gradlew spotlessApply` to auto-format before committing
 - **API**: commonMain uses `explicitApi()`; public declarations need explicit visibility modifiers and KDoc
-- **CI**: `build.yml` runs all of the above on main pushes and every PR (plus a macOS job for iOS simulator and macOS Arm64 tests) and asserts the publishing artifacts; `release.yml` publishes per-platform artifacts as GitHub Release attachments on `v*` tags
+- **CI**: `build.yml` runs all of the above on main pushes and every PR (plus macOS, Windows and arm64 Linux jobs for the iOS simulator, macOS Arm64, mingwX64 and Linux Arm64 native tests) and asserts the publishing artifacts; `release.yml` publishes per-platform artifacts as GitHub Release attachments on `v*` tags
 
 ### Submitting a PR
 

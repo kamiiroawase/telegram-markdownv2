@@ -182,7 +182,7 @@ src/
 
 ### 构建与测试
 
-210 个行为级测试（输入/输出断言，与 AST 无关），覆盖全部转义规则、每种块的渲染、截断与分片路径、代理对与转义边界（含 10 万级恶意输入的线性回溯回归测试——本库仅有的正则保持线性复杂度，无灾难性回溯）。CI 中：JVM、Android 单元测试与 JS、Wasm（Node）、Linux x64 原生测试在 ubuntu job 执行；iOS 模拟器与 macOS Arm64 测试在 macOS job 执行；其余原生目标（Windows、Linux Arm64）仅交叉编译验证，可在对应宿主上跑 `mingwX64Test` / `linuxArm64Test`：
+212 个行为级测试（输入/输出断言，与 AST 无关），覆盖全部转义规则、每种块的渲染、截断与分片路径、代理对与转义边界（含 10 万级恶意输入的线性回溯回归测试——本库仅有的正则保持线性复杂度，无灾难性回溯）。CI 中：JVM、Android 单元测试与 JS、Wasm（Node）、Linux x64 原生测试在 ubuntu job 执行；iOS 模拟器与 macOS Arm64 测试在 macOS job 执行；Windows 与 Linux Arm64 原生测试分别在 windows 与 arm64 Linux job 执行——所有原生目标均有 CI 测试覆盖：
 
 ```bash
 ./gradlew build             # 编译全部 target + 宿主可执行的测试 + 格式检查
@@ -193,7 +193,7 @@ src/
 
 - **格式**：Spotless + ktlint 挂在 `build` 上检查；提交前跑 `./gradlew spotlessApply` 一键格式化
 - **API**：commonMain 启用 `explicitApi()`，公开声明必须显式写可见性修饰符并附 KDoc
-- **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS job 跑 iOS 模拟器与 macOS Arm64 测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件
+- **CI**：`build.yml` 在 main 推送与所有 PR 上执行上述全部检查（另有 macOS、Windows 与 arm64 Linux job 跑 iOS 模拟器、macOS Arm64、mingwX64 与 Linux Arm64 原生测试）并断言发布产物齐全；`release.yml` 在推 `v*` tag 时把各平台产物发布为 GitHub Release 附件
 
 ### 提交流程
 

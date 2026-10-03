@@ -115,3 +115,67 @@ jobs:
             build/reports/tests/**
             build/test-results/**
           if-no-files-found: ignore
+
+  # mingwX64 native tests need a Windows host; the ubuntu job already covers
+  # cross-compilation
+  windows-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            gradle/libs.versions.toml
+            gradle/wrapper/gradle-wrapper.properties
+            **/*.gradle.kts
+
+      - name: Run Windows native tests
+        run: .\gradlew.bat mingwX64Test
+
+      - name: Upload Windows test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-test-reports
+          path: |
+            build/reports/tests/**
+            build/test-results/**
+          if-no-files-found: ignore
+
+  # linuxArm64 native tests need an arm64 Linux host (standard arm64 runners are free
+  # for public repositories); the ubuntu x64 job already covers cross-compilation
+  linux-arm64-tests:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            gradle/libs.versions.toml
+            gradle/wrapper/gradle-wrapper.properties
+            **/*.gradle.kts
+
+      - name: Run Linux Arm64 native tests
+        run: chmod +x gradlew && ./gradlew linuxArm64Test
+
+      - name: Upload Linux Arm64 test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-arm64-test-reports
+          path: |
+            build/reports/tests/**
+            build/test-results/**
+          if-no-files-found: ignore
