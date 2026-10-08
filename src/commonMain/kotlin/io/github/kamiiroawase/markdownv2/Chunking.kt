@@ -294,7 +294,10 @@ private fun chunkList(
 /**
  * Quote children are packed whole, each line "> "-prefixed; "> " alone on its own line
  * separates two quote paragraphs within a chunk. A child larger than the limit alone
- * flattens to escaped text prefixed line by line.
+ * flattens to escaped text prefixed line by line. A quote no child of which yields
+ * content (empty, or every child blank-rendering) emits the single bare ">" the full
+ * render emits (visit(blockQuote)'s empty-pieces fallback) — the marker is the quote's
+ * whole render, and dropping it loses it from the chunk list.
  */
 private fun chunkQuote(
     quote: Node,
@@ -303,27 +306,45 @@ private fun chunkQuote(
     options: RenderOptions,
     acc: ChunkAccumulator,
 ) {
+    // Whether any child placed content (mirrors visit(blockQuote)'s pieces.isEmpty()
+    // test for the bare-marker fallback below)
+    var content = false
     var node = quote.firstChild
     while (node != null) {
-        val rendered = renderBlock(node, depth + 1, options).trim()
+        // renderBlock already trims trailing newlines — the same shape renderQuoteChild
+        // packs on the full-render side; edge whitespace of the child's text is content
+        // and stays (the parser never forms it; a whitespace-only child skips here and
+        // in visit(blockQuote) alike)
+        val rendered = renderBlock(node, depth + 1, options)
         if (rendered.isNotBlank()) {
             val prefixed = prefixQuoteLevel(node is BlockQuote, rendered)
             val separator = if (acc.current.isEmpty()) "" else "\n>\n"
             if (acc.current.length + separator.length + prefixed.length <= maxLength) {
                 acc.appendRendered(separator + prefixed)
+                content = true
             } else {
                 acc.flush()
                 if (prefixed.length <= maxLength) {
                     acc.appendRendered(prefixed)
+                    content = true
                 } else {
                     // Untrimmed, same trade as the list path above; flattenTextOf for
                     // the same renders-but-extracts-to-nothing shapes (a lone break)
                     val text = flattenTextOf(node, depth + 1, options)
-                    if (text.isNotBlank()) chunkQuotedText(text, maxLength, acc)
+                    if (text.isNotBlank()) {
+                        chunkQuotedText(text, maxLength, acc)
+                        content = true
+                    }
                 }
             }
         }
         node = node.next
+    }
+    if (!content) {
+        // Reaching here means every child blank-skipped, so the caller's flushed/current
+        // state is empty (both entries into chunkBlockInto flush or start fresh) and the
+        // 1-char marker fits every chunking maxLength (the public guard keeps it ≥ 2)
+        acc.appendRendered(">")
     }
 }
 

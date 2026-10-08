@@ -2,6 +2,7 @@ package io.github.kamiiroawase.markdownv2
 
 import org.commonmark.ext.footnotes.FootnotesExtension
 import org.commonmark.ext.gfm.tables.TableBlock
+import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
 import org.commonmark.node.HtmlBlock
 import org.commonmark.node.HtmlInline
@@ -114,6 +115,41 @@ class ChunkingTest {
         // isNotBlank guard drops it from block packing
         val paragraph = Paragraph().apply { appendChild(Text("   ")) }
         assertEquals(emptyList(), MarkdownV2.renderChunked(paragraph, 30))
+    }
+
+    @Test
+    fun allBlankQuoteSingleNodeKeepsItsBareMarkerLine() {
+        // An all-blank-child quote renders to the single bare ">" — visit(blockQuote)'s
+        // empty-pieces fallback. The single-block entry used to walk the children alone
+        // and return no chunks at all, where the document entry packs that marker line
+        // The default parser never returns null for non-null input; the shape needs its
+        // empty-image paragraph, so assert through to the quote child
+        val quote = MarkdownV2.defaultParser.parse("> ![]()")!!.firstChild!!
+        assertEquals(listOf(">"), MarkdownV2.renderChunked(quote))
+        assertEquals(MarkdownV2.renderChunked("> ![]()"), MarkdownV2.renderChunked(quote))
+    }
+
+    @Test
+    fun allBlankQuoteAfterFlushKeepsItsMarkerLine() {
+        // The quote's ">" did not fit alongside "x" and opened its own chunk — the walk
+        // used to emit nothing for it there, dropping the quote's whole render from the
+        // chunk list (the marker is 1 char and fits every chunking maxLength)
+        assertEquals(listOf("x", ">"), MarkdownV2.renderChunked("x\n\n> ![]()", 2))
+    }
+
+    @Test
+    fun quoteChildEdgeWhitespacePacksLikeTheFullRender() {
+        // Hand-built AST only — the parser strips a paragraph's edge whitespace:
+        // chunkQuote used to trim each child's render before packing (a trailing space
+        // dropped mid-chunk), where the full render keeps it (renderQuoteChild trims
+        // newlines only); a whitespace-only child still skips on both sides
+        val quote =
+            BlockQuote().apply {
+                appendChild(Paragraph().apply { appendChild(Text("a ")) })
+                appendChild(Paragraph().apply { appendChild(Text("b")) })
+            }
+        assertEquals("> a \n>\n> b", MarkdownV2.render(quote))
+        assertEquals(listOf(MarkdownV2.render(quote)), MarkdownV2.renderChunked(quote, 4096))
     }
 
     @Test

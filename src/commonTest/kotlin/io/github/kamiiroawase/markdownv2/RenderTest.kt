@@ -202,6 +202,23 @@ class RenderTest {
     }
 
     @Test
+    fun blankSingleBlockNodeMatchesTheDocumentPath() {
+        // The single-node entries skip nothing-content the same way the document walk
+        // does: render()'s early-fit return sends a blank convert back untouched (no
+        // ellipsis from the plain-text fallback), and the chunk side's finish() drops a
+        // blank in-progress chunk — whichever way the node arrives, the shapes agree
+        val paragraph = Paragraph().apply { appendChild(Text(" ")) }
+        assertEquals("", MarkdownV2.render(paragraph, 10))
+        assertEquals(emptyList<String>(), MarkdownV2.renderChunked(paragraph))
+        val list =
+            BulletList().apply {
+                appendChild(ListItem().apply { appendChild(Paragraph().apply { appendChild(Text(" ")) }) })
+            }
+        assertEquals("", MarkdownV2.render(list, 10))
+        assertEquals(emptyList<String>(), MarkdownV2.renderChunked(list))
+    }
+
+    @Test
     fun htmlInlineTagsMapToMarkdownEntities() {
         val content = "a<i>it</i>b<s>del</s>c<u>u</u>d<code>k</code>e<br>f<span>x</span>"
         assertEquals("a_it_b~del~c__u__d`k`e\nf<span\\>x</span\\>", MarkdownV2.render(content))
