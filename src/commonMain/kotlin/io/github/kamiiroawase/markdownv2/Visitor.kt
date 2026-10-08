@@ -274,12 +274,12 @@ internal class Visitor(
                     when {
                         entity.url.isEmpty() || entity.url == NESTED_LITERAL_ANCHOR -> {}
 
-                        labelIsBlank(entity.labelStart) -> {
+                        regionIsBlank(entity.labelStart) -> {
                             // A blank label means nothing was emitted after its [ —
                             // anything opened inside would have output a marker or a
                             // literal tag — so this anchor is the latest open entry and
                             // rewinding the bracket discards only whitespace
-                            // (labelIsBlank covers the whitespace-only label too)
+                            // (regionIsBlank covers the whitespace-only label too)
                             sb.setLength(entity.openBracket)
                             sb.append(escapeText(entity.url))
                         }
@@ -310,8 +310,22 @@ internal class Visitor(
     }
 
     override fun visit(paragraph: Paragraph) {
+        val start = sb.length
         visitChildren(paragraph)
-        sb.append("\n\n")
+        // A paragraph that rendered no visible text is no-content: one whose every
+        // child dropped out (a lone inline comment, an empty-alt empty-URL image), or
+        // one whose render is whitespace only (a hand-built Text(" ") child — the
+        // parser never forms a paragraph from blank lines). The region rewinds and no
+        // separator follows — the same blank-render skip the truncation (renderBlocks)
+        // and chunking (chunkBlocks) paths make on the rendered shape, where the
+        // separator (or the whitespace itself) would double the blank line between its
+        // neighbors. Rewinding discards whitespace only: an entity marker would have
+        // emitted a non-whitespace character, so nothing visible is lost
+        if (regionIsBlank(start)) {
+            sb.setLength(start)
+        } else {
+            sb.append("\n\n")
+        }
     }
 
     // MarkdownV2 has no heading entity: the level is spelled out as escaped hashes
@@ -492,7 +506,7 @@ internal class Visitor(
                     when {
                         entity.url.isEmpty() || entity.url == NESTED_LITERAL_ANCHOR -> {}
 
-                        labelIsBlank(entity.labelStart) -> {
+                        regionIsBlank(entity.labelStart) -> {
                             // See output(): a blank label guarantees this anchor is the
                             // latest open entry, so the rewind discards only whitespace
                             sb.setLength(entity.openBracket)
@@ -571,7 +585,7 @@ internal class Visitor(
         // to anchors left unclosed at output time. Rewinding is safe — inside a label every
         // pushed entity marker is accompanied by output, so a blank label left nothing
         // open on the stack
-        if (labelIsBlank(labelStart)) {
+        if (regionIsBlank(labelStart)) {
             sb.setLength(openBracket)
             sb.append(escapeText(destination))
             return
@@ -604,7 +618,7 @@ internal class Visitor(
         visitChildren(image)
         openMarkdownLinks--
         // See visit(link): a label with no visible text degrades to the bare escaped URL
-        if (labelIsBlank(labelStart)) {
+        if (regionIsBlank(labelStart)) {
             sb.setLength(openBracket)
             sb.append(escapeText(destination))
             return
@@ -739,7 +753,7 @@ internal class Visitor(
             // visible text (whitespace included) degrades to the bare escaped URL,
             // rewinding the bracket — safe for the same reason as in visit(link): a blank
             // label left nothing open
-            if (labelIsBlank(top.labelStart)) {
+            if (regionIsBlank(top.labelStart)) {
                 sb.setLength(top.openBracket)
                 return escapeText(top.url)
             }
@@ -859,13 +873,14 @@ internal class Visitor(
 
     private fun linkEntityOpen(): Boolean = openEntities.any { it is OpenAnchor } || openMarkdownLinks > 0
 
-    // Whether a link label region starting at [labelStart] renders no visible text: empty
-    // or whitespace only. Every caller checks it immediately after the label's children,
+    // Whether the output region starting at [start] renders no visible text: empty or
+    // whitespace only. The label callers check it immediately after the label's children,
     // so the region runs exactly to the end of the current output; any entity marker a
-    // label had opened would have emitted a non-whitespace character, so a blank region
-    // guarantees nothing was left open inside it
-    private fun labelIsBlank(labelStart: Int): Boolean {
-        for (index in labelStart until sb.length) {
+    // label had opened would have emitted a non-whitespace character, so a blank label
+    // region guarantees nothing was left open inside it. visit(paragraph) asks the same
+    // question of a paragraph's region for its no-content skip
+    private fun regionIsBlank(start: Int): Boolean {
+        for (index in start until sb.length) {
             if (!sb[index].isWhitespace()) return false
         }
         return true
@@ -894,6 +909,7 @@ internal class Visitor(
     // its marker consumed — the same walk forEachListItem makes, so the full render,
     // truncation and chunking agree on which items exist and how they number
     private fun renderList(list: Node) {
+        val start = sb.length
         val marker = listMarkerOf(list)
         var item = list.firstChild
         while (item != null) {
@@ -906,7 +922,11 @@ internal class Visitor(
             }
             item = item.next
         }
-        sb.append('\n')
+        // The final '\n' completes the block separator the last emitted item's own '\n'
+        // started; a list whose every item is no-content (a lone "- " marker) renders to
+        // nothing and separates nothing — the same trade visit(paragraph) makes for a
+        // nothing-render
+        if (sb.length > start) sb.append('\n')
     }
 
     // Renders a nested block (quote body, list item) in a child visitor; at the depth cap

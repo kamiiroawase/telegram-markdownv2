@@ -159,6 +159,49 @@ class RenderTest {
     }
 
     @Test
+    fun nothingRenderingParagraphKeepsSingleBlockSpacing() {
+        // A paragraph whose every child drops out is no-content: its own block separator
+        // must not double the blank line between its neighbors (pre-fix render gave
+        // "A\n\n\n\nC" where renderChunked's blank skip gave "A\n\nC")
+        assertEquals("A\n\nC", MarkdownV2.render("A\n\n![]()\n\nC"))
+        if (htmlParsingSupported) {
+            assertEquals("A\n\nC", MarkdownV2.render("A\n\n<!-- c -->\n\nC"))
+        }
+    }
+
+    @Test
+    fun whitespaceOnlyParagraphSeparatesNothing() {
+        // Hand-built AST only — the parser never forms a paragraph from blank lines: a
+        // whitespace-only paragraph is no-content for the full render too, the same blank
+        // judgment the truncation and chunking paths make on the rendered shape (a
+        // length-based check here would emit the separator and give "A\n\n \n\nC")
+        val document = Document()
+        document.appendChild(Paragraph().apply { appendChild(Text("A")) })
+        document.appendChild(Paragraph().apply { appendChild(Text(" ")) })
+        document.appendChild(Paragraph().apply { appendChild(Text("C")) })
+        assertEquals("A\n\nC", MarkdownV2.render(document))
+        assertEquals(listOf("A\n\nC"), MarkdownV2.renderChunked(document))
+        // Under truncation the invisible paragraph costs neither separator nor budget
+        // (pre-fix it consumed "\n\n " of the budget and the C-run cut three shorter)
+        val long =
+            Document().apply {
+                appendChild(Paragraph().apply { appendChild(Text("A")) })
+                appendChild(Paragraph().apply { appendChild(Text(" ")) })
+                appendChild(Paragraph().apply { appendChild(Text("C".repeat(50))) })
+            }
+        assertEquals("A\n\nCCCCCC…", MarkdownV2.render(long, 10))
+    }
+
+    @Test
+    fun allBlankItemListSeparatesNothing() {
+        // A list whose every item is blank-bodied renders to nothing: the trailing block
+        // separator must drop with it (pre-fix it leaked as a lone newline, giving
+        // "A\n\n\nC" where renderChunked's blank skip gave "A\n\nC")
+        assertEquals("A\n\nC", MarkdownV2.render("A\n\n- \n\nC"))
+        assertEquals("A\n\nC", MarkdownV2.render("A\n\n1. \n\nC"))
+    }
+
+    @Test
     fun htmlInlineTagsMapToMarkdownEntities() {
         val content = "a<i>it</i>b<s>del</s>c<u>u</u>d<code>k</code>e<br>f<span>x</span>"
         assertEquals("a_it_b~del~c__u__d`k`e\nf<span\\>x</span\\>", MarkdownV2.render(content))

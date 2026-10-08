@@ -13,8 +13,11 @@ import org.commonmark.node.SoftLineBreak
 /**
  * Structure-preserving truncation of over-length content: starting from [renderBlocks],
  * blocks that fit are kept whole, blocks that do not are shrunk by type (whole lines /
- * whole items / fence closing); the output is always valid MarkdownV2. When no structural
- * content fits at all, the caller falls back to escaped plain text.
+ * whole items / fence closing); the output is always valid MarkdownV2. A block that
+ * renders to nothing (a comment-only paragraph, an all-blank-body list) skips — no
+ * separator, no budget — exactly as the chunking side skips it, so the truncated prefix
+ * spaces blocks like the full render does. When no structural content fits at all, the
+ * caller falls back to escaped plain text.
  */
 internal fun renderBlocks(
     first: Node?,
@@ -28,11 +31,22 @@ internal fun renderBlocks(
     val parts = StringBuilder()
     var node = first
     while (node != null) {
+        // The budget check precedes the render: once parts fill the budget no block
+        // can be placed, and rendering the next one (arbitrarily large) just to
+        // discard it is wasted work. Blank skips never touch parts, so re-running the
+        // same arithmetic next iteration is equivalent
         val separator = if (parts.isEmpty()) "" else "\n\n"
         val remaining = budget - parts.length - separator.length
         if (remaining <= 0) break
 
         val block = renderBlock(node, depth, options)
+        // The blank-render skip: the block's own visitors emit no separator for a
+        // nothing-render (see Visitor.visit(paragraph)/renderList), and this walk must
+        // not reintroduce one on its behalf — chunkBlocks makes the same skip
+        if (block.isBlank()) {
+            node = node.next
+            continue
+        }
         if (block.length <= remaining) {
             parts.append(separator).append(block)
             node = node.next
@@ -225,11 +239,23 @@ private fun shrinkQuote(
     val parts = StringBuilder()
     var node = quote.firstChild
     while (node != null) {
-        val separator = if (parts.isEmpty()) "" else "\n"
+        // See renderBlocks: check the budget before rendering the child
+        val separator = if (parts.isEmpty()) "" else "\n>\n"
         val remaining = budget - parts.length - separator.length
         if (remaining <= 0) break
 
-        val prefixed = prefixQuoteLevel(node is BlockQuote, renderBlock(node, depth + 1, options))
+        val rendered = renderBlock(node, depth + 1, options)
+        // A blank-rendering child is no-content and skips — leading, mid-sequence and
+        // trailing alike — exactly as visit(blockQuote) and chunkQuote skip it. The
+        // blank line between quote paragraphs belongs to the "\n>\n" join between the
+        // surviving pieces, never to a child: attributed to the blank child it stacked
+        // one bare ">" per consecutive blank and left blank-less paragraph pairs with
+        // no ">" line at all, where the full render shows exactly one either way
+        if (rendered.isBlank()) {
+            node = node.next
+            continue
+        }
+        val prefixed = prefixQuoteLevel(node is BlockQuote, rendered)
         if (prefixed.length <= remaining) {
             parts.append(separator).append(prefixed)
             node = node.next
@@ -277,12 +303,14 @@ private fun shrinkQuoteTail(
             if (remainingHere <= 0) break
 
             val block = renderBlock(current, depth + 1, options)
+            // Blank-rendering children skip here too — the "\n>\n" join between the
+            // surviving pieces carries the blank line (see shrinkQuote)
+            if (block.isBlank()) {
+                current = current.next
+                continue
+            }
             if (block.length <= remainingHere) {
-                // An empty block keeps parts empty, matching renderBlocks' separator
-                // suppression for blank leading blocks
-                if (block.isNotEmpty() || parts.isNotEmpty()) {
-                    parts.append(separator).append(prefixQuoteLevel(current is BlockQuote, block))
-                }
+                parts.append(separator).append(prefixQuoteLevel(current is BlockQuote, block))
                 current = current.next
             } else {
                 val shrunk = shrink(current, remainingHere, depth + 1, retriable = false, options)

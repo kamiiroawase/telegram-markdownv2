@@ -318,7 +318,7 @@ class TruncationTest {
         val result = MarkdownV2.render(content, maxMessageLength)
         assertTrue(result.length <= maxMessageLength)
         assertTrue(result.endsWith("…"))
-        assertTrue(result.startsWith("> short\n> "), "head quote lost: ${result.take(30)}")
+        assertTrue(result.startsWith("> short\n>\n> "), "head quote lost: ${result.take(30)}")
     }
 
     @Test
@@ -518,8 +518,11 @@ class TruncationTest {
 
     @Test
     fun quoteFitsAfterBlockwiseShrinkWithinBudget() {
-        // The whole render exceeds the budget, but after block-wise shrinking both sub-blocks fit: the list exhausts normally and exits
-        assertEquals("> ab\n> cd…", MarkdownV2.render("> ab\n>\n> cd", 10))
+        // The whole render exceeds the budget, but after block-wise shrinking both
+        // paragraphs fit: the list exhausts normally and exits. The join between them is
+        // the full render's "\n>\n" — the blank line between quote paragraphs belongs to
+        // the join, not to any child
+        assertEquals("> ab\n>\n> cdefg…", MarkdownV2.render("> ab\n>\n> cdefghij", 15))
     }
 
     @Test
@@ -634,6 +637,45 @@ class TruncationTest {
         assertTrue(result.length <= 100)
         assertTrue(result.endsWith("…"))
         assertTrue(result.startsWith("https"), "URL prefix lost: ${result.take(30)}")
+    }
+
+    @Test
+    fun blankBlockSkipsInTruncationWithoutSeparatorOrBudget() {
+        // A block that renders to nothing costs neither a separator nor budget in the
+        // truncated prefix (pre-fix the invisible paragraph consumed "\n\n" of it and the
+        // x-run cut two characters shorter)
+        val content = "A\n\n![]()\n\n" + "x".repeat(50)
+        assertEquals("A\n\nxxxxxxxxxxxxxxxx…", MarkdownV2.render(content, 20))
+    }
+
+    @Test
+    fun leadingBlankQuoteChildSkipsUnderTruncation() {
+        // Pre-fix the blank child opened the shrunken quote with a bare ">" marker line
+        // (">\n> xxxxx…"), where the full render skips it entirely
+        val content = "> ![]()\n>\n> " + "x".repeat(50)
+        assertEquals("> xxxxx…", MarkdownV2.render(content, 8))
+    }
+
+    @Test
+    fun midBlankQuoteChildKeepsBlankMarkerLineUnderTruncation() {
+        // Between fitted pieces the blank marker line survives as the join's "\n>\n" — the
+        // blank line the full render places between quote paragraphs — whether or not a
+        // blank child sits between them
+        val content = "> a\n>\n> ![]()\n>\n> " + "x".repeat(50)
+        assertEquals("> a\n>\n> xxxxx…", MarkdownV2.render(content, 14))
+    }
+
+    @Test
+    fun consecutiveBlankQuoteChildrenShareOneMarkerLineUnderTruncation() {
+        // Pre-fix each mid-sequence blank child contributed its own bare ">" line
+        // ("> a\n>\n>\n> …"). With the blank line owned by the join, any number of blank
+        // children between two paragraphs leaves exactly one — and a paragraph pair with
+        // no blank child between them (a structurally identical quote) truncates the same
+        val withBlanks = "> a\n>\n> ![]()\n>\n> ![]()\n>\n> " + "b".repeat(50)
+        val withoutBlanks = "> a\n>\n> " + "b".repeat(50)
+        val expected = "> a\n>\n> " + "b".repeat(31) + "…"
+        assertEquals(expected, MarkdownV2.render(withBlanks, 40))
+        assertEquals(expected, MarkdownV2.render(withoutBlanks, 40))
     }
 
     @Test

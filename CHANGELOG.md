@@ -4,6 +4,12 @@ One line per change; versions follow `v*` git tags.
 
 ## [Unreleased]
 
+### Fixed
+
+- Blocks that render to nothing (a comment-only paragraph, an empty-alt empty-URL image, a list whose every item is blank-bodied) no longer double the blank line between their neighbors — `render`, truncation and `renderChunked` now space such documents identically; under truncation they cost no separator or budget, and a blank leading quote child no longer opens the shrunken quote with a bare `>` marker line
+- Quote paragraphs under truncation now separate with exactly the one bare `>` marker line the full render and the chunking emit: the line belongs to the join between the surviving pieces, not to an invisible blank child (which stacked one `>` line per consecutive blank child, and dropped the line entirely between paragraphs with no blank child between them)
+- A whitespace-only paragraph (a hand-built `Text(" ")` child; the parser never forms one from blank lines) now skips like the other no-content shapes: its whitespace rewinds and no block separator follows — the same blank-render judgment the truncation and chunking paths make on the rendered shape — where a length-based check treated the whitespace as content and spaced its neighbors apart
+
 ## [2.0.0] — 2026-10-04
 
 ### Added

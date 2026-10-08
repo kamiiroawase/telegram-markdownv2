@@ -97,6 +97,17 @@ class ChunkingTest {
     }
 
     @Test
+    fun singleChunkPackingMatchesRenderForBlankBlocks() {
+        // A document that fits one chunk must chunk to exactly its full render: the
+        // blank-render shapes (a nothing-rendering paragraph, an all-blank-body list,
+        // consecutive blank children inside a quote) used to be the exception — render
+        // doubled their block separator where this side's blank skip dropped it
+        for (content in listOf("A\n\n![]()\n\nC", "A\n\n- \n\nC", "> a\n>\n> ![]()\n>\n> ![]()\n>\n> c")) {
+            assertEquals(listOf(MarkdownV2.render(content)), MarkdownV2.renderChunked(content, 4096))
+        }
+    }
+
+    @Test
     fun renderChunkedWhitespaceOnlySingleBlockYieldsNoChunksViaAst() {
         // The nothing-content skip covers the single-block entry too: a block whose
         // whole render is whitespace yields no chunk, exactly as the document path's
