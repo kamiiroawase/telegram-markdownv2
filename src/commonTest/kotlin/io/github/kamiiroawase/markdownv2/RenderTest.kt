@@ -1172,6 +1172,13 @@ class RenderTest {
     }
 
     @Test
+    fun fencedLanguageKeepsHash() {
+        // c#/f# are high-frequency fence tags; '#' is literal inside the pre entity
+        assertEquals("```c#\nc\n```", MarkdownV2.render("```c#\nc\n```"))
+        assertEquals("```f#\nc\n```", MarkdownV2.render("```f#\nc\n```"))
+    }
+
+    @Test
     fun deepAstEmphasisFlattens() {
         // The parser pairs consecutive underscores into StrongEmphasis; deep Emphasis chains can only be built via the AST
         var node: Node = Text("x")

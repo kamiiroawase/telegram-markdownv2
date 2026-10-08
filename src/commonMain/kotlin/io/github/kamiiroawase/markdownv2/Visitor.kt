@@ -375,13 +375,15 @@ internal class Visitor(
         // and in visit(htmlBlock); Text/Code/HtmlInline literals are declared non-null
         // upstream and are used directly
         //
-        // The info string is untrusted: keep only letters/digits/-/+ so it can neither
-        // forge the fence (backticks, newlines) nor inject entities; 32 chars is plenty
+        // The info string is untrusted: keep only letters/digits/-/+/# so it can neither
+        // forge the fence (backticks, newlines) nor inject entities — '#' completes the
+        // c#/f# tags and, like the rest of the set, renders literally inside the pre
+        // entity; 32 chars is plenty
         val language =
             fencedCodeBlock.info
                 .orEmpty()
                 .trim()
-                .filter { it.isLetterOrDigit() || it == '-' || it == '+' }
+                .filter { it.isLetterOrDigit() || it == '-' || it == '+' || it == '#' }
                 .take(32)
         completeOpenCodeEntities()
         sb.append("```").append(language).append('\n')

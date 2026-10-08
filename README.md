@@ -58,7 +58,7 @@ cd telegram-markdownv2
 ./gradlew benchmark    # 性能基准：常规消息 ~0.1ms 量级，百万字符 ~10ms；发版时 CI 复跑输出附在 GitHub Release
 ```
 
-309 个行为级测试（输入/输出断言）；其中 42 个依赖 HTML 解析，在 JS/Wasm 上因上游缺陷静默跳过。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。用户可见的行为变化记入 [CHANGELOG.md](CHANGELOG.md) 的 Unreleased 段。
+310 个行为级测试（输入/输出断言）；其中 42 个依赖 HTML 解析，在 JS/Wasm 上因上游缺陷静默跳过。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。用户可见的行为变化记入 [CHANGELOG.md](CHANGELOG.md) 的 Unreleased 段。
 
 ## 许可
 
