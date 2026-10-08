@@ -4,6 +4,8 @@ One line per change; versions follow `v*` git tags.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-10-08
+
 ### Fixed
 
 - Fenced-code language tags keep `#`: the info-string whitelist dropped it, degrading `c#`/`f#` blocks to the bare `c`/`f` annotation
