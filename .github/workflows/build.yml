@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main ]
   pull_request:
+  # Manual trigger: re-run the whole pipeline without an empty commit
+  # (release-artifact verification etc.)
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,11 +15,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# All actions are pinned by commit SHA (a tag can be re-pointed on the repo side;
+# the trailing comment records the version). Upgrades land through Dependabot PRs
+# that update the SHA, merged after a human reviews the diff
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full clone: git describe needs the commit history to reach tags; a shallow
           # clone misses the nearest tag
@@ -36,9 +42,9 @@ jobs:
           grep -q "$COUNT behavior-level tests" README.en.md || { echo "README.en.md test count is stale — the suite has $COUNT"; exit 1; }
           echo "README test counts match: $COUNT"
 
-      - uses: gradle/actions/wrapper-validation@v6
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: 21
@@ -52,7 +58,7 @@ jobs:
       # iOS/macOS/Windows targets cross-compile on Linux; jvm/android unit tests and
       # js/wasm (Node) tests run on the host
       - name: Build, test and check format
-        run: chmod +x gradlew && ./gradlew build
+        run: ./gradlew build
 
       # The Maven Central publish itself runs only in the Release workflow (tag push, with
       # credentials); here the publishing pipeline gets its only CI coverage: after
@@ -99,14 +105,14 @@ jobs:
         run: ./gradlew dokkaGeneratePublicationHtml
 
       - name: Upload API documentation
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: api-docs
           path: build/dokka/html/**
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-reports
           path: |
@@ -119,11 +125,13 @@ jobs:
   apple-tests:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-java@v6
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: 21
@@ -134,11 +142,11 @@ jobs:
             **/*.gradle.kts
 
       - name: Run macOS and iOS simulator tests
-        run: chmod +x gradlew && ./gradlew macosArm64Test iosSimulatorArm64Test
+        run: ./gradlew macosArm64Test iosSimulatorArm64Test
 
       - name: Upload macOS and iOS test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: apple-test-reports
           path: |
@@ -151,11 +159,13 @@ jobs:
   windows-tests:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-java@v6
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: 21
@@ -170,7 +180,7 @@ jobs:
 
       - name: Upload Windows test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-test-reports
           path: |

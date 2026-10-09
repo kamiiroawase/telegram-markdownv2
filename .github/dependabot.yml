@@ -1,13 +1,34 @@
+# Weekly dependency updates, one grouped PR per ecosystem: gradle covers
+# libs.versions.toml and the build scripts, gradle-version keeps the wrapper's
+# distributionUrl on new Gradle releases, and github-actions covers the workflow
+# actions — pinned by commit SHA, so Dependabot updates the SHA together with
+# the trailing version comment; release-chain upgrades deserve a diff review
+# (see the top of release.yml)
 version: 2
 updates:
   - package-ecosystem: gradle
     directory: /
     schedule:
       interval: weekly
+    groups:
+      gradle:
+        patterns: ["*"]
+
+  - package-ecosystem: gradle-version
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      gradle-version:
+        patterns: ["*"]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
   # kotlin-js-store/yarn.lock is deliberately NOT covered: dependabot's npm ecosystem
   # requires a package.json next to the lockfile, and Kotlin/JS stores only the lockfile
   # there (upstream limitation — KMP projects maintain it manually). Security alerts still

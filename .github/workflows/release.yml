@@ -3,9 +3,18 @@
 # the GitHub Release attachments (aar/jar/klib plus pom/module/sources files, creating
 # the Release when it does not exist), attaches the CI benchmark output for that release,
 # and fails loudly when the READMEs' documented version coordinates were not bumped with
-# the tag. The full build gate (compile, host tests, format and API checks) runs on the
-# tag itself before anything is published — a tag may point at a commit that never went
-# through the Build workflow, and a Central publication cannot be undone.
+# the tag. The full build gate runs on the tag itself before anything is published — a
+# tag may point at a commit that never went through the Build workflow, and a Central
+# publication cannot be undone: the release job compiles and runs the host tests
+# (jvm/android/js/wasm on Node) plus the format and API checks, while the macOS and
+# Windows native tests — which cannot run on the release job's Linux host — gate it as
+# prerequisite jobs.
+#
+# This workflow holds the Central publishing credentials and the GPG secret key, making
+# it a high-value supply-chain target: every action is pinned by commit SHA (a tag can
+# be re-pointed on the repo side; the trailing comment records the version), and
+# upgrades land only through Dependabot PRs that change the SHA, merged after a human
+# reviews the diff.
 #
 # Required repository secrets (Central Portal: https://central.sonatype.com) — the same
 # values the commonmark-kotlin repo publishes with; GitHub secrets are per-repository,
@@ -25,47 +34,143 @@ on:
 permissions:
   contents: write
 
+# Same concurrency-group shape as the Build workflow, but a running release is never
+# cancelled: publishing to Central is irreversible and killing it mid-flight leaves
+# half-finished state (an unfinished Central deployment, incomplete GitHub Release
+# attachments); on a same-tag delete-and-repush the later publish queues behind the
+# running one instead of racing it
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  # Release gate for the native targets whose tests cannot run on the release job's
+  # Linux host — its ./gradlew build only cross-compiles them. Same shape as the Build
+  # workflow's apple-tests job; failing here fails the whole Release before anything
+  # is published
+  apple-tests:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            gradle/libs.versions.toml
+            gradle/wrapper/gradle-wrapper.properties
+            **/*.gradle.kts
+
+      - name: Run macOS and iOS simulator tests
+        run: ./gradlew macosArm64Test iosSimulatorArm64Test
+
+      - name: Upload macOS and iOS test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apple-test-reports
+          path: |
+            build/reports/tests/**
+            build/test-results/**
+          if-no-files-found: ignore
+
+  # mingwX64 native tests need a Windows host; the release job's ubuntu build already
+  # covers the cross-compilation
+  windows-tests:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            gradle/libs.versions.toml
+            gradle/wrapper/gradle-wrapper.properties
+            **/*.gradle.kts
+
+      - name: Run Windows native tests
+        run: .\gradlew.bat mingwX64Test
+
+      - name: Upload Windows test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-test-reports
+          path: |
+            build/reports/tests/**
+            build/test-results/**
+          if-no-files-found: ignore
+
   release:
+    needs: [apple-tests, windows-tests]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full clone: the version derives from the nearest v* tag; a shallow clone misses it
           fetch-depth: 0
 
-      # The READMEs document the released coordinates; a forgotten bump
-      # ships stale versions to every reader until someone notices. Fail the release
-      # instead: the tag version must be present, the previous tag's version must be gone,
-      # and CHANGELOG.md must carry the tag's version section (history keeps old versions,
-      # so only the new one is required there). The match is token-anchored — a plain
-      # fixed-string grep would hit substrings (1.1.0 inside 11.1.0 or 1.1.0.1)
+      # The READMEs document the released coordinates; a forgotten bump ships stale
+      # versions to every reader until someone notices. Fail the release instead: the
+      # tag version must be present, the previous tag's version must be gone, and
+      # CHANGELOG.md must carry the tag's version section (history keeps old versions,
+      # so only the new one is required there). The token-anchored matching — a plain
+      # fixed-string grep would hit substrings (1.1.0 inside 11.1.0 or 1.1.0.1) — and
+      # the whole check live in the shared check-docs-version action
       - name: Check README and CHANGELOG version coordinates match the tag
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          test -n "$VERSION"
-          mentions_version() {
-            grep -Eq "(^|[^0-9.])${1//./\\.}([^0-9.]|$)" "$2"
-          }
-          for doc in README.md README.en.md; do
-            mentions_version "$VERSION" "$doc" || { echo "$doc does not mention version $VERSION"; exit 1; }
-          done
-          mentions_version "$VERSION" CHANGELOG.md || {
-            echo "CHANGELOG.md has no $VERSION section — move Unreleased under it"
-            exit 1
-          }
-          PREV_TAG="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
-          if [ -n "$PREV_TAG" ]; then
-            PREV_VERSION="${PREV_TAG#v}"
-            for doc in README.md README.en.md; do
-              if mentions_version "$PREV_VERSION" "$doc"; then
-                echo "$doc still mentions the previous version $PREV_VERSION — bump the documented coordinates"
-                exit 1
-              fi
-            done
-          fi
+        uses: ./.github/actions/check-docs-version
+        with:
+          docs: README.md README.en.md
+          changelog: CHANGELOG.md
+          reverse: true
 
-      - uses: actions/setup-java@v6
+      # Publishing-credentials gate before the long build, same spirit as the README
+      # coordinates gate above: a missing configuration fails loudly and early. A missing
+      # Portal token would otherwise surface as a 401 only at the upload stage; a missing
+      # key is the sneakiest — the signingKey guard treats an empty value as unconfigured
+      # and silently skips signing, and the unsigned artifacts get rejected by Central
+      # only after the upload, late and pointing nowhere near the root cause. Only
+      # non-emptiness is asserted, no value is echoed; the key id and the key passphrase
+      # are outside the gate — an empty passphrase is a legal configuration for a
+      # passphrase-less key
+      - name: Check publishing secrets are configured
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralUsername }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralPassword }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKey }}
+        run: |
+          for secret in \
+            ORG_GRADLE_PROJECT_mavenCentralUsername \
+            ORG_GRADLE_PROJECT_mavenCentralPassword \
+            ORG_GRADLE_PROJECT_signingInMemoryKey; do
+            test -n "${!secret}" || {
+              echo "$secret is missing or empty — configure it in the repository's Actions secrets; publishing cannot proceed"
+              exit 1
+            }
+          done
+
+      # Same gate the Build workflow runs: this workflow executes gradlew too, and it
+      # publishes — a tampered wrapper must fail before anything reaches Central
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: 21
@@ -77,12 +182,13 @@ jobs:
 
       # Same gate the Build workflow runs on main: the tag may point at a commit that
       # never went through CI (pushed from a feature branch, say), and publishing to
-      # Central is irreversible — verify before anything is published
+      # Central is irreversible — verify before anything is published. Host tests and
+      # format/API checks run here; the native tests gate this job as prerequisites
       - name: Build and test
-        run: chmod +x gradlew && ./gradlew build
+        run: ./gradlew build
 
       - name: Publish to local Maven
-        run: chmod +x gradlew && ./gradlew publishToMavenLocal
+        run: ./gradlew publishToMavenLocal
 
       # The tag checkout sits exactly on the v* tag, so the exact-match derivation must
       # produce precisely the tag version — a SNAPSHOT here would publish the release
@@ -112,7 +218,6 @@ jobs:
       # the reference numbers stay comparable against recent CI data
       - name: Run JVM rendering benchmark
         run: |
-          chmod +x gradlew
           set -o pipefail
           ./gradlew benchmark --console=plain 2>&1 | tee benchmark.txt
 
@@ -139,7 +244,7 @@ jobs:
           echo "Collected $(find "$STAGE" -type f | wc -l) files"
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             release-assets/*
