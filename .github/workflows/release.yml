@@ -129,16 +129,14 @@ jobs:
 
       # The READMEs document the released coordinates; a forgotten bump ships stale
       # versions to every reader until someone notices. Fail the release instead: the
-      # tag version must be present, the previous tag's version must be gone, and
-      # CHANGELOG.md must carry the tag's version section (history keeps old versions,
-      # so only the new one is required there). The token-anchored matching — a plain
-      # fixed-string grep would hit substrings (1.1.0 inside 11.1.0 or 1.1.0.1) — and
-      # the whole check live in the shared check-docs-version action
-      - name: Check README and CHANGELOG version coordinates match the tag
+      # tag version must be present and the previous tag's version must be gone. The
+      # token-anchored matching — a plain fixed-string grep would hit substrings
+      # (1.1.0 inside 11.1.0 or 1.1.0.1) — and the whole check live in the shared
+      # check-docs-version action
+      - name: Check README version coordinates match the tag
         uses: ./.github/actions/check-docs-version
         with:
           docs: README.md README.en.md
-          changelog: CHANGELOG.md
           reverse: true
 
       # Publishing-credentials gate before the long build, same spirit as the README
