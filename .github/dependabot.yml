@@ -1,9 +1,10 @@
 # Weekly dependency updates, one grouped PR per ecosystem: gradle covers
-# libs.versions.toml and the build scripts, gradle-version keeps the wrapper's
-# distributionUrl on new Gradle releases, and github-actions covers the workflow
+# libs.versions.toml and the build scripts, and github-actions covers the workflow
 # actions — pinned by commit SHA, so Dependabot updates the SHA together with
 # the trailing version comment; release-chain upgrades deserve a diff review
-# (see the top of release.yml)
+# (see the top of release.yml). The Gradle wrapper is not covered: Dependabot
+# has no wrapper ecosystem (gradle-version is a Renovate concept — including it
+# fails the whole config parse), bump its distributionUrl by hand
 version: 2
 updates:
   - package-ecosystem: gradle
@@ -12,14 +13,6 @@ updates:
       interval: weekly
     groups:
       gradle:
-        patterns: ["*"]
-
-  - package-ecosystem: gradle-version
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      gradle-version:
         patterns: ["*"]
 
   - package-ecosystem: github-actions
