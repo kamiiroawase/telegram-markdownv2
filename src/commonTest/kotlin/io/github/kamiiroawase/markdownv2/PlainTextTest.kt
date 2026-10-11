@@ -133,24 +133,32 @@ class PlainTextTest {
 
     @Test
     fun plainTextStripsQuoteMarkersBehindListStructure() {
-        // applyPrefix prefixes every line of a list item's body — the marker on the
-        // first line, the marker-width indent on the rest — so a quote inside an item
-        // carries its '>' markers behind list structure. They strip there too; the list
-        // structure stays (pre-fix "> " leaked into the plain text of both lines of
-        // every list-wrapped quote)
-        assertEquals("• a\n  b", MarkdownV2.toPlainText(MarkdownV2.render("- > a\n  > b")))
-        assertEquals("1. a\n   b", MarkdownV2.toPlainText(MarkdownV2.render("1. > a\n   > b")))
+        // The render no longer places quote markers behind list structure (the Bot API
+        // accepts '>' only at a line start, so a quote in a list item degrades to its
+        // content) — but deformat still meets the shape in arbitrary input and must strip
+        // it there: markers behind the first line's list marker or a continuation indent
+        // alike, list structure kept (pre-fix "> " leaked into the plain text of both
+        // lines of every list-wrapped quote)
+        assertEquals("• a\n  b", MarkdownV2.toPlainText("• > a\n  > b"))
+        assertEquals("1. a\n   b", MarkdownV2.toPlainText("1\\. > a\n   > b"))
         // Two quote levels behind the bullet strip both units per line
-        assertEquals("• a\n  b", MarkdownV2.toPlainText(MarkdownV2.render("- > > a\n  > > b")))
-        // A list inside a quote: the markers strip around the kept bullet
+        assertEquals("• a\n  b", MarkdownV2.toPlainText("• >> a\n  >> b"))
+        // A list inside a quote: the markers strip around the kept bullet — this one is
+        // still the render's own shape (the quote is at the line start, only the inner
+        // quote degrades)
         assertEquals("• a", MarkdownV2.toPlainText(MarkdownV2.render("> - > a")))
+        // The degraded renders themselves: no markers to strip, the plain text is the
+        // item body as rendered
+        assertEquals("• a\n  b", MarkdownV2.toPlainText(MarkdownV2.render("- > a\n  > b")))
     }
 
     @Test
     fun plainTextLabelAndCodeSpanContinuationsBehindListStructure() {
         // The continuation-line scan behind list context: the indent stays, the quote
-        // markers strip — the list-wrapped shape of the spanning-entity tests above
-        assertEquals("• a\n  b (u)", MarkdownV2.toPlainText(MarkdownV2.render("- > [a\n  > b](u)")))
+        // markers strip — the list-wrapped shape of the spanning-entity tests above,
+        // hand-made the same way (the render degrades quotes in list items and no longer
+        // produces it)
+        assertEquals("• a\n  b (u)", MarkdownV2.toPlainText("• > [a\n  > b](u)"))
         // Hand-made code-span shape (the parser never spans code spans across lines —
         // the same hand-made posture as the quote-only test above)
         assertEquals("• x\n  y", MarkdownV2.toPlainText("• > `x\n  > y`"))

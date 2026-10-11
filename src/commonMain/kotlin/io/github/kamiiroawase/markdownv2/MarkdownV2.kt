@@ -59,10 +59,12 @@ public object MarkdownV2 {
      * (the default) disables truncation — the full document renders regardless of
      * length; pass [MAX_MESSAGE_LENGTH] to clip to the Telegram message limit.
      * Constructs Telegram cannot render (tables, raw HTML) are degraded to fenced code
-     * blocks; link entities Telegram rejects (empty URL, or a label that renders to
-     * nothing) degrade to the label text or the bare escaped URL. Rendering knobs that
-     * have no single right answer (table cell cap, character display width) live in
-     * [options].
+     * blocks; a blockquote inside a list item degrades to its content — the Bot API
+     * accepts an unescaped '>' only at a line start, never behind a list marker or
+     * continuation indent; link entities Telegram rejects (empty URL, or a label that
+     * renders to nothing) degrade to the label text or the bare escaped URL. Rendering
+     * knobs that have no single right answer (table cell cap, character display width)
+     * live in [options].
      *
      * On Kotlin/JS and Kotlin/Wasm this call throws for inputs the upstream parser cannot
      * handle (HTML blocks, `<a href>` anchors, documents opening with an HTML tag — see
@@ -137,9 +139,9 @@ public object MarkdownV2 {
      * glued markers included, so `_a__b_` (the render of two italics side by side) resolves
      * to plain `ab` — code spans and fenced blocks keep their content — a code block inside
      * a quote de-formats to its content with the per-line quote markers stripped — quote
-     * `>` prefixes drop wherever the renderer puts them (behind a list marker or a
-     * continuation indent — a quote inside a list item keeps its bullets — and on the
-     * continuation line of a label or code span soft-broken inside a quote) — escapes
+     * `>` prefixes drop wherever they sit (at a line start, behind a list marker or a
+     * continuation indent — list structure itself stays — and on the continuation line of
+     * a label or code span soft-broken inside a quote) — escapes
      * resolve per context, and `[label](url)` becomes `label (url)` so no link target is
      * lost (an empty label or URL degrades to the non-empty piece).
      * The input is expected to be this library's output; arbitrary strings degrade

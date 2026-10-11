@@ -25,6 +25,7 @@ internal fun renderBlocks(
     depth: Int,
     retriable: Boolean,
     options: RenderOptions,
+    inListItem: Boolean = false,
 ): String {
     if (budget <= 0) return ""
 
@@ -39,7 +40,7 @@ internal fun renderBlocks(
         val remaining = budget - parts.length - separator.length
         if (remaining <= 0) break
 
-        val block = renderBlock(node, depth, options)
+        val block = renderBlock(node, depth, options, inListItem)
         // The blank-render skip: the block's own visitors emit no separator for a
         // nothing-render (see Visitor.visit(paragraph)/renderList), and this walk must
         // not reintroduce one on its behalf — chunkBlocks makes the same skip
@@ -51,7 +52,7 @@ internal fun renderBlocks(
             parts.append(separator).append(block)
             node = node.next
         } else {
-            val shrunk = shrink(node, remaining, depth, retriable, options)
+            val shrunk = shrink(node, remaining, depth, retriable, options, inListItem)
             if (shrunk.isNotEmpty()) {
                 parts.append(separator).append(shrunk)
             }
@@ -94,6 +95,7 @@ private fun shrink(
     depth: Int,
     retriable: Boolean,
     options: RenderOptions,
+    inListItem: Boolean = false,
 ): String =
     when {
         node.isFenceWrappedBlock() -> {
@@ -105,7 +107,16 @@ private fun shrink(
         }
 
         node is BlockQuote -> {
-            shrinkQuote(node, budget, depth, retriable, options)
+            // Behind list structure (inListItem) shrinkQuote's '>' prefixes are unplaceable
+            // — the same degradation visit(blockQuote) makes on the full-render side: the
+            // quote truncates as its children's plain blocks, "\n\n"-joined exactly as the
+            // full render joins the degraded pieces, so a shrunken prefix still matches
+            // the full render's shape
+            if (inListItem) {
+                renderBlocks(node.firstChild, budget, depth, retriable, options, inListItem = true)
+            } else {
+                shrinkQuote(node, budget, depth, retriable, options)
+            }
         }
 
         node is Heading -> {
@@ -206,7 +217,8 @@ private fun fitListItem(
 
     var budget = remaining - prefix.length
     while (budget > 0) {
-        val shrunk = renderBlocks(item.firstChild, budget, depth + 1, retriable = false, options).trim()
+        val shrunk =
+            renderBlocks(item.firstChild, budget, depth + 1, retriable = false, options, inListItem = true).trim()
         if (shrunk.isEmpty()) return null
         val prefixed = applyPrefix(prefix, shrunk)
         if (prefixed.length <= remaining) return prefixed

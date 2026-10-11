@@ -608,22 +608,22 @@ class TruncationTest {
     }
 
     @Test
-    fun nestedQuoteOverrunDegradesToPrefixedPlainText() {
-        // A quote inside a list does not fit (indent overhead included): its tail degrades
-        // to escaped plain text behind the quote prefix and the item structure survives
-        // (pre-fix the nested tail shrink returned empty, the item was dropped, and the
-        // document fell back to plain text wholesale)
-        assertEquals("• > abc def…", MarkdownV2.render("- > *abc\ndef*", 13))
+    fun quoteInsideListedItemDegradesButKeepsItemAndEmphasis() {
+        // A quote inside a list item cannot keep its markers (the Bot API accepts '>' only
+        // at a line start, never behind a list marker or indent): it degrades to its
+        // children, so the item, the soft-break line shape and the emphasis all survive
+        // (pre-fix the render emitted "• > abc def…", which Telegram rejected wholesale)
+        assertEquals("• _abc\n  def_", MarkdownV2.render("- > *abc\ndef*", 13))
     }
 
     @Test
     fun quoteInsideListItemKeepsStructureWhenTailDegrades() {
-        // The same fix at length: a fitting "• > …" prefix must survive instead of the
-        // whole document degrading to escaped plain text
+        // The same degradation at length: a fitting "• w1 …" prefix must survive instead
+        // of the whole document degrading to escaped plain text
         val content = "- > " + (1..30).joinToString(" ") { "w$it" }
         val result = MarkdownV2.render(content, maxLength = 40)
         assertTrue(result.length <= 40)
-        assertTrue(result.startsWith("• > w1"), "structure lost: $result")
+        assertTrue(result.startsWith("• w1"), "structure lost: $result")
         assertTrue(result.endsWith("…"))
     }
 
@@ -691,6 +691,7 @@ class TruncationTest {
                     result.length <= length,
                     "len=$length gave ${result.length}: ${result.take(50).replace("\n", "\\n")}",
                 )
+                assertQuoteMarkersLegal(result, "sweep len=$length of ${content.replace("\n", "\\n")}")
             }
         }
     }

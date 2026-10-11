@@ -722,7 +722,11 @@ class RenderTest {
 
     @Test
     fun blockQuoteInsideListItem() {
-        assertEquals("• > q", MarkdownV2.render("- > q"))
+        // The Bot API accepts an unescaped '>' only at a line start: behind a list marker
+        // ("• >") or a continuation indent ("  >") it rejects the whole message with
+        // "Character '>' is reserved". A quote inside a list item therefore degrades to
+        // its children's content — the item survives, the quote formatting does not
+        assertEquals("• q", MarkdownV2.render("- > q"))
     }
 
     @Test

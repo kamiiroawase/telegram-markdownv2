@@ -22,13 +22,17 @@ import org.commonmark.node.OrderedList
 /**
  * Renders one block node through a fresh Visitor; nesting-depth capping happens inside
  * the visitor itself (renderChild for structure, enterInline for inline emphasis).
+ * [inListItem] tells the visitor the render sits inside a list item body, where quote
+ * markers cannot reach a line start and a blockquote degrades to its children's content
+ * (see Visitor.inListItem).
  */
 internal fun renderBlock(
     node: Node,
     depth: Int,
     options: RenderOptions,
+    inListItem: Boolean = false,
 ): String {
-    val visitor = Visitor(depth, options)
+    val visitor = Visitor(depth, options, inListItem = inListItem)
     node.accept(visitor)
     return visitor.output().trimEnd('\n')
 }
@@ -89,7 +93,10 @@ internal fun forEachListItem(
     while (item != null) {
         if (item is ListItem) {
             val prefix = marker()
-            val body = renderBlock(item, depth + 1, options)
+            // inListItem: the item body renders behind the list marker/indent, where a
+            // blockquote's '>' markers are unplaceable (see Visitor.inListItem) — its
+            // quotes degrade so every rendering path's item body stays valid MarkdownV2
+            val body = renderBlock(item, depth + 1, options, inListItem = true)
             if (body.isNotBlank() && !visit(item, prefix, body)) break
         }
         item = item.next

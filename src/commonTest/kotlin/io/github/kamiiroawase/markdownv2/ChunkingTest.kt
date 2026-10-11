@@ -547,6 +547,7 @@ class ChunkingTest {
                         chunk.length <= length,
                         "len=$length gave ${chunk.length}: ${chunk.take(50).replace("\n", "\\n")}",
                     )
+                    assertQuoteMarkersLegal(chunk, "chunk sweep len=$length of ${content.replace("\n", "\\n")}")
                 }
             }
         }

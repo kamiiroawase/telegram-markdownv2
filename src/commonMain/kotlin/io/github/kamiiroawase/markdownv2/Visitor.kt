@@ -199,6 +199,14 @@ internal class Visitor(
     private val depth: Int = 0,
     private val options: RenderOptions = RenderOptions(),
     private val precededByBacktick: Boolean = false,
+    // Whether this render sits inside a list item body: the item's first line carries the
+    // list marker and every continuation line the marker-width indent (applyPrefix), so a
+    // blockquote's '>' markers could never land at a line start — the only position the
+    // Bot API accepts them at (any ordinary character, a marker or an indent space alike,
+    // clears tdlib's can_start_blockquote flag and a following '>' draws the 400 "Character
+    // '>' is reserved"). A quote in that position degrades to its children's content (see
+    // visit(blockQuote))
+    private val inListItem: Boolean = false,
 ) : AbstractVisitor() {
     private val sb = StringBuilder()
 
@@ -343,14 +351,32 @@ internal class Visitor(
         // grammar (nesting runs glue; "> >" is unescaped content). The "\n>\n" separator
         // keeps the blank line between the quote's paragraphs as a bare marker. An empty
         // quote keeps a single ">"
+        //
+        // Behind list structure (inListItem) no '>' marker can sit at a line start — the
+        // only position the Bot API accepts it at — so the quote degrades there: its
+        // children render as plain blocks of the item, joined by the block separator, the
+        // quote formatting traded for output Telegram parses (the same trade tables and
+        // raw HTML make). An all-blank quote renders nothing; the blank-item skip upstream
+        // drops the emptied marker
         val pieces = mutableListOf<String>()
         var child = blockQuote.firstChild
         while (child != null) {
             val rendered = renderQuoteChild(child)
             if (rendered.isNotBlank()) {
-                pieces += prefixQuoteLevel(child is BlockQuote, rendered)
+                pieces +=
+                    if (inListItem) {
+                        rendered
+                    } else {
+                        prefixQuoteLevel(child is BlockQuote, rendered)
+                    }
             }
             child = child.next
+        }
+        if (inListItem) {
+            if (pieces.isNotEmpty()) {
+                sb.append(pieces.joinToString("\n\n")).append("\n\n")
+            }
+            return
         }
         sb.append(if (pieces.isEmpty()) ">" else pieces.joinToString("\n>\n"))
         sb.append("\n\n")
@@ -933,14 +959,17 @@ internal class Visitor(
 
     // Renders a nested block (quote body, list item) in a child visitor; at the depth cap
     // the subtree flattens to plain text (see MAX_RENDER_DEPTH). Trailing newlines are
-    // trimmed here — callers prepend their own prefixes and separators.
+    // trimmed here — callers prepend their own prefixes and separators. The only caller
+    // renders list item bodies, so the child visitor carries inListItem (quotes inside
+    // the item degrade; a nested list's own items keep degrading through renderList →
+    // renderChild)
     private fun renderChild(node: Node): String =
         if (depth + 1 >= MAX_RENDER_DEPTH) {
             val plain = StringBuilder()
             appendPlainText(plain, node)
             plain.toString().trimEnd('\n')
         } else {
-            val visitor = Visitor(depth + 1, options)
+            val visitor = Visitor(depth + 1, options, inListItem = true)
             visitor.visitChildren(node)
             visitor.output().trimEnd('\n')
         }
@@ -948,14 +977,16 @@ internal class Visitor(
     // The quote-child variant: the node renders through its own full block shape —
     // visit(node), not visitChildren(node) — so a nested blockQuote child arrives with
     // its own marker run for the caller to glue onto (see visit(blockQuote)). Depth
-    // capping and trailing-newline trimming match renderChild
+    // capping and trailing-newline trimming match renderChild. inListItem propagates: a
+    // quote degraded behind list structure still renders its children in list-item
+    // context, where any deeper quote degrades alike
     private fun renderQuoteChild(node: Node): String =
         if (depth + 1 >= MAX_RENDER_DEPTH) {
             val plain = StringBuilder()
             appendPlainText(plain, node)
             plain.toString().trimEnd('\n')
         } else {
-            val visitor = Visitor(depth + 1, options)
+            val visitor = Visitor(depth + 1, options, inListItem = inListItem)
             node.accept(visitor)
             visitor.output().trimEnd('\n')
         }
