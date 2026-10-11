@@ -59,7 +59,7 @@ cd telegram-markdownv2
 ./gradlew benchmark    # perf benchmark: typical messages ~0.1 ms, 1M characters ~10 ms; CI re-runs attach the output to every GitHub Release
 ```
 
-313 behavior-level tests (input/output assertions); 42 of them depend on HTML parsing and silently skip on JS/Wasm due to the upstream defect. Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
+321 behavior-level tests (input/output assertions); 49 of them depend on HTML parsing and silently skip on JS/Wasm due to the upstream defect. Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
 
 ## License
 
