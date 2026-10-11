@@ -35,7 +35,7 @@ val fallback = MarkdownV2.toPlainText(rejectedPart)                    // de-for
 ```
 
 - All 19 escapable characters (Telegram's 18 official special characters plus the backslash) escaped; inline code / code blocks / link URLs follow their own escaping rules
-- Unsupported constructs degrade gracefully: tables become aligned code blocks (cell cap and display-width measure configurable via `RenderOptions`), HTML maps to entities or literal text, and a blockquote inside a list item degrades to its content (the Bot API accepts an unescaped `>` only at a line start — one behind a list marker or continuation indent gets the whole message rejected with 400)
+- Unsupported constructs degrade gracefully: tables become aligned code blocks (cell cap and display-width measure configurable via `RenderOptions`), HTML maps to entities or literal text, a blockquote inside a list item degrades to its content (the Bot API accepts an unescaped `>` only at a line start — one behind a list marker or continuation indent gets the whole message rejected with 400), and underscore-family emphasis that would glue onto a neighboring `_`/`__` marker degrades (the parser re-pairs touching markers into entities it cannot close)
 - Truncation and chunking preserve structure: code fences close, unclosed entities complete, quote and list prefixes survive line by line, escape sequences and surrogate pairs never split; when nothing structural fits, the fallback is escaped plain text
 - Pass a custom `Parser` built on top of `MarkdownV2.defaultExtensions` for more Markdown extensions (footnotes, autolink, …); unknown extension nodes traverse as plain content without crashing
 

@@ -691,7 +691,7 @@ class TruncationTest {
                     result.length <= length,
                     "len=$length gave ${result.length}: ${result.take(50).replace("\n", "\\n")}",
                 )
-                assertQuoteMarkersLegal(result, "sweep len=$length of ${content.replace("\n", "\\n")}")
+                assertTelegramParseable(result, "sweep len=$length of ${content.replace("\n", "\\n")}")
             }
         }
     }

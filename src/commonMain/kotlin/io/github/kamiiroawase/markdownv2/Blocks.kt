@@ -40,13 +40,21 @@ internal fun renderBlock(
 // A fresh visitor per group: entities left unclosed within the group are completed by its
 // own output(), never leaking into the next group. [precededByBacktick] reports that this
 // render will sit directly behind the caller's unescaped backtick (the chunking node
-// seam) — a code entity opening first then takes the suppressed degradation
+// seam) — a code entity opening first then takes the suppressed degradation;
+// [precededByUnderscore] is the same seam report for the caller's trailing unescaped '_'
+// (Visitor.atUnderscoreGlue)
 internal fun renderInlineGroup(
     nodes: List<Node>,
     options: RenderOptions,
     precededByBacktick: Boolean = false,
+    precededByUnderscore: Boolean = false,
 ): String {
-    val visitor = Visitor(options = options, precededByBacktick = precededByBacktick)
+    val visitor =
+        Visitor(
+            options = options,
+            precededByBacktick = precededByBacktick,
+            precededByUnderscore = precededByUnderscore,
+        )
     nodes.forEach { it.accept(visitor) }
     return visitor.output()
 }

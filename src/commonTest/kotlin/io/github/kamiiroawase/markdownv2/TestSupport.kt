@@ -5,117 +5,200 @@ package io.github.kamiiroawase.markdownv2
 
 internal val maxMessageLength = MarkdownV2.MAX_MESSAGE_LENGTH
 
-// The reserved set of tdlib's parse_markdown_v2 minus '\n', which the validator below
-// handles on its own branch: the Bot API's MarkdownV2 parser, the authority on what it
-// accepts, leaves these entity-marker characters outside its can_start_blockquote bookkeeping
-private val TELEGRAM_RESERVED_MARKERS = "_*[]()~`>#+-=|{}.!".toSet()
+private enum class Kind { BOLD, ITALIC, UNDERLINE, STRIKE, CODE, PRE, TEXTURL, BLOCKQUOTE }
 
 /**
- * Asserts [output] obeys the Telegram MarkdownV2 grammar for '>' — a faithful port of the
- * can_start_blockquote rule tdlib's parse_markdown_v2 applies. An unescaped '>' may open or
- * continue a blockquote only while the flag holds: set at message start and by an unescaped
- * newline, cleared by any ordinary character (a letter, a space, a bullet), left untouched by
- * the reserved marker characters and '\r' (how glued nesting runs like ">>" stay legal). A
- * '>' the rule rejects is exactly the "Character '>' is reserved and must be escaped with
- * the preceding '\'" 400 the Bot API answers with — which is why every render, truncation
- * and chunk piece must pass here.
+ * Asserts [output] is a message tdlib's parse_markdown_v2 — the parser the Bot API
+ * actually runs — accepts: a faithful port of its accept/reject decisions, so every
+ * 400 it would answer with fails here. The rules, in the source's own terms:
  *
- * '>' inside code entities is ordinary content (inside pre/code tdlib narrows the reserved
- * set to the backtick alone), and a link URL is consumed by a dedicated scan that stops at
- * the unescaped ')' — a '>' there never meets the rule — so the validator tracks those
- * three states by the library's own shapes: ``` fences, single-backtick code spans, and
- * ]( … ) link tails.
+ * - a backslash followed by any char 1..126 is an escape pair, consumed wherever it
+ *   appears;
+ * - outside code entities the reserved set is "_*[]()~`>#+-=|{}.!" plus newline: a
+ *   reserved char must open or close the entity the parser's stack expects, else the
+ *   message draws "Character 'x' is reserved"; inside code/pre the set narrows to the
+ *   backtick;
+ * - "_" pairs by context: it closes an italic only when the next char is not "_", and
+ *   "__" is one underline unit — glued underscore markers re-pair into shapes the
+ *   parser leaves unterminated ("Can't find end of the entity");
+ * - ">" may open a quote only while can_start_blockquote holds: set at message start
+ *   and by an unescaped newline, cleared by any ordinary character, untouched by the
+ *   reserved markers and CR;
+ * - a newline inside a quote ends any open entity unless the next char is ">";
+ * - a link's "](url)" tail is scanned by a dedicated loop that stops at the unescaped
+ * ")";
+ * - the input may not end with an open entity.
+ *
+ * Every render, truncation and chunk piece must pass here.
  */
-internal fun assertQuoteMarkersLegal(
+internal fun assertTelegramParseable(
     output: String,
     context: String,
 ) {
+    val stack = ArrayDeque<Kind>()
+    var haveBlockquote = false
     var canStart = true
-    var inFence = false
-    var inCodeSpan = false
-    var inLinkUrl = false
     var index = 0
+
+    // The NUL past-the-end read of std::string's operator[] — past-the-end looks like
+    // U+0000, which matches none of the marker comparisons below
+    fun at(i: Int): Char = if (i < output.length) output[i] else '\u0000'
+
+    fun isSpace(c: Char): Boolean = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\u000B' || c == '\u000C'
     while (index < output.length) {
-        val char = output[index]
-        if (char == '\\' && index + 1 < output.length && output[index + 1].code in 1..126) {
-            canStart = output[index + 1] == '\n'
+        val c = output[index]
+        if (c == '\\' && at(index + 1).code in 1..126) {
+            canStart = at(index + 1) == '\n'
             index += 2
             continue
         }
-        if (inLinkUrl) {
-            if (char == ')') inLinkUrl = false
-            index++
-            continue
-        }
-        if (inFence || inCodeSpan) {
-            when {
-                char == '`' && inFence && isFenceCloseAt(output, index) -> {
-                    inFence = false
-                    index += 3
-                }
-
-                char == '`' && !inFence -> {
-                    inCodeSpan = false
-                    index++
+        val top = stack.lastOrNull()
+        val reserved =
+            when (top) {
+                Kind.CODE, Kind.PRE -> {
+                    c == '`'
                 }
 
                 else -> {
+                    c == '_' || c == '*' || c == '[' || c == ']' || c == '(' || c == ')' ||
+                        c == '~' || c == '`' || c == '>' || c == '#' || c == '+' || c == '-' ||
+                        c == '=' || c == '|' || c == '{' || c == '}' || c == '.' || c == '!' || c == '\n'
+                }
+            }
+        if (!reserved) {
+            if (c != '\r' && c.code !in 0xDC00..0xDFFF) canStart = false
+            index++
+            continue
+        }
+        val isEnd =
+            when {
+                stack.isEmpty() -> false
+                haveBlockquote && c == '\n' && (index + 1 >= output.length || output[index + 1] != '>') -> true
+                top == Kind.BOLD -> c == '*'
+                top == Kind.ITALIC -> c == '_' && at(index + 1) != '_'
+                top == Kind.CODE -> c == '`'
+                top == Kind.PRE -> c == '`' && at(index + 1) == '`' && at(index + 2) == '`'
+                top == Kind.TEXTURL -> c == ']'
+                top == Kind.UNDERLINE -> c == '_' && at(index + 1) == '_'
+                top == Kind.STRIKE -> c == '~'
+                else -> false // BLOCKQUOTE never ends at its own marker
+            }
+        if (isEnd) {
+            if (c == '\n' && top != Kind.BLOCKQUOTE) {
+                throw AssertionError("newline inside a quote ends a $top entity ($context): $output")
+            }
+            when (top) {
+                Kind.UNDERLINE -> {
+                    index++
+                }
+
+                Kind.PRE -> {
+                    index += 2
+                }
+
+                Kind.TEXTURL -> {
+                    if (at(index + 1) == '(') {
+                        var j = index + 2
+                        while (j < output.length && output[j] != ')') {
+                            if (output[j] == '\\' && at(j + 1).code in 1..126) j += 2 else j++
+                        }
+                        if (j >= output.length) {
+                            throw AssertionError("unterminated link URL ($context): $output")
+                        }
+                        index = j
+                    }
+                }
+
+                Kind.BLOCKQUOTE -> {
+                    haveBlockquote = false
+                    canStart = true
+                }
+
+                else -> {}
+            }
+            stack.removeLast()
+            index++
+            continue
+        }
+        // begin-of-entity path
+        when (c) {
+            '_' -> {
+                if (at(index + 1) == '_') {
+                    stack.addLast(Kind.UNDERLINE)
+                    index += 2
+                } else {
+                    stack.addLast(Kind.ITALIC)
                     index++
                 }
             }
-            continue
-        }
-        when {
-            char == '\n' -> {
-                canStart = true
-            }
 
-            char == '\r' -> {}
-
-            char == '`' && isFenceOpenAt(output, index) -> {
-                inFence = true
-                index += 3
-            }
-
-            char == '`' -> {
-                inCodeSpan = true
+            '*' -> {
+                stack.addLast(Kind.BOLD)
                 index++
             }
 
-            char == ']' && index + 1 < output.length && output[index + 1] == '(' -> {
-                inLinkUrl = true
-                index += 2
+            '~' -> {
+                stack.addLast(Kind.STRIKE)
+                index++
             }
 
-            char in TELEGRAM_RESERVED_MARKERS -> {
-                if (char == '>' && !canStart) {
+            '[' -> {
+                stack.addLast(Kind.TEXTURL)
+                index++
+            }
+
+            '`' -> {
+                if (at(index + 1) == '`' && at(index + 2) == '`') {
+                    index += 3
+                    var langEnd = index
+                    while (langEnd < output.length && !isSpace(output[langEnd]) && output[langEnd] != '`') langEnd++
+                    if (langEnd != index && langEnd < output.length && output[langEnd] != '`') index = langEnd
+                    if (index < output.length && (output[index] == '\n' || output[index] == '\r')) {
+                        if (at(index + 1) != output[index] && (at(index + 1) == '\n' || at(index + 1) == '\r')) {
+                            index += 2
+                        } else {
+                            index++
+                        }
+                    }
+                    stack.addLast(Kind.PRE)
+                } else {
+                    stack.addLast(Kind.CODE)
+                    index++
+                }
+            }
+
+            '\n' -> {
+                canStart = true
+                index++
+            }
+
+            '>' -> {
+                if (canStart) {
+                    if (!haveBlockquote) {
+                        stack.addLast(Kind.BLOCKQUOTE)
+                        haveBlockquote = true
+                    }
+                    index++
+                } else {
                     throw AssertionError(
-                        "unquoted-marker '>' at index $index Telegram rejects ($context): $output",
+                        "Character '>' is reserved and must be escaped ($context): $output",
                     )
                 }
             }
 
-            // An ordinary character clears the flag unless it is a UTF-16 low surrogate —
-            // a continuation unit, not a character start (the UTF-8 twin in tdlib)
             else -> {
-                if (char.code !in 0xDC00..0xDFFF) canStart = false
+                throw AssertionError(
+                    "Character '$c' is reserved and must be escaped ($context): $output",
+                )
             }
         }
-        index++
+    }
+    // EOF: a trailing blockquote closes here; anything else open is an error
+    if (haveBlockquote && stack.isNotEmpty() && stack.last() == Kind.BLOCKQUOTE) stack.removeLast()
+    if (stack.isNotEmpty()) {
+        throw AssertionError("Can't find end of the ${stack.last()} entity ($context): $output")
     }
 }
-
-// A ``` run: the library opens and closes every fence with exactly three backticks (the
-// language string is filtered to letters/digits/+/-/#), so a bare length check pins it
-private fun isFenceOpenAt(
-    output: String,
-    index: Int,
-): Boolean = index + 2 < output.length && output[index + 1] == '`' && output[index + 2] == '`'
-
-private fun isFenceCloseAt(
-    output: String,
-    index: Int,
-): Boolean = isFenceOpenAt(output, index)
 
 /** Resolves the library's escape sequences (\ + special char); a lone backslash stays. */
 internal fun removeEscapes(text: String): String =
@@ -172,4 +255,9 @@ internal fun sweepContents(htmlParsingSupported: Boolean): List<String> =
         add("😀😀😀 *bold 😀* `code 😀` [😀 link](https://example.com/x)")
         if (htmlParsingSupported) add("<div>\nblock html content\nmore html\n</div>")
         if (htmlParsingSupported) add("###### <!-- c -->")
+        // Glued underscore-family emphasis degrades (Visitor.atUnderscoreGlue): sibling
+        // tags, nested tags and empty pairs, so the sweep crosses those degradation
+        // budgets alongside the plain shapes
+        if (htmlParsingSupported) add("<i>aaaa</i><i>bbbb</i> cccc <u>dddd</u><u>eeee</u>")
+        if (htmlParsingSupported) add("<u>aaaa<i>bbbb</i></u> cccc <i></i> dddd")
     }

@@ -138,6 +138,16 @@ private fun buildCases(): List<BenchmarkCase> {
                 "y<i>ital <a href=\"https://example.com/w\">label " + "more ".repeat(12) + "\n\n"
         ).repeat(8)
 
+    // Adjacent, nested and empty underscore-family tags — every shape the glue rule
+    // degrades (sibling italics merging, an italic inside an underline, empty pairs, and
+    // unclosed tags completing at output time with opener rewinds); the render stays
+    // within 4096
+    val underscoreGlue =
+        (
+            "lead <i>a</i><i>b</i> gap <u>c</u><u>d</u> gap <u>e<i>f</i></u> gap <i></i> tail " +
+                "unclosed <i>g<i>h open <u>i end " + "fill ".repeat(30) + "\n\n"
+        ).repeat(20)
+
     // Beyond 100 levels; triggers deep flattening
     val deepNesting = ">".repeat(200) + " deep quote body " + "x".repeat(100)
 
@@ -185,6 +195,7 @@ private fun buildCases(): List<BenchmarkCase> {
         stringCase("Large code block (500 lines, truncated)", code),
         stringCase("Inline HTML mix", htmlInline),
         stringCase("Unclosed inline entities (completion)", unclosedHtml),
+        stringCase("Glued underscore emphasis (degradation)", underscoreGlue),
         stringCase("Deeply nested quote (200 levels, flattened)", deepNesting),
         BenchmarkCase(
             "Malicious unclosed tag (tag-scan linearity)",

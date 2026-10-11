@@ -61,10 +61,13 @@ public object MarkdownV2 {
      * Constructs Telegram cannot render (tables, raw HTML) are degraded to fenced code
      * blocks; a blockquote inside a list item degrades to its content — the Bot API
      * accepts an unescaped '>' only at a line start, never behind a list marker or
-     * continuation indent; link entities Telegram rejects (empty URL, or a label that
-     * renders to nothing) degrade to the label text or the bare escaped URL. Rendering
-     * knobs that have no single right answer (table cell cap, character display width)
-     * live in [options].
+     * continuation indent; underscore-family emphasis whose markers would glue onto
+     * another '_' marker (two italics side by side, an italic opening straight after
+     * one closes, an italic nested directly in an underline) degrades — the parser
+     * re-pairs touching '_'/'__' markers into entities it cannot close; link entities
+     * Telegram rejects (empty URL, or a label that renders to nothing) degrade to the
+     * label text or the bare escaped URL. Rendering knobs that have no single right
+     * answer (table cell cap, character display width) live in [options].
      *
      * On Kotlin/JS and Kotlin/Wasm this call throws for inputs the upstream parser cannot
      * handle (HTML blocks, `<a href>` anchors, documents opening with an HTML tag — see

@@ -65,14 +65,23 @@ private enum class CodeDelimiter {
 // visitor's own emphasis visits — only html-owned markers may be matched and popped by
 // a closing tag, so a Markdown emphasis' own entry can never be stolen from under it.
 // openPosition: for a LOUD code entry, the output position right after its opening
-// backtick (everything the entity emitted sits at or after it; -1 otherwise)
+// backtick, and for an underscore-family entry the position right after its opening
+// marker (everything the entity emitted sits at or after it; -1 otherwise).
+// silent: an underscore-family entry degraded by the glue rule — it emitted no opener
+// and its closer emits nothing; the content renders as plain text in place
 private class OpenEmphasisMarker(
     val marker: String,
     val html: Boolean,
     val codeDelimiter: CodeDelimiter = CodeDelimiter.LOUD,
     override val seq: Int,
     val openPosition: Int = -1,
+    val silent: Boolean = false,
 ) : OpenEntity
+
+// Which underscore-family marker the last emission was — the glue rule (atUnderscoreGlue)
+// needs the kind, not just the character: a trailing "__" that CLOSED an underline may
+// legally glue onto a following marker, every other trailing marker may not
+private enum class UnderscoreEmission { I_OPEN, U_OPEN, I_CLOSE, U_CLOSE }
 
 // An open HTML anchor: its URL ("" when href-less, the NESTED_LITERAL_ANCHOR sentinel
 // while an outer link is open) plus the output positions that let an empty label degrade
@@ -171,6 +180,22 @@ internal fun endsWithUnescapedBacktick(output: CharSequence): Boolean {
     return backslashes % 2 == 0
 }
 
+// The underscore twin of endsWithUnescapedBacktick: whether [output] ends with an '_'
+// that is a marker rather than content. Content underscores always escape (\_), and
+// parity settles the tail exactly as it does for backslashes before a backtick — an odd
+// run of backslashes means the last one escapes the underscore. Shared with the
+// chunking node seam
+internal fun endsWithUnescapedUnderscore(output: CharSequence): Boolean {
+    if (output.isEmpty() || output.last() != '_') return false
+    var backslashes = 0
+    var index = output.length - 2
+    while (index >= 0 && output[index] == '\\') {
+        backslashes++
+        index--
+    }
+    return backslashes % 2 == 0
+}
+
 // Entity decoding for URL attribute values: the five XML predefined entities plus decimal
 // and hex character references. The full HTML5 named-entity table (~2k names) is
 // deliberately out of scope for URLs; anything unrecognized stays literal. Scanned
@@ -193,12 +218,17 @@ private val NAMED_ENTITIES =
  * [precededByBacktick] tells the visitor that the output it produces will sit directly
  * behind an unescaped backtick of the caller's already-emitted content (the chunking
  * node seam): a code entity opening first in such a render would glue its delimiter
- * onto that backtick and takes the suppressed degradation instead.
+ * onto that backtick and takes the suppressed degradation instead. [precededByUnderscore]
+ * is the underscore-family twin (see atUnderscoreGlue).
  */
 internal class Visitor(
     private val depth: Int = 0,
     private val options: RenderOptions = RenderOptions(),
     private val precededByBacktick: Boolean = false,
+    // The output will sit directly behind an unescaped '_' of the caller's content (the
+    // chunking node seam): a '_'/'__' marker opening first in such a render would glue
+    // onto it and takes the degradation instead (see atUnderscoreGlue)
+    private val precededByUnderscore: Boolean = false,
     // Whether this render sits inside a list item body: the item's first line carries the
     // list marker and every continuation line the marker-width indent (applyPrefix), so a
     // blockquote's '>' markers could never land at a line start — the only position the
@@ -215,6 +245,12 @@ internal class Visitor(
     private val openEntities = ArrayDeque<OpenEntity>()
 
     private var nextSeq = 0
+
+    // The kind of the last underscore-family marker emitted — read by atUnderscoreGlue
+    // only when the output tail is an unescaped '_' (which is necessarily that marker);
+    // null after a suppression rewinds one, where the effective tail reverts to whatever
+    // preceded and its kind is unknown — treated as glue-dangerous, the conservative read
+    private var lastUnderscoreEmission: UnderscoreEmission? = null
 
     // Depth of open Markdown link entities (Link and Image both render as links); HTML
     // anchors are tracked in [openEntities]. Telegram links cannot nest, so while any
@@ -245,7 +281,7 @@ internal class Visitor(
      */
     fun output(): String {
         if (openEntities.isEmpty()) return sb.toString()
-        val closers = mutableListOf<String>()
+        val closers = StringBuilder()
         while (openEntities.isNotEmpty()) {
             when (val entity = openEntities.removeLast()) {
                 is OpenEmphasisMarker -> {
@@ -254,6 +290,11 @@ internal class Visitor(
                             // MERGED and SUPPRESSED code entries never emit their
                             // backtick — completing them must not either, or the glue
                             // they avoided at open time reappears at the completion point
+                        }
+
+                        entity.silent -> {
+                            // A glue-degraded underscore-family entry emitted no opener;
+                            // its completion emits no closer either
                         }
 
                         entity.marker == "`" && sb.substring(entity.openPosition).trimEnd('\n').isEmpty() -> {
@@ -272,8 +313,22 @@ internal class Visitor(
                             sb.setLength(entity.openPosition - 1)
                         }
 
+                        (entity.marker == "_" || entity.marker == "__") && outputGlue(closers) -> {
+                            // The completion's underscore closer would glue onto the
+                            // trimmed tail (see atUnderscoreGlue) — the entity rewinds
+                            // instead, exactly like a matched close does. The tail being
+                            // its own opener covers the empty entity: "<i>" alone
+                            // rewinds rather than completing into "__", which Telegram
+                            // would read as an unterlined underline
+                            rewindUnderscoreOpener(entity)
+                        }
+
                         else -> {
-                            closers += entity.marker
+                            closers.append(entity.marker)
+                            when (entity.marker) {
+                                "_" -> lastUnderscoreEmission = UnderscoreEmission.I_CLOSE
+                                "__" -> lastUnderscoreEmission = UnderscoreEmission.U_CLOSE
+                            }
                         }
                     }
                 }
@@ -293,7 +348,7 @@ internal class Visitor(
                         }
 
                         else -> {
-                            closers += "](${escapeUrl(entity.url)})"
+                            closers.append("](${escapeUrl(entity.url)})")
                         }
                     }
                 }
@@ -304,8 +359,24 @@ internal class Visitor(
         // literal content and must survive; only trailing newlines are cleared — they
         // are block separators (or a dangling <br>), never code the entity displays
         val body = if (htmlCodeDepth > 0) sb.toString().trimEnd('\n') else sb.toString().trimEnd()
-        return body + closers.joinToString("")
+        return body + closers
     }
+
+    // The output()-time twin of atUnderscoreGlue: closers accumulate in their own builder
+    // after a trimEnd lifts trailing block separators, so the tail the FIRST closer would
+    // glue onto is the trimmed body's, not the raw sb's — a bare "<i>" ahead of a
+    // paragraph separator must still rewind rather than complete into "__", which reads
+    // as an opened underline. Later closers check the builder's own tail
+    private fun outputGlue(closers: StringBuilder): Boolean =
+        if (closers.isNotEmpty()) {
+            endsWithUnescapedUnderscore(closers) && lastUnderscoreEmission != UnderscoreEmission.U_CLOSE
+        } else {
+            // The trim this output will apply before appending closers; the code-open
+            // variant keeps spaces and tabs, neither of which is '_', so either tail
+            // serves the check
+            val body = if (htmlCodeDepth > 0) sb.toString().trimEnd('\n') else sb.toString().trimEnd()
+            endsWithUnescapedUnderscore(body) && lastUnderscoreEmission != UnderscoreEmission.U_CLOSE
+        }
 
     override fun visit(text: Text) {
         // Inside an HTML code entity the full 19-char escaping would leak backslashes:
@@ -448,12 +519,31 @@ internal class Visitor(
             appendPlainText(sb, emphasis)
             return
         }
+        // A '_' opening onto a trailing underscore marker would glue (see
+        // atUnderscoreGlue) — flatten to plain text, the depth-cap degradation
+        if (atUnderscoreGlue()) {
+            appendPlainText(sb, emphasis)
+            exitInline()
+            return
+        }
         val seq = nextSeq++
-        openEntities.addLast(OpenEmphasisMarker("_", html = false, seq = seq))
+        val entry =
+            OpenEmphasisMarker("_", html = false, seq = seq, openPosition = sb.length + 1)
+        openEntities.addLast(entry)
         sb.append('_')
+        lastUnderscoreEmission = UnderscoreEmission.I_OPEN
         visitChildren(emphasis)
         completeOpenedAfter(seq)
+        // The closer glues onto a completion's just-emitted '_' (an unclosed <i> inside
+        // the emphasis completed right here): rewind the opener instead of emitting it
+        if (atUnderscoreGlue()) {
+            openEntities.removeLast()
+            rewindUnderscoreOpener(entry)
+            exitInline()
+            return
+        }
         sb.append('_')
+        lastUnderscoreEmission = UnderscoreEmission.I_CLOSE
         openEntities.removeLast()
         exitInline()
     }
@@ -518,14 +608,27 @@ internal class Visitor(
                     when {
                         entity.codeDelimiter != CodeDelimiter.LOUD -> {}
 
+                        entity.silent -> {}
+
                         entity.marker == "`" && sb.length == entity.openPosition -> {
                             // See output(): an empty code entity rewinds its opener
                             // instead of gluing `` at the completion point
                             sb.setLength(entity.openPosition - 1)
                         }
 
+                        (entity.marker == "_" || entity.marker == "__") && atUnderscoreGlue() -> {
+                            // The completion's underscore closer would glue onto the
+                            // tail — an inner entity just completed here, or the entry's
+                            // own opener when it is empty: rewind (see atUnderscoreGlue)
+                            rewindUnderscoreOpener(entity)
+                        }
+
                         else -> {
                             sb.append(entity.marker)
+                            when (entity.marker) {
+                                "_" -> lastUnderscoreEmission = UnderscoreEmission.I_CLOSE
+                                "__" -> lastUnderscoreEmission = UnderscoreEmission.U_CLOSE
+                            }
                         }
                     }
                 }
@@ -714,6 +817,20 @@ internal class Visitor(
         if (parts.closing) {
             val top = openEntities.lastOrNull()
             if (top is OpenEmphasisMarker && top.html && top.marker == marker) {
+                // A glue-degraded entry emitted nothing and closes with nothing
+                if (top.silent) {
+                    openEntities.removeLast()
+                    return ""
+                }
+                // The '_'/'__' closer would glue onto the tail — a just-closed inner
+                // entity's marker, or this entry's own opener when it is empty
+                // (<i></i>, which would complete into "__", an opened underline): drop
+                // the entity's markers and keep the content (see atUnderscoreGlue)
+                if ((marker == "_" || marker == "__") && atUnderscoreGlue()) {
+                    openEntities.removeLast()
+                    rewindUnderscoreOpener(top)
+                    return ""
+                }
                 // An empty code pair (<code></code>, or one whose only content dropped
                 // out — a lone comment) rewinds its opener: emitting the closer would
                 // glue `` — an empty entity Telegram rejects; the tags carried no
@@ -729,9 +846,23 @@ internal class Visitor(
                 // LOUD and MERGED entries own a depth unit; a SUPPRESSED one never took
                 // one (and a non-code marker has none to give back either)
                 if (marker == "`" && top.codeDelimiter != CodeDelimiter.SUPPRESSED) htmlCodeDepth--
-                return if (top.codeDelimiter == CodeDelimiter.LOUD) marker else ""
+                if (top.codeDelimiter != CodeDelimiter.LOUD) return ""
+                when (marker) {
+                    "_" -> lastUnderscoreEmission = UnderscoreEmission.I_CLOSE
+                    "__" -> lastUnderscoreEmission = UnderscoreEmission.U_CLOSE
+                }
+                return marker
             }
             return escapeText(tag)
+        }
+        // The '_'/'__' opener would glue onto a trailing underscore marker — degrade:
+        // the entry goes silent (no opener, its closer emits nothing), the content
+        // renders in place (see atUnderscoreGlue)
+        if ((marker == "_" || marker == "__") && atUnderscoreGlue()) {
+            openEntities.addLast(
+                OpenEmphasisMarker(marker, html = true, seq = nextSeq++, silent = true),
+            )
+            return ""
         }
         // A code-family tag never emits a second backtick in a row: nested inside an
         // open code entity it merges into it (nested code renders exactly as single
@@ -746,17 +877,24 @@ internal class Visitor(
                 CodeDelimiter.LOUD
             }
         // For a LOUD code entry, the opener backtick lands at sb.length once the caller
-        // appends this method's return — openPosition is the position right after it
+        // appends this method's return — openPosition is the position right after it;
+        // the underscore-family openPosition follows the same rule for its own length
+        val openPosition =
+            when {
+                marker == "`" && delimiter == CodeDelimiter.LOUD -> sb.length + 1
+                marker == "_" || marker == "__" -> sb.length + marker.length
+                else -> -1
+            }
         openEntities.addLast(
-            OpenEmphasisMarker(
-                marker,
-                html = true,
-                delimiter,
-                nextSeq++,
-                openPosition = if (marker == "`" && delimiter == CodeDelimiter.LOUD) sb.length + 1 else -1,
-            ),
+            OpenEmphasisMarker(marker, html = true, delimiter, nextSeq++, openPosition),
         )
         if (delimiter != CodeDelimiter.SUPPRESSED && marker == "`") htmlCodeDepth++
+        if (delimiter == CodeDelimiter.LOUD) {
+            when (marker) {
+                "_" -> lastUnderscoreEmission = UnderscoreEmission.I_OPEN
+                "__" -> lastUnderscoreEmission = UnderscoreEmission.U_OPEN
+            }
+        }
         return if (delimiter == CodeDelimiter.LOUD) marker else ""
     }
 
@@ -921,6 +1059,36 @@ internal class Visitor(
     // pair every backslash with the character after it, so an odd number of
     // backslashes before the backtick means the last one belongs to an escape
     private fun atCodeGlue(): Boolean = if (sb.isEmpty()) precededByBacktick else endsWithUnescapedBacktick(sb)
+
+    /**
+     * Whether emitting a '_' or '__' marker now would glue it onto a trailing underscore
+     * marker — the one shape family tdlib's parser re-pairs into entities Telegram rejects
+     * ("Can't find end of the Italic/Underline entity"): "_" closes an italic only when
+     * the next character is not '_', and "__" reads as one underline unit, so two touching
+     * markers re-parse as a different nesting (a just-closed italic '_' followed by any
+     * marker, or two openers with no content between). The single legal adjacency is an
+     * underline CLOSER "__" on the left — "__X__Y__" and "__X___Y_" re-parse cleanly — so
+     * only that emission kind clears the glue. An empty render checks the seam flag
+     * instead (the chunking node seam passes the previous atom's tail in). Every emission
+     * point — openers, matched closers, completion loops — degrades on a positive answer:
+     * an opener pushes a silent entry and emits nothing, a closer rewinds its opener; the
+     * entity's formatting drops, its content stays.
+     */
+    private fun atUnderscoreGlue(): Boolean =
+        if (sb.isEmpty()) {
+            precededByUnderscore
+        } else {
+            endsWithUnescapedUnderscore(sb) && lastUnderscoreEmission != UnderscoreEmission.U_CLOSE
+        }
+
+    // Drops a closing underscore-family entity's markers entirely: the opener rewinds
+    // (its position is recorded on the entry), the closer never emits. Safe only where
+    // nothing is open inside the entity — every caller pops it as the innermost entry —
+    // so no still-recorded position lies inside the rewound range
+    private fun rewindUnderscoreOpener(marker: OpenEmphasisMarker) {
+        sb.deleteRange(marker.openPosition - marker.marker.length, marker.openPosition)
+        lastUnderscoreEmission = null
+    }
 
     private fun enterInline(): Boolean {
         if (inlineDepth >= MAX_RENDER_DEPTH) return false

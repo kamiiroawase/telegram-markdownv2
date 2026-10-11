@@ -3,7 +3,7 @@ package io.github.kamiiroawase.markdownv2
 import kotlin.test.Test
 
 // Every quote/list shape the renderer can meet: the Bot API accepts an unescaped '>' only
-// at a line start (see assertQuoteMarkersLegal), so quote markers must never end up
+// at a line start (see assertTelegramParseable), so quote markers must never end up
 // behind a list marker or a continuation indent — the shapes a quote nested in a list
 // item would naturally produce. Each corpus entry must survive render, truncation at a
 // range of budgets and chunking at a range of limits with every output piece legal.
@@ -42,7 +42,7 @@ class QuoteGrammarTest {
     @Test
     fun rendersObeyTelegramsQuoteMarkerGrammar() {
         quoteListCorpus.forEach { content ->
-            assertQuoteMarkersLegal(MarkdownV2.render(content), "render of: ${content.replace("\n", "\\n")}")
+            assertTelegramParseable(MarkdownV2.render(content), "render of: ${content.replace("\n", "\\n")}")
         }
     }
 
@@ -50,7 +50,7 @@ class QuoteGrammarTest {
     fun truncationsObeyTelegramsQuoteMarkerGrammar() {
         quoteListCorpus.forEach { content ->
             for (maxLength in 1..30) {
-                assertQuoteMarkersLegal(
+                assertTelegramParseable(
                     MarkdownV2.render(content, maxLength),
                     "render maxLength=$maxLength of: ${content.replace("\n", "\\n")}",
                 )
@@ -63,7 +63,7 @@ class QuoteGrammarTest {
         quoteListCorpus.forEach { content ->
             for (maxLength in listOf(2, 5, 9, 17, 33, 80)) {
                 MarkdownV2.renderChunked(content, maxLength).forEachIndexed { index, piece ->
-                    assertQuoteMarkersLegal(
+                    assertTelegramParseable(
                         piece,
                         "chunk $index of $maxLength of: ${content.replace("\n", "\\n")}",
                     )

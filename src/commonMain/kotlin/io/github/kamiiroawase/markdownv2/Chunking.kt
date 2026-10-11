@@ -482,9 +482,12 @@ private fun chunkInlineGroup(
     for (node in nodes) {
         // A fresh visitor renders each node, so the glue this chunk's trailing backtick
         // would form with the node's opening one is invisible to it — pass the seam
-        // state in (`x` packed directly against `y` would glue ``)
+        // state in (`x` packed directly against `y` would glue ``), and the underscore
+        // twin for a trailing '_'/'__' closer (an <i> atom completing directly before
+        // the next atom's emphasis opener would glue; see Visitor.atUnderscoreGlue)
         val seamGlue = acc.current.isNotEmpty() && endsWithUnescapedBacktick(acc.current)
-        val rendered = renderInlineGroup(listOf(node), options, seamGlue)
+        val seamUnderscore = acc.current.isNotEmpty() && endsWithUnescapedUnderscore(acc.current)
+        val rendered = renderInlineGroup(listOf(node), options, seamGlue, seamUnderscore)
         if (acc.current.length + rendered.length <= maxLength) {
             acc.appendRendered(rendered)
         } else {
