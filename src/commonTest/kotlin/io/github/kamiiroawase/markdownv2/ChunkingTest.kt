@@ -79,8 +79,7 @@ class ChunkingTest {
     fun chunkedCommentOnlyHeadingKeepsTheVisibleRender() {
         // Every line group renders to nothing (a lone comment), so the lead is the whole
         // visible output: it used to be dropped outright — an empty chunk list for a
-        // non-empty render (the JS/Wasm parse defect keeps this shape on JVM/Native only)
-        if (!htmlParsingSupported) return
+        // non-empty render
         val pieces = MarkdownV2.renderChunked("###### <!-- c -->", 10)
         assertTrue(pieces.isNotEmpty(), "visible render produced no chunks")
         pieces.forEach { piece -> assertTrue(piece.length <= 10, "over-long piece: $piece") }
@@ -540,7 +539,7 @@ class ChunkingTest {
         // hand-picked ones (the sibling sweep in TruncationTest covers the render side;
         // the sweep starts at 2 because 1 and below return the full render as a single
         // chunk by contract)
-        for (content in sweepContents(htmlParsingSupported)) {
+        for (content in sweepContents()) {
             for (length in 2..96) {
                 for (chunk in MarkdownV2.renderChunked(content, length)) {
                     assertTrue(

@@ -14,7 +14,6 @@ import kotlin.test.assertTrue
 class UnderscoreGlueTest {
     @Test
     fun siblingTagsKeepTheFirstEntityAndMergeTheContent() {
-        if (!htmlParsingSupported) return
         // The second entity degrades: its content glues into the first's span, which
         // renders both stretches in the first's style
         assertEquals("_a_b", MarkdownV2.render("<i>a</i><i>b</i>"))
@@ -32,7 +31,6 @@ class UnderscoreGlueTest {
 
     @Test
     fun nestedUnderscoreFamilyDegradesTheInnerOpener() {
-        if (!htmlParsingSupported) return
         // Two openers with no content between re-read as "___": the inner degrades
         assertEquals("__x__", MarkdownV2.render("<u><i>x</i></u>"))
         assertEquals("_x_", MarkdownV2.render("<i><u>x</u></i>"))
@@ -48,7 +46,6 @@ class UnderscoreGlueTest {
 
     @Test
     fun emptyUnderscoreEntitiesRewind() {
-        if (!htmlParsingSupported) return
         // An empty pair would complete into "__" — which reads as an opened underline:
         // the opener rewinds instead, exactly like the empty code pair
         assertEquals("", MarkdownV2.render("<i></i>"))
@@ -69,7 +66,6 @@ class UnderscoreGlueTest {
 
     @Test
     fun unclosedAdjacentTagsCompleteWithoutGlue() {
-        if (!htmlParsingSupported) return
         // Unclosed tags complete at output time; the completions must respect the glue
         // rule too (pre-fix "<i>a<i>b" completed into "_a_b__" — an unterminated
         // underline)
@@ -80,7 +76,6 @@ class UnderscoreGlueTest {
 
     @Test
     fun glueShapesParseAcrossTruncationBudgets() {
-        if (!htmlParsingSupported) return
         val contents =
             listOf(
                 "<i>a</i><i>b</i>",
@@ -105,7 +100,6 @@ class UnderscoreGlueTest {
 
     @Test
     fun glueShapesParseAcrossChunkSeams() {
-        if (!htmlParsingSupported) return
         // The per-node chunk seam renders each inline node through a fresh visitor, so
         // an emphasis atom completing at one seam edge used to glue onto the next
         // atom's opener (pre-fix pieces like "__b" — an opened underline with no
@@ -128,7 +122,6 @@ class UnderscoreGlueTest {
 
     @Test
     fun degradedOutputIsLosslessInPlainText() {
-        if (!htmlParsingSupported) return
         // The degradation drops formatting, never text
         assertEquals("ab", MarkdownV2.toPlainText(MarkdownV2.render("<i>a</i><i>b</i>")))
         assertEquals("ab", MarkdownV2.toPlainText(MarkdownV2.render("<u>a<i>b</i></u>")))

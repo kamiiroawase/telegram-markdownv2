@@ -35,8 +35,7 @@ import kotlin.test.assertTrue
  * caps) and the linear-scan regressions. Behavior-level tests: feed input, assert the
  * exact rendered output. Tests suffixed `ViaAst` build the AST by hand to reach shapes
  * the CommonMark parser cannot produce from text (null literals, foreign children, deep
- * chains, lone surrogates). HTML-parsing tests are guarded by [htmlParsingSupported]
- * because of the upstream JS/Wasm parser defect. Test data is ASCII wherever possible;
+ * chains, lone surrogates). Test data is ASCII wherever possible;
  * non-ASCII appears only where the behavior under test is itself Unicode-specific
  * (display width, surrogate pairs).
  */
@@ -145,15 +144,11 @@ class RenderTest {
 
     @Test
     fun htmlBlockRendersAsCodeBlock() {
-        if (!htmlParsingSupported) return
-
         assertEquals("```\n<div>\nhello\n</div>\n```", MarkdownV2.render("<div>\nhello\n</div>"))
     }
 
     @Test
     fun htmlCommentBlockIsDropped() {
-        if (!htmlParsingSupported) return
-
         assertEquals("", MarkdownV2.render("<!-- note -->"))
         assertEquals("text", MarkdownV2.render("<!-- note -->\n\ntext"))
     }
@@ -164,9 +159,7 @@ class RenderTest {
         // must not double the blank line between its neighbors (pre-fix render gave
         // "A\n\n\n\nC" where renderChunked's blank skip gave "A\n\nC")
         assertEquals("A\n\nC", MarkdownV2.render("A\n\n![]()\n\nC"))
-        if (htmlParsingSupported) {
-            assertEquals("A\n\nC", MarkdownV2.render("A\n\n<!-- c -->\n\nC"))
-        }
+        assertEquals("A\n\nC", MarkdownV2.render("A\n\n<!-- c -->\n\nC"))
     }
 
     @Test
@@ -333,15 +326,11 @@ class RenderTest {
 
     @Test
     fun unclosedCodeEntityClosesBeforeHtmlBlock() {
-        if (!htmlParsingSupported) return
-
         assertEquals("a `x`\n\n```\n<div>\ny\n</div>\n```", MarkdownV2.render("a <kbd>x\n\n<div>\ny\n</div>"))
     }
 
     @Test
     fun htmlAnchorMapsToLink() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[t](https://x.com/a(b\\))", MarkdownV2.render("<a href=\"https://x.com/a(b)\">t</a>"))
     }
 
@@ -443,8 +432,6 @@ class RenderTest {
 
     @Test
     fun nestedAnchorInnerIsRenderedAsLiteral() {
-        if (!htmlParsingSupported) return
-
         // Telegram links cannot nest: the anchor nested in emphasis inside the Markdown
         // link's label escapes literally (both its tags), the outer link stays the only
         // link entity — distinct from the emphasis-free shapes covered by the sibling
@@ -457,8 +444,6 @@ class RenderTest {
 
     @Test
     fun unclosedAnchorInsideLinkTextEscapesLiterally() {
-        if (!htmlParsingSupported) return
-
         // The anchor must not become a second link entity inside the Markdown link's label
         assertEquals(
             """[<a href\="u1"\>x](u2)""",
@@ -468,8 +453,6 @@ class RenderTest {
 
     @Test
     fun closedAnchorInsideLinkTextEscapesLiterally() {
-        if (!htmlParsingSupported) return
-
         // '<' and '/' are not MarkdownV2 special characters — only '=' and '>' escape
         assertEquals(
             """[<a href\="u1"\>x</a\>](u2)""",
@@ -479,8 +462,6 @@ class RenderTest {
 
     @Test
     fun imageInsideAnchorDegradesToAltText() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[alt](u)", MarkdownV2.render("<a href=\"u\">![alt](i)</a>"))
     }
 
@@ -520,36 +501,26 @@ class RenderTest {
 
     @Test
     fun htmlAnchorWithoutHrefRendersTextOnly() {
-        if (!htmlParsingSupported) return
-
         assertEquals("t", MarkdownV2.render("<a>t</a>"))
     }
 
     @Test
     fun htmlAnchorUppercaseHrefAttrIsRecognized() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[x](u)", MarkdownV2.render("<A HREF=\"u\">x</A>"))
     }
 
     @Test
     fun htmlAnchorMixedCaseHrefAttrIsRecognized() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[x](u)", MarkdownV2.render("<a HrEf='u'>x</a>"))
     }
 
     @Test
     fun htmlAnchorUnquotedHrefValueIsRecognized() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[x](https://e.com/a)", MarkdownV2.render("<a href=https://e.com/a>x</a>"))
     }
 
     @Test
     fun quotedGreaterThanSignInHrefValueStaysInTheUrl() {
-        if (!htmlParsingSupported) return
-
         // Per CommonMark/HTML5 a quoted attribute value may contain '>'; the tag scan must
         // not close on it (pre-fix the whole anchor degraded to literal escaped text)
         assertEquals("[t](a>b)", MarkdownV2.render("<a href=\"a>b\">t</a>"))
@@ -558,8 +529,6 @@ class RenderTest {
 
     @Test
     fun quotedGreaterThanSignInNonHrefAttributeStillParses() {
-        if (!htmlParsingSupported) return
-
         // The '>' lives inside a quoted value: the tag still opens, and a '/' inside a
         // quoted value still does not read as self-closing
         assertEquals("*t*", MarkdownV2.render("<b data-x=\"a>b\">t</b>"))
@@ -568,8 +537,6 @@ class RenderTest {
 
     @Test
     fun htmlAnchorDataHrefAttrDoesNotShadowHref() {
-        if (!htmlParsingSupported) return
-
         // The href= inside data-href= must not be mistaken for the real attribute
         assertEquals("[x](real)", MarkdownV2.render("<a data-href=\"fake\" href=\"real\">x</a>"))
     }
@@ -597,8 +564,6 @@ class RenderTest {
 
     @Test
     fun htmlAnchorHrefNamedEntitiesAreDecoded() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[x](a&b)", MarkdownV2.render("<a href=\"a&amp;b\">x</a>"))
         assertEquals("[x](a<b)", MarkdownV2.render("<a href=\"a&lt;b\">x</a>"))
         assertEquals("[x](a>b)", MarkdownV2.render("<a href=\"a&gt;b\">x</a>"))
@@ -608,8 +573,6 @@ class RenderTest {
 
     @Test
     fun htmlAnchorHrefCharRefsAreDecoded() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[x](a&b)", MarkdownV2.render("<a href=\"a&#38;b\">x</a>"))
         assertEquals("[x](a&b)", MarkdownV2.render("<a href=\"a&#x26;b\">x</a>"))
         assertEquals("[x](a&b)", MarkdownV2.render("<a href=\"a&#X26;b\">x</a>"))
@@ -618,8 +581,6 @@ class RenderTest {
 
     @Test
     fun htmlAnchorHrefMalformedEntitiesStayLiteral() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[x](a&b)", MarkdownV2.render("<a href=\"a&b\">x</a>")) // no semicolon
         assertEquals("[x](a&nope;b)", MarkdownV2.render("<a href=\"a&nope;b\">x</a>")) // unknown name
         assertEquals("[x](&;)", MarkdownV2.render("<a href=\"&;\">x</a>")) // empty body
@@ -777,7 +738,6 @@ class RenderTest {
         // empty)
         assertEquals("u", MarkdownV2.render("[ ](u)"))
         assertEquals("u", MarkdownV2.render("![ ](u)"))
-        if (!htmlParsingSupported) return
 
         // Leading text keeps the anchor inline — a bare tag line parses as an HTML block
         assertEquals("xu", MarkdownV2.render("x<a href=\"u\"> </a>"))
@@ -785,8 +745,6 @@ class RenderTest {
 
     @Test
     fun unclosedHtmlEmphasisInsideLinkLabelClosesBeforeLink() {
-        if (!htmlParsingSupported) return
-
         // Left open past ](url) the emphasis would cross the link entity into invalid
         // output, and htmlCodeDepth would leak code-escaping onto the text after the link
         assertEquals("[*x*](u)", MarkdownV2.render("[<b>x](u)"))
@@ -795,8 +753,6 @@ class RenderTest {
 
     @Test
     fun unclosedAnchorInsideLinkLabelDoesNotSuppressLaterLinks() {
-        if (!htmlParsingSupported) return
-
         // The nested-literal sentinel left by the unclosed inner anchor used to degrade
         // every following link in the document to plain text
         assertEquals("[x <a\\>y](u) and [z](t)", MarkdownV2.render("[x <a>y](u) and [z](t)"))
@@ -804,8 +760,6 @@ class RenderTest {
 
     @Test
     fun emptyAnchorLabelDegradesToBareUrl() {
-        if (!htmlParsingSupported) return
-
         // The HTML-anchor counterpart of emptyLinkTextDegradesToBareUrl, closed and
         // unclosed alike: the label rewinds, the destination survives as escaped text.
         // Leading text keeps the tags inline — a bare tag line parses as an HTML block
@@ -815,8 +769,6 @@ class RenderTest {
 
     @Test
     fun markdownCodeInsideHtmlCodeEntityEscapesBackticks() {
-        if (!htmlParsingSupported) return
-
         // Raw backticks here would pair with the entity's own delimiters and garble the
         // code span boundaries
         assertEquals("`a \\`b\\` c`", MarkdownV2.render("<kbd>a `b` c</kbd>"))
@@ -824,8 +776,6 @@ class RenderTest {
 
     @Test
     fun unclosedHtmlCodeEntityKeepsTrailingWhitespace() {
-        if (!htmlParsingSupported) return
-
         // The comment tag renders to nothing, so the code entity's content runs to the
         // paragraph tail — "x " with its trailing space. Output-time completion used to
         // trimEnd before the closer and eat that space as block-separator junk. Spaces
@@ -860,8 +810,6 @@ class RenderTest {
 
     @Test
     fun unclosedNestedHtmlEmphasisCompletesInOrder() {
-        if (!htmlParsingSupported) return
-
         assertEquals("*_x_*", MarkdownV2.render("<b><i>x"))
     }
 
@@ -878,8 +826,6 @@ class RenderTest {
 
     @Test
     fun closingTagNotMatchingStackTopIsLiteral() {
-        if (!htmlParsingSupported) return
-
         assertEquals("_x</b\\>y_", MarkdownV2.render("<i>x</b>y</i>"))
     }
 
@@ -898,7 +844,6 @@ class RenderTest {
         // Pre-fix the anchor completed at output time and its ](url) crossed the
         // emphasis closer into the label (`_[x_](u)`-shaped) — an entity nesting Telegram
         // rejects; now it closes inside the emphasis, properly nested
-        if (!htmlParsingSupported) return
 
         assertEquals("_[x](u)_", MarkdownV2.render("*<a href=\"u\">x*"))
         assertEquals("_u_", MarkdownV2.render("*<a href=\"u\">*"))
@@ -910,7 +855,6 @@ class RenderTest {
         // anchor opened after the bold closes first, and vice versa — pre-fix output()
         // always emitted emphasis closers before link closers, crossing `<b><a href>`-shaped
         // stacks into `*[x*](u)`
-        if (!htmlParsingSupported) return
 
         assertEquals("*[x](u)*", MarkdownV2.render("<b><a href=\"u\">x"))
         assertEquals("[*x*](u)", MarkdownV2.render("<a href=\"u\"><b>x"))
@@ -922,7 +866,6 @@ class RenderTest {
         // still-open anchor (or an anchor closer crossing a still-open tag) used to pop
         // across stacks and emit crossed entities like `[*x](u)*`; now the tag renders
         // literally and the crossed entity completes later, innermost first
-        if (!htmlParsingSupported) return
 
         assertEquals("[*x</a\\>*](u)", MarkdownV2.render("<a href=\"u\"><b>x</a>"))
         assertEquals("*[x</b\\>](u)*", MarkdownV2.render("<b><a href=\"u\">x</b>"))
@@ -935,43 +878,31 @@ class RenderTest {
 
     @Test
     fun htmlTagWithAttributesMapsToEntity() {
-        if (!htmlParsingSupported) return
-
         assertEquals("*t*", MarkdownV2.render("<b class=\"x\">t</b>"))
     }
 
     @Test
     fun unclosedHtmlAnchorIsCompleted() {
-        if (!htmlParsingSupported) return
-
         assertEquals("a [b](u)", MarkdownV2.render("a <a href=\"u\">b"))
     }
 
     @Test
     fun singleQuotedHrefMapsToLink() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[t](u)", MarkdownV2.render("<a href='u'>t</a>"))
     }
 
     @Test
     fun emptyHrefRendersTextOnly() {
-        if (!htmlParsingSupported) return
-
         assertEquals("t", MarkdownV2.render("<a href=\"\">t</a>"))
     }
 
     @Test
     fun extraClosingAnchorIsLiteral() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[x](o)</a\\>", MarkdownV2.render("<a href=\"o\">x</a></a>"))
     }
 
     @Test
     fun anchorWithoutHrefInsideAnchorStaysLiteral() {
-        if (!htmlParsingSupported) return
-
         assertEquals("[x<a\\>y</a\\>z](o)", MarkdownV2.render("<a href=\"o\">x<a>y</a>z</a>"))
     }
 
@@ -1156,15 +1087,11 @@ class RenderTest {
 
     @Test
     fun anchorSelfClosingIsLiteral() {
-        if (!htmlParsingSupported) return
-
         assertEquals("<a href\\=\"u\"/\\>x", MarkdownV2.render("<a href=\"u\"/>x"))
     }
 
     @Test
     fun anchorUnquotedHrefTrailingSlashIsNotSelfClosing() {
-        if (!htmlParsingSupported) return
-
         // HTML5: an unquoted attribute value ends only at whitespace or >, so the slash
         // belongs to the URL — the anchor links, and the URL keeps its trailing slash
         assertEquals("[x](http://e.com/)", MarkdownV2.render("<a href=http://e.com/>x</a>"))
@@ -1269,15 +1196,11 @@ class RenderTest {
 
     @Test
     fun unclosedHreflessAnchorIsFilteredInCompletion() {
-        if (!htmlParsingSupported) return
-
         assertEquals("prefix t", MarkdownV2.render("prefix <a>t"))
     }
 
     @Test
     fun unclosedNestedAnchorIsFilteredInCompletion() {
-        if (!htmlParsingSupported) return
-
         assertEquals("q [x<a\\>y](o)", MarkdownV2.render("q <a href=\"o\">x<a>y"))
     }
 

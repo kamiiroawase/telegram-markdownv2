@@ -11,12 +11,6 @@ import org.commonmark.parser.Parser
  * CommonMark (incl. GFM tables and strikethrough) to Telegram MarkdownV2 converter
  * with structure-preserving truncation.
  *
- * Platform warning — Kotlin/JS and Kotlin/Wasm: the upstream commonmark-kotlin parser
- * throws on these platforms for inputs containing an HTML block, an `<a href>` anchor,
- * or any document that opens with an HTML tag (its `Regex("]]>")` is invalid in the JS
- * RegExp engine). Wrap calls in try/catch with a plain-text fallback there, or pre-strip
- * HTML; mid-paragraph inline tags such as `<b>` or `<br>` are not affected.
- *
  * Thread safety: every member is safe to call concurrently from multiple threads. The
  * object holds no mutable state, and [defaultParser] — a commonmark parser — keeps all
  * parse-time state inside each parse call (a fresh document parser per invocation), so
@@ -68,10 +62,6 @@ public object MarkdownV2 {
      * Telegram rejects (empty URL, or a label that renders to nothing) degrade to the
      * label text or the bare escaped URL. Rendering knobs that have no single right
      * answer (table cell cap, character display width) live in [options].
-     *
-     * On Kotlin/JS and Kotlin/Wasm this call throws for inputs the upstream parser cannot
-     * handle (HTML blocks, `<a href>` anchors, documents opening with an HTML tag — see
-     * the object-level platform warning); catch and fall back to plain text there.
      */
     public fun render(
         content: String,
@@ -167,10 +157,6 @@ public object MarkdownV2 {
      * 1 or less returns the full render as a single chunk (chunking needs room for at
      * least one escaped character — two chars), and content that renders to nothing
      * yields an empty list.
-     *
-     * On Kotlin/JS and Kotlin/Wasm this call throws for inputs the upstream parser cannot
-     * handle (HTML blocks, `<a href>` anchors, documents opening with an HTML tag — see
-     * the object-level platform warning); catch and fall back to plain text there.
      */
     public fun renderChunked(
         content: String,

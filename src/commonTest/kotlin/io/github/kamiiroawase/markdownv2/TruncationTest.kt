@@ -228,8 +228,6 @@ class TruncationTest {
 
     @Test
     fun longHtmlBlockTruncatesAsClosedCodeBlock() {
-        if (!htmlParsingSupported) return
-
         val content = "<div>\n" + "x".repeat(5000) + "\n</div>"
         val result = MarkdownV2.render(content, maxMessageLength)
         assertTrue(result.length <= maxMessageLength)
@@ -323,8 +321,6 @@ class TruncationTest {
 
     @Test
     fun htmlBlockPlainTextFallbackKeepsContent() {
-        if (!htmlParsingSupported) return
-
         // The plain-text fallback must carry the HTML block's literal, like it does for
         // fenced code blocks
         assertEquals("<div\\>…", MarkdownV2.render("<div>\nhello world\n</div>", 7))
@@ -684,7 +680,7 @@ class TruncationTest {
         // breaks at specific boundary lengths, which a sweep crosses. Pre-fix the
         // fence-wrapped line check forgot the newline joining the line, and render
         // returned maxLength + 1 characters at those lengths (the table shape at 23, say)
-        for (content in sweepContents(htmlParsingSupported)) {
+        for (content in sweepContents()) {
             for (length in 1..96) {
                 val result = MarkdownV2.render(content, length)
                 assertTrue(

@@ -219,8 +219,7 @@ internal fun removeEscapes(text: String): String =
 // fence-wrapped kinds, lists and nesting, quotes, headings, paragraph inline nodes,
 // surrogate pairs) at a range of limits. The exact-output tests pin hand-picked lengths;
 // the budget arithmetic only breaks at specific boundary lengths, which a sweep crosses.
-// The HTML-block shape joins only where the platform parses HTML (htmlParsingSupported).
-internal fun sweepContents(htmlParsingSupported: Boolean): List<String> =
+internal fun sweepContents(): List<String> =
     buildList {
         add("```\nabcdefghij\nklmnopqrst\nuvwx\n```")
         add("    indented code aaaa\n    more lines bbbb\n    third cccc")
@@ -253,11 +252,11 @@ internal fun sweepContents(htmlParsingSupported: Boolean): List<String> =
         add("###### ![]()")
         add("para **bold** text [link](https://example.com/path) `code` more text to push length")
         add("😀😀😀 *bold 😀* `code 😀` [😀 link](https://example.com/x)")
-        if (htmlParsingSupported) add("<div>\nblock html content\nmore html\n</div>")
-        if (htmlParsingSupported) add("###### <!-- c -->")
+        add("<div>\nblock html content\nmore html\n</div>")
+        add("###### <!-- c -->")
         // Glued underscore-family emphasis degrades (Visitor.atUnderscoreGlue): sibling
         // tags, nested tags and empty pairs, so the sweep crosses those degradation
         // budgets alongside the plain shapes
-        if (htmlParsingSupported) add("<i>aaaa</i><i>bbbb</i> cccc <u>dddd</u><u>eeee</u>")
-        if (htmlParsingSupported) add("<u>aaaa<i>bbbb</i></u> cccc <i></i> dddd")
+        add("<i>aaaa</i><i>bbbb</i> cccc <u>dddd</u><u>eeee</u>")
+        add("<u>aaaa<i>bbbb</i></u> cccc <i></i> dddd")
     }

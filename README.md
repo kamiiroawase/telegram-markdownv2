@@ -38,8 +38,6 @@ val fallback = MarkdownV2.toPlainText(rejectedPart)                    // 被拒
 - 截断与分片保结构：代码围栏闭合、未闭合实体补全、引用与列表前缀逐行保留，绝不劈开转义序列和代理对；结构化内容完全放不下时回退为转义纯文本
 - 需要更多 Markdown 扩展（footnotes、autolink 等）时在 `MarkdownV2.defaultExtensions` 之上传入自建 `Parser`；未知扩展节点按纯内容遍历，不崩溃
 
-> ⚠️ **JS/Wasm 平台注意**：上游 commonmark-kotlin 在这两个平台无法解析 HTML——输入含 HTML 块、`<a href>` 锚点或以 HTML 标签开头时 `render`/`renderChunked` 会直接抛异常，务必 try/catch 兜底（捕获后按纯文本发送）或预先滤除 HTML；段落中间的 `<b>`、`<br>` 等行内标签不受影响。
-
 ## 已知限制
 
 - 解析后端与 commonmark-java 的行为差异：HTML 块识别较弱（`<!-- -->`、`<!DOCTYPE>` 按段落内联处理）；强调内部的闭合 HTML 标签（如 `*a<b>x</b>*` 中的 `</b>`）不被识别为行内 HTML
@@ -58,7 +56,7 @@ cd telegram-markdownv2
 ./gradlew benchmark    # 性能基准：常规消息 ~0.1ms 量级，百万字符 ~10ms；发版时 CI 复跑输出附在 GitHub Release
 ```
 
-321 个行为级测试（输入/输出断言）；其中 49 个依赖 HTML 解析，在 JS/Wasm 上因上游缺陷静默跳过。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
+321 个行为级测试（输入/输出断言），全部平台运行。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
 
 ## 许可
 

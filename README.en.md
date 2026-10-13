@@ -39,8 +39,6 @@ val fallback = MarkdownV2.toPlainText(rejectedPart)                    // de-for
 - Truncation and chunking preserve structure: code fences close, unclosed entities complete, quote and list prefixes survive line by line, escape sequences and surrogate pairs never split; when nothing structural fits, the fallback is escaped plain text
 - Pass a custom `Parser` built on top of `MarkdownV2.defaultExtensions` for more Markdown extensions (footnotes, autolink, …); unknown extension nodes traverse as plain content without crashing
 
-> ⚠️ **Kotlin/JS and Kotlin/Wasm**: the upstream commonmark-kotlin parser cannot handle HTML on these platforms — inputs containing an HTML block, an `<a href>` anchor, or opening with an HTML tag make `render`/`renderChunked` throw. Wrap calls in try/catch with a plain-text fallback, or pre-strip HTML; mid-paragraph inline tags such as `<b>` or `<br>` are unaffected.
-
 ## Known limitations
 
 - Parser differences vs commonmark-java: weaker HTML block detection (`<!-- -->`, `<!DOCTYPE>` treated as inline paragraph content); a closing HTML tag inside emphasis (the `</b>` in `*a<b>x</b>*`) is not recognized as inline HTML
@@ -59,7 +57,7 @@ cd telegram-markdownv2
 ./gradlew benchmark    # perf benchmark: typical messages ~0.1 ms, 1M characters ~10 ms; CI re-runs attach the output to every GitHub Release
 ```
 
-321 behavior-level tests (input/output assertions); 49 of them depend on HTML parsing and silently skip on JS/Wasm due to the upstream defect. Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
+321 behavior-level tests (input/output assertions), running on every platform. Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
 
 ## License
 
