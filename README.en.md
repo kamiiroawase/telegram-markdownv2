@@ -47,6 +47,15 @@ val htmlLiteral = TelegramHtml.escape(userInput)                             // 
 val message = TelegramEntities.render(reply)          // EntityText(text = plain display text, entities = ranges)
 sendMessage(text = message.text, entities = message.entitiesJson())
 val messageParts = TelegramEntities.renderChunked(reply)   // same lossless chunking, offsets re-based per piece
+
+// Chunk decoration: a header/footer on every piece (page counters, signatures) —
+// all three entry points carry the overload
+val pages = MarkdownV2.renderChunked(
+    reply,
+    decoration = ChunkDecoration(header = { i, n -> "Part ${i + 1}/$n
+
+" }),
+)
 ```
 
 - All 19 escapable characters (Telegram's 18 official special characters plus the backslash) escaped; inline code / code blocks / link URLs follow their own escaping rules
@@ -69,6 +78,79 @@ val messageParts = TelegramEntities.renderChunked(reply)   // same lossless chun
 - Truncation clamps ranges to the surviving text (a straddling range shortens, a fully-beyond one drops); chunking re-establishes structural formatting per piece (a split quote carries a blockquote range on every piece) while an inline range straddling a seam stays in the piece holding its start — the same seam discipline the string formats apply
 - Chunking needs room for one surrogate pair — 2 characters (`TelegramEntities.MIN_CHUNK_LENGTH`)
 
+## Integration (ktgram)
+
+Wiring the three formats into [ktgram](https://github.com/vendelieu/telegram-bot)
+(`eu.vendeli:telegram-bot`) is a matter of `options { parseMode = ... }` or
+`entities(...)` on its actions (versions and DSL details per ktgram's docs):
+
+```kotlin
+import eu.vendeli.tgbot.api.message.sendMessage
+import eu.vendeli.tgbot.types.component.ParseMode
+import eu.vendeli.tgbot.types.msg.EntityType
+import eu.vendeli.tgbot.types.msg.MessageEntity
+
+// HTML: parse_mode = HTML
+sendMessage(TelegramHtml.render(reply))
+    .options { parseMode = ParseMode.HTML }
+    .send(user, bot)
+
+// entities: no parse_mode, ranges passed straight through (fields match the Bot API)
+fun MessageEntity.toKtgram() = MessageEntity(
+    type = when (type) {
+        MessageEntityType.BOLD -> EntityType.Bold
+        MessageEntityType.ITALIC -> EntityType.Italic
+        MessageEntityType.UNDERLINE -> EntityType.Underline
+        MessageEntityType.STRIKETHROUGH -> EntityType.Strikethrough
+        MessageEntityType.SPOILER -> EntityType.Spoiler
+        MessageEntityType.CODE -> EntityType.Code
+        MessageEntityType.PRE -> EntityType.Pre
+        MessageEntityType.TEXT_LINK -> EntityType.TextLink
+        MessageEntityType.BLOCKQUOTE -> EntityType.Blockquote
+        MessageEntityType.CUSTOM_EMOJI -> EntityType.CustomEmoji
+    },
+    offset = offset,
+    length = length,
+    url = url,
+    language = language,
+    customEmojiId = customEmojiId,
+)
+
+val formatted = TelegramEntities.render(reply)
+sendMessage(formatted.text)
+    .entities(formatted.entities.map { it.toKtgram() })
+    .send(user, bot)
+```
+
+**The pagination-edit pattern**: combine chunking + decoration with `editMessageText`
+to page through one message in place instead of sending a burst — send page one, keep
+the returned `Message`, edit it on navigation:
+
+```kotlin
+val pages = TelegramEntities.renderChunked(
+    reply,
+    decoration = ChunkDecoration(footer = { i, n -> if (n > 1) "
+
+Part ${i + 1}/$n" else "" }),
+)
+
+var page = 0
+val first = sendMessage(pages[0].text)
+    .entities(pages[0].entities.map { it.toKtgram() })
+    .sendReturning(user, bot)
+    .getOrNull() ?: return
+
+// in the pager button callback:
+editMessageText(first.messageId, pages[++page].text)
+    .entities(pages[page].entities.map { it.toKtgram() })
+    .send(user, bot)
+```
+
+Any other framework works the same way: every Bot API client that can set `parse_mode`
+or pass `entities` (ktor, a bare REST client, ...) consumes the three entry points'
+output directly — `entitiesJson()` is the ready-made value for the request body's
+`entities` field.
+
 ## Known limitations
 
 - Parser differences vs commonmark-java: weaker HTML block detection (`<!-- -->`, `<!DOCTYPE>` treated as inline paragraph content); a closing HTML tag inside emphasis (the `</b>` in `*a<b>x</b>*`) is not recognized as inline HTML
@@ -89,7 +171,9 @@ cd telegram-markdownv2
 ./gradlew benchmark    # perf benchmark: typical messages ~0.1 ms, 1M characters ~10 ms; CI re-runs attach the output to every GitHub Release
 ```
 
-537 behavior-level tests (input/output assertions), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
+The API reference (Dokka) deploys to [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/) on every main push.
+
+547 behavior-level tests (input/output assertions) plus a seeded random-document property test (150 seeds, a generator over random combinations of emphasis/code/links/quotes/lists/task lists/tables/footnotes/autolinks/raw HTML/emoji asserting every invariant for all three formats — it is what caught the two line-initial '>' defects below), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
 
 ## License
 

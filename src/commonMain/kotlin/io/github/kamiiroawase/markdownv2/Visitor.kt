@@ -826,9 +826,26 @@ internal class Visitor(
             is FootnoteDefinition -> {
                 // The definition keeps its place in the document (Telegram message text
                 // is linear): label spelled back out, content rendered as the blocks it
-                // wraps — the same visible shape the unextended parse shows
-                sb.append(escapeText("[^${customBlock.label}]: "))
-                visitChildren(customBlock)
+                // wraps. The content renders in the in-list-item context: a quote's '>'
+                // markers must stay line-initial, and the label prefix would push them
+                // mid-line — the same unplaceable position a list marker creates — so
+                // quotes inside the definition degrade to their content, exactly the
+                // visible text the unextended parse shows
+                val body =
+                    if (depth + 1 >= MAX_RENDER_DEPTH) {
+                        val plain = StringBuilder()
+                        appendPlainText(plain, customBlock)
+                        plain.toString().trimEnd('\n')
+                    } else {
+                        val visitor = Visitor(depth + 1, options, inListItem = true)
+                        visitor.visitChildren(customBlock)
+                        visitor.output().trimEnd('\n')
+                    }
+                if (body.isNotEmpty()) {
+                    sb.append(escapeText("[^${customBlock.label}]: "))
+                    sb.append(body)
+                    sb.append("\n\n")
+                }
             }
 
             else -> {

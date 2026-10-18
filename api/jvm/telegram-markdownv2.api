@@ -1,3 +1,11 @@
+public final class io/github/kamiiroawase/markdownv2/ChunkDecoration {
+	public fun <init> ()V
+	public fun <init> (Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;)V
+	public synthetic fun <init> (Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getFooter ()Lkotlin/jvm/functions/Function2;
+	public final fun getHeader ()Lkotlin/jvm/functions/Function2;
+}
+
 public final class io/github/kamiiroawase/markdownv2/EntityText {
 	public static final field Companion Lio/github/kamiiroawase/markdownv2/EntityText$Companion;
 	public fun <init> (Ljava/lang/String;Ljava/util/List;)V
@@ -28,9 +36,13 @@ public final class io/github/kamiiroawase/markdownv2/MarkdownV2 {
 	public static synthetic fun render$default (Lio/github/kamiiroawase/markdownv2/MarkdownV2;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/lang/String;
 	public static synthetic fun render$default (Lio/github/kamiiroawase/markdownv2/MarkdownV2;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/lang/String;
 	public final fun renderChunked (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public final fun renderChunked (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;)Ljava/util/List;
 	public final fun renderChunked (Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public final fun renderChunked (Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;)Ljava/util/List;
 	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/MarkdownV2;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/MarkdownV2;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;ILjava/lang/Object;)Ljava/util/List;
 	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/MarkdownV2;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/MarkdownV2;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;ILjava/lang/Object;)Ljava/util/List;
 	public final fun toPlainText (Ljava/lang/String;)Ljava/lang/String;
 }
 
@@ -105,9 +117,13 @@ public final class io/github/kamiiroawase/markdownv2/TelegramEntities {
 	public static synthetic fun render$default (Lio/github/kamiiroawase/markdownv2/TelegramEntities;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Lio/github/kamiiroawase/markdownv2/EntityText;
 	public static synthetic fun render$default (Lio/github/kamiiroawase/markdownv2/TelegramEntities;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Lio/github/kamiiroawase/markdownv2/EntityText;
 	public final fun renderChunked (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public final fun renderChunked (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;)Ljava/util/List;
 	public final fun renderChunked (Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public final fun renderChunked (Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;)Ljava/util/List;
 	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramEntities;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramEntities;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;ILjava/lang/Object;)Ljava/util/List;
 	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramEntities;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramEntities;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;ILjava/lang/Object;)Ljava/util/List;
 }
 
 public final class io/github/kamiiroawase/markdownv2/TelegramHtml {
@@ -119,8 +135,12 @@ public final class io/github/kamiiroawase/markdownv2/TelegramHtml {
 	public static synthetic fun render$default (Lio/github/kamiiroawase/markdownv2/TelegramHtml;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/lang/String;
 	public static synthetic fun render$default (Lio/github/kamiiroawase/markdownv2/TelegramHtml;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/lang/String;
 	public final fun renderChunked (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public final fun renderChunked (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;)Ljava/util/List;
 	public final fun renderChunked (Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public final fun renderChunked (Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;)Ljava/util/List;
 	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramHtml;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramHtml;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;ILjava/lang/Object;)Ljava/util/List;
 	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramHtml;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramHtml;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;Lio/github/kamiiroawase/markdownv2/ChunkDecoration;ILjava/lang/Object;)Ljava/util/List;
 }
 

@@ -123,12 +123,21 @@ private fun shrink(
         node is FootnoteDefinition -> {
             // The definition shrinks as its label prefix plus its child block chain —
             // the label glues onto the first surviving block, the same shape the full
-            // render emits
+            // render emits. inListItem matches the full render: the prefix would push a
+            // quote's '>' markers off the line start, so quotes inside degrade
             val prefix = escapeText("[^${node.label}]: ")
             if (prefix.length >= budget) {
                 ""
             } else {
-                prefix + renderBlocks(node.firstChild, budget - prefix.length, depth, retriable, options)
+                prefix +
+                    renderBlocks(
+                        node.firstChild,
+                        budget - prefix.length,
+                        depth,
+                        retriable,
+                        options,
+                        inListItem = true,
+                    )
             }
         }
 

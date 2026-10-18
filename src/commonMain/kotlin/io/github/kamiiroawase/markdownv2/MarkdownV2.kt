@@ -207,6 +207,59 @@ public object MarkdownV2 {
     }
 
     /**
+     * The decorated twin of [renderChunked]: every chunk carries a [decoration] — page
+     * counters ("Part 2/5"), source links, bot signatures — while staying within
+     * [maxLength]. The header and footer receive the chunk's zero-based index and the
+     * total chunk count, so decorations that vary with the count itself re-chunk
+     * correctly: the engine reserves the widest decoration seen and re-splits until
+     * every decorated piece fits (see [decorateChunks]; one or two rounds in practice).
+     *
+     * The decoration strings insert verbatim — they are the caller's own markup, so
+     * special characters are the caller's to escape ([escape]), while a deliberate link
+     * entity goes through unescaped. A single chunk keeps its decoration (index 0, total
+     * 1); content that renders to nothing yields an empty list undecorated.
+     *
+     * @throws IllegalArgumentException when the decorations leave no room for content
+     * under [maxLength] (the undecorated overloads stay lenient here — this one is
+     * explicit about an impossible request)
+     */
+    public fun renderChunked(
+        content: String,
+        maxLength: Int = MAX_MESSAGE_LENGTH,
+        parser: Parser = defaultParser,
+        options: RenderOptions = RenderOptions(),
+        decoration: ChunkDecoration,
+    ): List<String> {
+        // See the render(content) overload: only a custom parser can return null here
+        val document = parser.parse(content) ?: return emptyList()
+        return renderChunked(document, maxLength, options, decoration)
+    }
+
+    /** The decorated [renderChunked] for an already-parsed document; see the string overload. */
+    public fun renderChunked(
+        document: Node,
+        maxLength: Int = MAX_MESSAGE_LENGTH,
+        options: RenderOptions = RenderOptions(),
+        decoration: ChunkDecoration,
+    ): List<String> =
+        decorateChunks(
+            maxLength,
+            minLimit = 2,
+            chunk = { limit ->
+                if (document is Document) {
+                    chunkBlocks(document.firstChild, limit, 0, options)
+                } else {
+                    chunkBlock(document, limit, 0, options)
+                }
+            },
+            decoration = decoration,
+            // A quote piece's leading '>' must stay line-initial; a header not ending in
+            // a newline would push it mid-line, so the engine separates them — the one
+            // grammar shape a decoration could otherwise break
+            separatorNeeded = { head, piece -> head.isNotEmpty() && !head.endsWith("\n") && piece.startsWith(">") },
+        )
+
+    /**
      * Last-resort fallback: extract plain text from the document, then escape and truncate it
      * char by char. Truncating the fully rendered result directly would split code fences /
      * entity markers into invalid MarkdownV2, while fully escaped plain text is always valid.

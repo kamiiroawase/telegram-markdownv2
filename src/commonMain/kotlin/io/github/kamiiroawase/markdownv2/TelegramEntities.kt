@@ -152,6 +152,49 @@ public object TelegramEntities {
     }
 
     /**
+     * The decorated twin of [renderChunked]: every chunk's text carries a [decoration] —
+     * page counters ("Part 2/5"), source links, bot signatures — while staying within
+     * [maxLength], with every entity range shifted past its chunk's header. The header
+     * and footer receive the chunk's zero-based index and the total chunk count;
+     * decorations that vary with the count itself re-chunk correctly (see
+     * [decorateEntityChunks]). The decoration strings insert verbatim as plain text —
+     * formatting on them is the caller's to add as extra entities.
+     *
+     * @throws IllegalArgumentException when the decorations leave no room for content
+     * under [maxLength] (the undecorated overloads stay lenient here)
+     */
+    public fun renderChunked(
+        content: String,
+        maxLength: Int = MarkdownV2.MAX_MESSAGE_LENGTH,
+        parser: Parser = MarkdownV2.defaultParser,
+        options: RenderOptions = RenderOptions(),
+        decoration: ChunkDecoration,
+    ): List<EntityText> {
+        val document = parser.parse(content) ?: return emptyList()
+        return renderChunked(document, maxLength, options, decoration)
+    }
+
+    /** The decorated [renderChunked] for an already-parsed document; see the string overload. */
+    public fun renderChunked(
+        document: Node,
+        maxLength: Int = MarkdownV2.MAX_MESSAGE_LENGTH,
+        options: RenderOptions = RenderOptions(),
+        decoration: ChunkDecoration,
+    ): List<EntityText> =
+        decorateEntityChunks(
+            maxLength,
+            minLimit = MIN_CHUNK_LENGTH,
+            chunk = { limit ->
+                if (document is Document) {
+                    chunkEntityBlocks(document.firstChild, limit, 0, options)
+                } else {
+                    chunkEntityBlock(document, limit, 0, options)
+                }
+            },
+            decoration = decoration,
+        )
+
+    /**
      * The smallest [maxLength] the entities chunker accepts before falling back to the
      * full render as a single chunk: one surrogate pair, the atomic minimum any valid
      * cut in plain text must be able to hold.

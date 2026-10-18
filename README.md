@@ -44,6 +44,14 @@ val htmlLiteral = TelegramHtml.escape(userInput)                             // 
 val message = TelegramEntities.render(reply)          // EntityText(text = 纯显示文本, entities = 区间列表)
 sendMessage(text = message.text, entities = message.entitiesJson())
 val messageParts = TelegramEntities.renderChunked(reply)   // 同样无损分片，每段实体的偏移按段重基准
+
+// 分片装饰：每片带头尾（页码 / 签名），三个入口都有对应重载
+val pages = MarkdownV2.renderChunked(
+    reply,
+    decoration = ChunkDecoration(header = { i, n -> "第 ${i + 1}/$n 页
+
+" }),
+)
 ```
 
 - 官方 18 个特殊字符加反斜杠共 19 个全量转义；行内代码 / 代码块 / 链接 URL 按各自规则转义
@@ -66,6 +74,72 @@ val messageParts = TelegramEntities.renderChunked(reply)   // 同样无损分片
 - 截断时区间钳制到幸存文本（跨界区间缩短、界外区间丢弃）；分片时结构化格式逐段重建（拆开的引用每段带自己的 blockquote 区间），跨缝的内联区间只留在持有其起点的段里——与两个字符串格式的接缝闭合纪律一致
 - 分片的下限是 2 字符（一个代理对，对应 `TelegramEntities.MIN_CHUNK_LENGTH`）
 
+## 集成（ktgram）
+
+[ktgram](https://github.com/vendelieu/telegram-bot)（`eu.vendeli:telegram-bot`）的 action 上可以直接接线三种格式——`options { parseMode = ... }` 或 `entities(...)`（版本与 DSL 细节以 ktgram 文档为准）：
+
+```kotlin
+import eu.vendeli.tgbot.api.message.sendMessage
+import eu.vendeli.tgbot.types.component.ParseMode
+import eu.vendeli.tgbot.types.msg.EntityType
+import eu.vendeli.tgbot.types.msg.MessageEntity
+
+// HTML：parse_mode = HTML
+sendMessage(TelegramHtml.render(reply))
+    .options { parseMode = ParseMode.HTML }
+    .send(user, bot)
+
+// entities：不发 parse_mode，直接传区间（字段与 Bot API 一致）
+fun MessageEntity.toKtgram() = MessageEntity(
+    type = when (type) {
+        MessageEntityType.BOLD -> EntityType.Bold
+        MessageEntityType.ITALIC -> EntityType.Italic
+        MessageEntityType.UNDERLINE -> EntityType.Underline
+        MessageEntityType.STRIKETHROUGH -> EntityType.Strikethrough
+        MessageEntityType.SPOILER -> EntityType.Spoiler
+        MessageEntityType.CODE -> EntityType.Code
+        MessageEntityType.PRE -> EntityType.Pre
+        MessageEntityType.TEXT_LINK -> EntityType.TextLink
+        MessageEntityType.BLOCKQUOTE -> EntityType.Blockquote
+        MessageEntityType.CUSTOM_EMOJI -> EntityType.CustomEmoji
+    },
+    offset = offset,
+    length = length,
+    url = url,
+    language = language,
+    customEmojiId = customEmojiId,
+)
+
+val formatted = TelegramEntities.render(reply)
+sendMessage(formatted.text)
+    .entities(formatted.entities.map { it.toKtgram() })
+    .send(user, bot)
+```
+
+**分页编辑模式**：把分片 + 装饰与 `editMessageText` 组合，一条消息原地翻页，而不是连发一串——先发第一页，把返回的 `Message` 存下，翻页时编辑它：
+
+```kotlin
+val pages = TelegramEntities.renderChunked(
+    reply,
+    decoration = ChunkDecoration(footer = { i, n -> if (n > 1) "
+
+第 ${i + 1}/$n 页" else "" }),
+)
+
+var page = 0
+val first = sendMessage(pages[0].text)
+    .entities(pages[0].entities.map { it.toKtgram() })
+    .sendReturning(user, bot)
+    .getOrNull() ?: return
+
+// 翻页按钮的回调里：
+editMessageText(first.messageId, pages[++page].text)
+    .entities(pages[page].entities.map { it.toKtgram() })
+    .send(user, bot)
+```
+
+其他框架同理：任何能设 `parse_mode` 或传 `entities` 的 Bot API 客户端（ktor、ktor-client 裸调 REST 也行）都可以直接消费这三个入口的输出——`entitiesJson()` 就是请求体里 `entities` 字段的现成值。
+
 ## 已知限制
 
 - 解析后端与 commonmark-java 的行为差异：HTML 块识别较弱（`<!-- -->`、`<!DOCTYPE>` 按段落内联处理）；强调内部的闭合 HTML 标签（如 `*a<b>x</b>*` 中的 `</b>`）不被识别为行内 HTML
@@ -86,7 +160,9 @@ cd telegram-markdownv2
 ./gradlew benchmark    # 性能基准：常规消息 ~0.1ms 量级，百万字符 ~10ms；发版时 CI 复跑输出附在 GitHub Release
 ```
 
-537 个行为级测试（输入/输出断言），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
+API 参考（Dokka）随 main 分支推送自动部署到 [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/)。
+
+547 个行为级测试（输入/输出断言）外加一个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量——正是它抓住了下述两个行首 `>` 缺陷），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
 
 ## 许可
 
