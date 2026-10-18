@@ -624,4 +624,20 @@ class EntityRenderTest {
             TelegramEntities.render("![](tg://emoji?id=5368324170671202286)"),
         )
     }
+
+    @Test
+    fun htmlRangeClosedInsideABlankRegionShrinksAtTheRewind() {
+        // The </b> closed over whitespace a later blank-paragraph rewind replaced — the
+        // range survived with a stale end and used to format the re-seated text (the
+        // 'h' of hello) as bold. It now shrinks to the rewind point: only HTML-opened
+        // ranges can straddle (Markdown containers close before any blank-region
+        // rewind their container makes)
+        val rendered = TelegramEntities.render("x <b>y\n\n` `</b>\n\nhello")
+        assertEquals("x y\n\nhello", rendered.text)
+        assertEquals(
+            listOf(MessageEntity(MessageEntityType.BOLD, 2, 3)),
+            rendered.entities,
+        )
+        assertEntitiesValid(rendered, "stale end after rewind")
+    }
 }

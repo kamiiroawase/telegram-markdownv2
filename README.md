@@ -153,6 +153,7 @@ editMessageText(first.messageId, pages[++page].text)
 - HTML 端的块级输入 HTML（`<div>` 等）仍降级为 `<pre>` 转义文本，不透传；可折叠引用（`<blockquote expandable>`）同样不支持
 - entities 端对引用套引用（`> > x`）产出嵌套的 blockquote 区间——Bot API 格式化规则禁止 blockquote 嵌套，但服务端发送时静默修复（丢弃内层区间），消息照常送达；对原始区间数组做严格校验的消费方需自行去重
 - 分片的"不丢字符"有两个纯空白例外：代码块顶部尚未拼接真实内容的空行在接缝触发时丢弃；全空白的扁平化分片丢弃（服务端拒绝空白消息）——丢失的都是 Telegram 永远不会显示的空白
+- 列表项内的代码块：续行缩进（对齐列表标记宽度）落在 pre 实体内部，三格式显示的代码行都带缩进噪声且互有差异（MarkdownV2 端每行前置标记宽度的空格，HTML/entities 端仅续行缩进）——列表连续性与代码块有效性不可兼得时的既定取舍
 
 ## 开发
 
@@ -166,7 +167,7 @@ cd telegram-markdownv2
 
 API 参考（Dokka）随 main 分支推送自动部署到 [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/)。
 
-645 个测试——644 个行为级（输入/输出断言）外加 1 个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量——正是它抓住了下述两个行首 `>` 缺陷），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、按 close order 排列、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
+655 个测试——654 个行为级（输入/输出断言）外加 1 个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、按 close order 排列、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
 
 ## 许可
 

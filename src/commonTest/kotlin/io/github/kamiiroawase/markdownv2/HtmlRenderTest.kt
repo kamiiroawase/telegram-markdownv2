@@ -722,4 +722,48 @@ class HtmlRenderTest {
             TelegramHtml.render("```kotlin\nval x = 1\n```"),
         )
     }
+
+    // ---------- custom-emoji fallbacks with unclosed tags inside ----------
+
+    @Test
+    fun customEmojiFallbackClosesUnclosedAnchorsInsteadOfCrashing() {
+        // An unclosed anchor inside the fallback used to pop under an unchecked cast —
+        // a ClassCastException crashing the whole render. It now completes before the
+        // emoji closes, literalized exactly the way the MarkdownV2 twin renders it
+        // (links cannot nest inside a custom emoji)
+        assertEquals(
+            "<tg-emoji emoji-id=\"5\">&lt;a href=\"u\"&gt;x</tg-emoji> tail",
+            TelegramHtml.render("""![<a href="u">x](tg://emoji?id=5) tail"""),
+        )
+        assertEquals(
+            "<tg-emoji emoji-id=\"5\">&lt;a&gt;x</tg-emoji> tail",
+            TelegramHtml.render("""![<a>x](tg://emoji?id=5) tail"""),
+        )
+    }
+
+    @Test
+    fun customEmojiFallbackClosesInlineTagsTightly() {
+        // The unclosed <b> completes before </tg-emoji>, so the entity ends at the
+        // image — the same tight close a balanced fallback gets, not one swallowing the
+        // text that follows
+        assertEquals(
+            "<tg-emoji emoji-id=\"7\"><b>x</b></tg-emoji> tail",
+            TelegramHtml.render("![<b>x](tg://emoji?id=7) tail"),
+        )
+        assertEquals(
+            "<tg-emoji emoji-id=\"7\"><b>x</b></tg-emoji> tail",
+            TelegramHtml.render("![<b>x</b>](tg://emoji?id=7) tail"),
+        )
+    }
+
+    @Test
+    fun anchorInsideCustomEmojiFallbackLiteralizes() {
+        // The tag path twin: an <a> opened inside a <tg-emoji> fallback literalizes —
+        // links cannot nest inside a custom emoji, the same degradation the MarkdownV2
+        // twin makes (its emoji entries are anchors, so its linkEntityOpen reads true)
+        assertEquals(
+            "<tg-emoji emoji-id=\"5\">&lt;a href=\"u\"&gt;x&lt;/a&gt;</tg-emoji>",
+            TelegramHtml.render("""<tg-emoji emoji-id="5"><a href="u">x</a></tg-emoji>"""),
+        )
+    }
 }

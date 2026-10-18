@@ -144,8 +144,11 @@ public object MarkdownV2 {
      * `>` prefixes drop wherever they sit (at a line start, behind a list marker or a
      * continuation indent — list structure itself stays — and on the continuation line of
      * a label or code span soft-broken inside a quote) — escapes
-     * resolve per context, and `[label](url)` becomes `label (url)` so no link target is
-     * lost (an empty label or URL degrades to the non-empty piece).
+     * resolve per context, `[label](url)` becomes `label (url)` so no link target is
+     * lost (an empty label or URL degrades to the non-empty piece; a label equal to its
+     * URL — the render of a bare autolink — stays the single URL), and
+     * `![fallback](tg://emoji?id=…)` resolves to the bare fallback, the text Telegram
+     * displays for a custom emoji.
      * The input is expected to be this library's output; arbitrary strings degrade
      * best-effort but losslessly — unterminated entities keep their content and never-closed
      * markers return literally — and the call never throws.

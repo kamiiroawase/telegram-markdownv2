@@ -164,6 +164,7 @@ output directly — `entitiesJson()` is the ready-made value for the request bod
 - The HTML side still degrades block-level input HTML (`<div>` and friends) to escaped text inside a `<pre>` instead of passing it through; expandable blockquotes (`<blockquote expandable>`) are likewise unsupported
 - The entities side emits nested blockquote ranges for a quote inside a quote (`> > x`) — the Bot API formatting rules say blockquote entities can't nest, but the server repairs this silently at send time (the inner range drops) and the message delivers; consumers that strictly validate the raw entity array need to deduplicate themselves
 - Chunking has two whitespace-only exceptions to no-character-loss: pending blank lines at the top of a split code block drop when the seam fires before real content joins them, and an all-whitespace flattened piece drops because the server rejects blank messages — everything lost is whitespace Telegram would never display
+- A code block inside a list item: the continuation indent (aligned to the list marker's width) lands inside the pre entity, so all three formats display the code lines with indentation noise and differ from each other (the MarkdownV2 side prefixes every line with marker-width spaces; the HTML/entities sides indent continuation lines only) — the pinned trade-off when list continuity and code-block validity can't both hold
 
 ## Development
 
@@ -177,7 +178,7 @@ cd telegram-markdownv2
 
 The API reference (Dokka) deploys to [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/) on every main push.
 
-645 tests — 644 behavior-level (input/output assertions) plus one seeded random-document property test (150 seeds, a generator over random combinations of emphasis/code/links/quotes/lists/task lists/tables/footnotes/autolinks/raw HTML/emoji asserting every invariant for all three formats — it is what caught the two line-initial '>' defects below), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, close-order listing, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
+655 tests — 654 behavior-level (input/output assertions) plus one seeded random-document property test (150 seeds, a generator over random combinations of emphasis/code/links/quotes/lists/task lists/tables/footnotes/autolinks/raw HTML/emoji asserting every invariant for all three formats), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, close-order listing, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
 
 ## License
 

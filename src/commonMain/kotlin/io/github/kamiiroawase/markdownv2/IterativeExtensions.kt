@@ -77,8 +77,10 @@ private object IterativeTaskListPostProcessor : PostProcessor {
 
                 // Upstream's bracket class is [xX\s]: any single whitespace inside the
                 // brackets is an unchecked box, not just the plain space — "- [\t] x"
-                // parses as a task item there, so it must here too
-                marker[0] == '[' && marker[2] == ']' && marker[1].isWhitespace() -> false
+                // parses as a task item there, so it must here too. Java's \s is ASCII
+                // only, so the check is too: an em space stays literal text, exactly
+                // what upstream does with it (Kotlin's isWhitespace() would admit it)
+                marker[0] == '[' && marker[2] == ']' && isAsciiWhitespace(marker[1]) -> false
 
                 else -> return
             }
@@ -88,6 +90,11 @@ private object IterativeTaskListPostProcessor : PostProcessor {
         paragraph.insertBefore(TaskListItemMarker(checked))
     }
 }
+
+// The ASCII \s class of upstream's regexes: space, tab, newline, vertical tab, form
+// feed, carriage return — nothing Unicode
+private fun isAsciiWhitespace(char: Char): Boolean =
+    char == ' ' || char == '\t' || char == '\n' || char == '\u000B' || char == '\u000C' || char == '\r'
 
 private object IterativeAutolinkPostProcessor : PostProcessor {
     private val extractor =

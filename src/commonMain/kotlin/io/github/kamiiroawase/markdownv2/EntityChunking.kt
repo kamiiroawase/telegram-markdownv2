@@ -225,9 +225,11 @@ private fun chunkEntityFence(
     val current = StringBuilder()
     // See shrinkEntityFence: a blank first line appends nothing yet still counts as
     // placed, or the newline joining the next line would be lost. The split guard keys
-    // on real content (the MarkdownV2/HTML twins do the same), so pending blank lines
-    // never become a piece of their own — rendered.text cannot start blank anyway
-    // (EntityVisitor.output() trims), the guard just pins the invariant
+    // on real content (isNotBlank — pending blank lines at the top of a split fence
+    // drop, the MarkdownV2/HTML twins' documented whitespace exception; output() only
+    // trims the trailing side, so a fence whose content starts with blank lines DOES
+    // start blank, and an unguarded flush used to ship it as an all-whitespace chunk
+    // the server rejects with a 400)
     var hasLine = false
     for (line in rendered.text.split('\n')) {
         val joiner = if (hasLine) "\n" else ""
@@ -236,7 +238,7 @@ private fun chunkEntityFence(
             hasLine = true
         } else {
             if (current.isNotEmpty()) {
-                pieces += preEntityOf(current.toString(), node)
+                if (current.isNotBlank()) pieces += preEntityOf(current.toString(), node)
                 current.setLength(0)
                 hasLine = false
             }
@@ -244,13 +246,15 @@ private fun chunkEntityFence(
                 current.append(line)
                 hasLine = true
             } else {
+                // See appendPlainChunks: a whitespace-only segment can never be sent, so
+                // it drops instead of shipping an unsendable chunk
                 plainChunks(line, maxLength).forEach { segment ->
-                    pieces += preEntityOf(segment, node)
+                    if (segment.isNotBlank()) pieces += preEntityOf(segment, node)
                 }
             }
         }
     }
-    if (current.isNotEmpty()) pieces += preEntityOf(current.toString(), node)
+    if (current.isNotBlank()) pieces += preEntityOf(current.toString(), node)
     if (pieces.isEmpty()) return
     pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)
     acc.appendRendered("", pieces.last())

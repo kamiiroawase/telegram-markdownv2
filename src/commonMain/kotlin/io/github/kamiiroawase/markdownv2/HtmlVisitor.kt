@@ -573,13 +573,21 @@ internal class HtmlVisitor(
         if (destination.isNotEmpty() && !linkEntityOpen() && codeDepth == 0) {
             val emojiId = tgEmojiUrlIdOf(destination)
             if (emojiId != null) {
+                val entrySeq = nextSeq++
                 val openStart = sb.length
                 val opener = "<tg-emoji emoji-id=\"$emojiId\">"
                 sb.append(opener)
                 openTags.addLast(
-                    OpenInlineTag("tg-emoji", html = true, seq = nextSeq++, openStart = openStart, openLength = opener.length),
+                    OpenInlineTag("tg-emoji", html = true, seq = entrySeq, openStart = openStart, openLength = opener.length),
                 )
                 visitChildren(image)
+                // Whatever HTML opened inside the fallback closes before the emoji does:
+                // left open it would cross the </tg-emoji> boundary into crossed tags —
+                // or pop under the cast below, which used to crash the whole render on an
+                // unclosed anchor. linkEntityOpen's tg-emoji arm degraded those anchors
+                // to literals already, and completeOpenedAfter leaves our entry innermost
+                // by construction
+                completeOpenedAfter(entrySeq)
                 // A fallback that rendered no visible text is an empty entity — the
                 // rewind drops the pair (see closeInlineTag)
                 closeInlineTag(openTags.removeLast() as OpenInlineTag, sb)
@@ -804,7 +812,14 @@ internal class HtmlVisitor(
         openTags.addLast(OpenAnchorTag(href, openStart, sb.length, nextSeq++))
     }
 
-    private fun linkEntityOpen(): Boolean = openTags.any { it is OpenAnchorTag } || openMarkdownLinks > 0
+    // A link entity is open when an anchor is (or a Markdown link), or a tg-emoji entry:
+    // the MarkdownV2 twin's emoji entries ARE anchors (its tag path pushes OpenAnchor,
+    // its image path bumps openMarkdownLinks), so its linkEntityOpen reads true across a
+    // custom-emoji fallback — links cannot nest inside it there, and the twin formats
+    // must agree. Merged entries (a tg-emoji degraded inside code) count too, the same
+    // way the twin's code-depth emoji sentinel does
+    private fun linkEntityOpen(): Boolean =
+        openTags.any { it is OpenAnchorTag || (it is OpenInlineTag && it.tag == "tg-emoji") } || openMarkdownLinks > 0
 
     // Whether the output region starting at [start] renders no visible text: empty or
     // whitespace only. The label callers check it immediately after the label's children,

@@ -266,4 +266,43 @@ class PlainTextTest {
         assertEquals("", MarkdownV2.toPlainText("```\n```"))
         assertEquals("", MarkdownV2.toPlainText("```\n\n```"))
     }
+
+    @Test
+    fun plainTextCustomEmojiResolvesToTheBareFallback() {
+        // The Bot API's own spelling: the display text is the fallback alone — the id
+        // rides in the entity, never in the text. Pre-fix the '!' stayed literal and
+        // the internal tg:// URL leaked into the fallback
+        assertEquals("alt", MarkdownV2.toPlainText(MarkdownV2.render("![alt](tg://emoji?id=5)")))
+        assertEquals("alt", MarkdownV2.toPlainText("![alt](tg://emoji?id=5)"))
+        // Arbitrary input loses nothing: a non-emoji destination (or an invalid id — 0
+        // is not a positive int64) keeps the ordinary '!' + link degradation
+        assertEquals("!alt (https://e.com/i.png)", MarkdownV2.toPlainText("![alt](https://e.com/i.png)"))
+        assertEquals("!alt (tg://emoji?id=0)", MarkdownV2.toPlainText("![alt](tg://emoji?id=0)"))
+        // Incomplete shapes stay literal
+        assertEquals("![oops", MarkdownV2.toPlainText("![oops"))
+    }
+
+    @Test
+    fun plainTextAutolinkRenderStaysTheSingleUrl() {
+        // The render of a bare autolink is [url](url): Telegram displays the label
+        // alone, and the mechanical "label (url)" shape would duplicate it
+        assertEquals(
+            "go https://e.com. now",
+            MarkdownV2.toPlainText(MarkdownV2.render("go https://e.com. now")),
+        )
+        // A genuine link whose label happens to equal its URL displays the same way
+        assertEquals("https://e.com", MarkdownV2.toPlainText("[https://e.com](https://e.com)"))
+    }
+
+    @Test
+    fun plainTextUnmatchedMarkerRunsReinsertInPushOrder() {
+        // Markers of one run share an output position: the earlier-opened re-inserts
+        // first — pins the linear reopenUnmatched rebuild's ordering (the old
+        // per-marker inserts and the rebuild must agree here). A self-pairing run
+        // ("~~", an empty strikethrough) consumes itself and vanishes, as ever
+        assertEquals("*_a", MarkdownV2.toPlainText("*_a"))
+        assertEquals("___x", MarkdownV2.toPlainText("___x"))
+        assertEquals("a||b", MarkdownV2.toPlainText("a||b"))
+        assertEquals("x", MarkdownV2.toPlainText("~~x"))
+    }
 }

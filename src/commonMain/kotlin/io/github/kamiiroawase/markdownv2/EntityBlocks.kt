@@ -77,14 +77,17 @@ internal fun renderEntityBlock(
 }
 
 // A fresh visitor per group: ranges left unclosed within the group complete by its own
-// output(), never leaking into the next
+// output(), never leaking into the next. Untrimmed: an inline group holds no block
+// separators, so its trailing whitespace is content (the space before the next node's
+// text at a chunking seam) — trimming it here used to drop exactly that character from
+// the chunk-joined text
 internal fun renderEntityInlineGroup(
     nodes: List<Node>,
     options: RenderOptions,
 ): EntityText {
     val visitor = EntityVisitor(options = options)
     nodes.forEach { it.accept(visitor) }
-    return visitor.output()
+    return visitor.outputUntrimmed()
 }
 
 // Trims trailing newlines off a render's text, clamping entity ranges to the trimmed

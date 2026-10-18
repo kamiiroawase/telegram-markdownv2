@@ -106,11 +106,24 @@ internal class EntityVisitor(
      * the twins return their buffers as-is.
      */
     fun output(): EntityText {
+        val text = outputUntrimmed().text.trimEnd()
+        return EntityText(text, entities.toList().clampedTo(text.length))
+    }
+
+    /**
+     * The inline-group twin of [output]: everything completes the same way, but nothing
+     * trims. An inline group carries no block separators, so the trailing whitespace the
+     * block flavor trims is content here — the space before the next node's text at a
+     * chunking seam, which the losslessness guarantee forbids dropping (the group renders
+     * whole in the full render, whitespace included). Block-level trailing whitespace
+     * still trims where it belongs, at the accumulator's flush — the same place the
+     * string formats trim theirs.
+     */
+    fun outputUntrimmed(): EntityText {
         while (openRanges.isNotEmpty()) {
             closeRange(openRanges.removeLast())
         }
-        val text = sb.toString().trimEnd()
-        return EntityText(text, entities.toList().clampedTo(text.length))
+        return EntityText(sb.toString(), entities.toList())
     }
 
     // Turns the range into its entity, measured against the live length. A zero-length
@@ -186,14 +199,25 @@ internal class EntityVisitor(
     // Rolls the text back to [start], dropping every entity registered inside the rewound
     // region (offsets at or past the rewind point; text positions only grow, so anything
     // closed before the region opened sits entirely before it) — kept, those entities
-    // would format whatever text the rewind re-seats at their offsets. Open ranges
-    // deliberately survive the rewind: one pushed by an input-HTML opener emitted no
-    // text, and completing later over whatever text re-seats at its start is exactly how
-    // the string twins treat an unclosed tag (their openers stay visible and complete at
-    // output time), so all three formats format the same trailing text — see
+    // would format whatever text the rewind re-seats at their offsets. A range opened
+    // BEFORE the rewind and closed inside the region (only HTML-opened ranges can: a
+    // Markdown emphasis or link closes within its own container, before any blank-region
+    // rewind its container makes) survives the offset filter with a stale end — its
+    // length was measured against text the rewind replaces — so it shrinks to the rewind
+    // point, at the very position its closer last saw. Open ranges deliberately survive
+    // the rewind: one pushed by an input-HTML opener emitted no text, and completing
+    // later over whatever text re-seats at its start is exactly how the string twins
+    // treat an unclosed tag (their openers stay visible and complete at output time), so
+    // all three formats format the same trailing text — see
     // unclosedAnchorInBlankParagraphCompletesAcrossFormats
     private fun rewindTo(start: Int) {
         entities.removeAll { it.offset >= start }
+        for (index in entities.indices) {
+            val entity = entities[index]
+            if (entity.offset + entity.length > start) {
+                entities[index] = entity.copy(length = start - entity.offset)
+            }
+        }
         sb.setLength(start)
     }
 

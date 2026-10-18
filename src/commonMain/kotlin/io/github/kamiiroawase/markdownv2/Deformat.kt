@@ -15,9 +15,12 @@ package io.github.kamiiroawase.markdownv2
  * a label or code span soft-broken onto the next line of a quote body (exactly the
  * wrapping quote's depth strips; a content '>' beyond it survives); quote markers strip
  * behind list structure too — a quote or fence inside a list item de-formats with the
- * bullet and the continuation indent kept and the `> ` markers gone — escapes resolve per
- * context, and `[label](url)` becomes `label (url)` so no link target is
- * lost (an empty label or URL degrades to the non-empty piece). Even malformed input
+ * bullet and the continuation indent kept and the `> ` markers gone — escapes
+ * resolve per context, `[label](url)` becomes `label (url)` so no link target is
+ * lost (an empty label or URL degrades to the non-empty piece; a label equal to its
+ * URL — the render of a bare autolink — stays the single URL), and
+ * `![fallback](tg://emoji?id=…)` resolves to the bare fallback, the text Telegram
+ * displays for a custom emoji. Even malformed input
  * loses nothing: an emphasis marker that never closes is re-inserted literally, and
  * unterminated code spans / labels / URLs keep their content as text.
  */
@@ -56,6 +59,10 @@ internal fun deformat(rendered: String): String {
                 index = appendLinkText(rendered, index, sb, lineQuoteDepth)
             }
 
+            char == '!' && rendered.getOrNull(index + 1) == '[' -> {
+                index = appendCustomEmojiText(rendered, index, sb, lineQuoteDepth)
+            }
+
             char == '_' || char == '*' || char == '~' || char == '|' -> {
                 var run = 1
                 while (index + run < rendered.length && rendered[index + run] == char) run++
@@ -87,14 +94,30 @@ private class OpenMarker(
     val position: Int,
 )
 
-// Re-inserting top-down (descending output positions) keeps same-position markers in
-// push order — the earlier-opened marker lands before the later one — while distinct
-// positions are unaffected by the shifts that inserts at higher indices would cause
+// Re-inserting keeps same-position markers in push order — the earlier-opened marker
+// lands before the later one — while distinct positions splice at their recorded
+// offsets. One linear rebuild instead of one shifting insert per marker: the markers of
+// one run share a position, and n of them used to cost n quadratic copies on
+// adversarial marker-only input
 private fun reopenUnmatched(
     sb: StringBuilder,
     open: ArrayDeque<OpenMarker>,
 ) {
-    open.asReversed().forEach { sb.insert(it.position, it.marker) }
+    if (open.isEmpty()) return
+    // Stack order is push order, and positions only grow between pushes (the scan never
+    // rewinds output), so the groups come out in ascending position order
+    val byPosition = LinkedHashMap<Int, MutableList<String>>()
+    open.forEach { entry -> byPosition.getOrPut(entry.position) { mutableListOf() }.add(entry.marker) }
+    val spliced = StringBuilder(sb.length + open.sumOf { it.marker.length })
+    var cursor = 0
+    for ((position, markers) in byPosition) {
+        spliced.append(sb, cursor, position)
+        markers.forEach(spliced::append)
+        cursor = position
+    }
+    spliced.append(sb, cursor, sb.length)
+    sb.setLength(0)
+    sb.append(spliced)
 }
 
 /**
@@ -354,9 +377,11 @@ private fun scanLineStart(
  * Link from the `[` at [from]. The label parses as inline text — emphasis, code spans and
  * escapes all apply inside labels, so `[*b*](u)` yields `b (u)` — and a complete `](url)`
  * shape emits `label (url)`, keeping the target visible in the plain-text fallback; an
- * empty label or URL degrades to the non-empty piece, never dangling parentheses.
- * Anything incomplete degrades to literal text: the `[` and the processed label stay.
- * Returns the index after the link (or wherever the degradation stopped).
+ * empty label or URL degrades to the non-empty piece, never dangling parentheses, and a
+ * label equal to its URL (the render of a bare autolink) stays the single URL — Telegram
+ * displays the label alone, and the mechanical pair shape would duplicate it. Anything
+ * incomplete degrades to literal text: the `[` and the processed label stay. Returns the
+ * index after the link (or wherever the degradation stopped).
  */
 private fun appendLinkText(
     rendered: String,
@@ -367,51 +392,110 @@ private fun appendLinkText(
     val label = StringBuilder()
     val labelEnd = appendLabelText(rendered, from + 1, label, quoteDepth)
     if (rendered.startsWith("](", labelEnd)) {
-        var index = labelEnd + 2
-        val url = StringBuilder()
-        var closed = false
-        while (index < rendered.length && !closed) {
-            val char = rendered[index]
-            val next = rendered.getOrNull(index + 1)
-            when {
-                char == '\\' && (next == ')' || next == '\\') -> {
-                    url.append(next)
-                    index += 2
-                }
+        val scanned = scanLinkUrl(rendered, labelEnd + 2)
+        when {
+            !scanned.closed -> {
+                // No closing ')': emit everything literally and stop — the shape is not a link
+                sb
+                    .append('[')
+                    .append(label)
+                    .append("](")
+                    .append(scanned.url)
+            }
 
-                char == ')' -> {
-                    index++
-                    closed = true
-                }
+            scanned.url.isEmpty() -> {
+                sb.append(label)
+            }
 
-                else -> {
-                    url.append(char)
-                    index++
-                }
+            label.isEmpty() -> {
+                sb.append(scanned.url)
+            }
+
+            scanned.url == label.toString() -> {
+                sb.append(label)
+            }
+
+            else -> {
+                sb
+                    .append(label)
+                    .append(" (")
+                    .append(scanned.url)
+                    .append(')')
             }
         }
-        if (!closed) {
-            // No closing ')': emit everything literally and stop — the shape is not a link
-            sb
-                .append('[')
-                .append(label)
-                .append("](")
-                .append(url)
-        } else if (url.isEmpty()) {
-            sb.append(label)
-        } else if (label.isEmpty()) {
-            sb.append(url)
-        } else {
-            sb
-                .append(label)
-                .append(" (")
-                .append(url)
-                .append(')')
-        }
-        return index
+        return scanned.index
     }
     sb.append('[').append(label)
     return labelEnd
+}
+
+/**
+ * Custom emoji from the '!' at [from] (necessarily followed by '[' — an unescaped '!'
+ * occurs in this library's output only as the emoji opener, '! being a special character
+ * that always escapes as content). The Bot API's own MarkdownV2 spelling,
+ * `![fallback](tg://emoji?id=…)`, displays as the bare fallback — the id rides in the
+ * entity, never in the text — so the completed shape with a valid tg://emoji destination
+ * emits the label alone, matching the display text the entities format reports. Any
+ * other shape keeps the ordinary '!' + link degradation, so arbitrary input loses
+ * nothing (an empty fallback cannot occur in this library's render and degrades the
+ * same way). Returns the index after the emoji (or wherever the degradation stopped).
+ */
+private fun appendCustomEmojiText(
+    rendered: String,
+    from: Int,
+    sb: StringBuilder,
+    quoteDepth: Int,
+): Int {
+    val label = StringBuilder()
+    val labelEnd = appendLabelText(rendered, from + 2, label, quoteDepth)
+    if (rendered.startsWith("](", labelEnd)) {
+        val scanned = scanLinkUrl(rendered, labelEnd + 2)
+        if (scanned.closed && label.isNotEmpty() && tgEmojiUrlIdOf(scanned.url) != null) {
+            sb.append(label)
+            return scanned.index
+        }
+    }
+    // Not the custom emoji shape: the '!' stays literal and the '[' takes the ordinary
+    // link path
+    sb.append('!')
+    return appendLinkText(rendered, from + 1, sb, quoteDepth)
+}
+
+// The "(url)" tail of a link entity from the character after "](" at [from]: escapes
+// resolve (\) and \\), the unescaped ')' closes, anything else is URL text.
+// Unterminated, the rest of the string is the URL and closed stays false
+private class ScannedUrl(
+    val url: String,
+    val index: Int,
+    val closed: Boolean,
+)
+
+private fun scanLinkUrl(
+    rendered: String,
+    from: Int,
+): ScannedUrl {
+    var index = from
+    val url = StringBuilder()
+    while (index < rendered.length) {
+        val char = rendered[index]
+        val next = rendered.getOrNull(index + 1)
+        when {
+            char == '\\' && (next == ')' || next == '\\') -> {
+                url.append(next)
+                index += 2
+            }
+
+            char == ')' -> {
+                return ScannedUrl(url.toString(), index + 1, closed = true)
+            }
+
+            else -> {
+                url.append(char)
+                index++
+            }
+        }
+    }
+    return ScannedUrl(url.toString(), index, closed = false)
 }
 
 // Label content from [from]: the text-state logic (escapes, markers, code spans) minus

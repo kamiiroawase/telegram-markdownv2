@@ -275,6 +275,16 @@ class ExtensionsTest {
     }
 
     @Test
+    fun taskMarkerBracketWhitespaceIsAsciiOnly() {
+        // The other side of upstream's \s: it admits no Unicode whitespace. An em space
+        // inside the brackets stays literal text — pre-fix Kotlin's isWhitespace()
+        // admitted it and turned the item into an unchecked task box upstream leaves
+        // alone. 0x2003 is the em space, kept programmatic to keep the source ASCII
+        val emSpace = 0x2003.toChar()
+        assertEquals("• \\[$emSpace\\] x", MarkdownV2.render("- [$emSpace] x"))
+    }
+
+    @Test
     fun orderedTaskListMarksMdv2() {
         assertEquals("1\\. \\[ \\] a\n2\\. \\[x\\] b", MarkdownV2.render("1. [ ] a\n2. [x] b"))
     }

@@ -278,4 +278,34 @@ class EntityChunkingTest {
             assertEntitiesValid(TelegramEntities.render(content), "close order render of $content")
         }
     }
+
+    @Test
+    fun fenceWithLeadingBlankLinesNeverYieldsABlankChunk() {
+        // output() only trims the trailing side, so a fence whose content starts with
+        // blank lines starts blank — pre-fix the pending blank lines flushed as an
+        // all-whitespace chunk the server rejects with a 400; they drop at the split
+        // instead, the MarkdownV2/HTML twins' documented whitespace exception
+        val chunks =
+            TelegramEntities.renderChunked(
+                "```\n\n   \n" + "x".repeat(20) + "\n```",
+                10,
+            )
+        assertTrue(chunks.isNotEmpty())
+        chunks.forEach { chunk ->
+            assertTrue(chunk.text.isNotBlank(), "blank chunk: <${chunk.text}>")
+            assertTrue(chunk.text.length <= 10, "over-long chunk: ${chunk.text}")
+            assertEntitiesValid(chunk, "leading blank fence")
+        }
+    }
+
+    @Test
+    fun inlineSeamKeepsInteriorWhitespace() {
+        // The space after "foo " is content between two nodes; the per-node seam renders
+        // each in isolation and used to trim it away (output()'s trailing trim has no
+        // business in an inline group) — the chunk-joined text must equal the full
+        // render's
+        val content = "foo <!-- c -->bar zzzzzzzzzz"
+        val chunks = TelegramEntities.renderChunked(content, 10)
+        assertEquals(TelegramEntities.render(content).text, chunks.joinToString("") { it.text })
+    }
 }
