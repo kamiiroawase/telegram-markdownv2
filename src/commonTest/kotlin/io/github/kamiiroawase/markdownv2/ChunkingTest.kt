@@ -50,6 +50,23 @@ class ChunkingTest {
     }
 
     @Test
+    fun whitespaceRunNeverYieldsABlankChunk() {
+        // A whitespace-only flattened piece can never be sent — the server trims message
+        // text and rejects blank text with a 400 — so it drops; pre-fix a 700-space run
+        // with a 300 limit shipped blank chunks. The joined text loses only whitespace
+        // Telegram would never display
+        val pieces = MarkdownV2.renderChunked("a" + " ".repeat(700) + "b", 300)
+        assertTrue(pieces.size >= 2)
+        pieces.forEach { piece ->
+            assertTrue(piece.isNotBlank(), "blank piece")
+            assertTrue(piece.length <= 300, "piece of ${piece.length}")
+            assertTelegramParseable(piece, "whitespaceRun")
+        }
+        assertTrue(pieces.first().startsWith("a"))
+        assertTrue(pieces.last().endsWith("b"))
+    }
+
+    @Test
     fun chunkedHeadingPrefixDroppedWhenFirstNodeFitsWithoutIt() {
         // The heading's first inline node fits the limit only without its "\# " lead:
         // dropping the lead and keeping the node's rendered structure beats flattening
@@ -302,12 +319,16 @@ class ChunkingTest {
     }
 
     @Test
-    fun renderChunkedKeepsWhitespaceOnlyTailPiece() {
+    fun renderChunkedDropsWhitespaceOnlyTailPiece() {
         // The flattening may leave a tail piece that is nothing but whitespace (a code
-        // span's trailing spaces again) — it is text, so the final flush must emit it
-        // however blank it looks (pre-fix the isNotBlank skip dropped it outright)
+        // span's trailing spaces again). An earlier round kept it as text, but a
+        // whitespace-only chunk can never be sent — the server trims message text and
+        // rejects blank text with a 400, and "every piece independently sendable" is
+        // the chunking contract — so the final flush drops it; the loss is whitespace
+        // Telegram would never display (the twin flattening guards drop blank middle
+        // pieces for the same reason)
         val chunks = MarkdownV2.renderChunked("`" + "a".repeat(9) + " ".repeat(9) + "`", 9)
-        assertEquals(listOf("aaaaaaaaa", " ".repeat(9)), chunks)
+        assertEquals(listOf("aaaaaaaaa"), chunks)
         chunks.forEach { chunk -> assertTrue(chunk.length <= 9, "over-long chunk: $chunk") }
     }
 

@@ -154,7 +154,9 @@ internal class EntityChunkAccumulator {
     }
 
     fun finish(): List<EntityText> {
-        if (!current.isEmpty() && (verbatimTail || current.sb.isNotBlank())) flush()
+        // See ChunkAccumulator.finish: a blank final chunk — rendered nothing-content or
+        // flattened all-whitespace text — can never be sent, so it drops
+        if (!current.isEmpty() && current.sb.isNotBlank()) flush()
         return pieces
     }
 
@@ -167,7 +169,8 @@ internal class EntityChunkAccumulator {
 }
 
 // Last-resort seam: plain text is valid at any surrogate-safe cut, so unit-boundary
-// chunking loses no characters (formatting drops, text never does)
+// chunking loses no characters (formatting drops, text never does — the lone exception
+// being a whitespace-only piece, which cannot be sent at all; see appendPlainChunks)
 private fun flattenEntityToPlainText(
     node: Node,
     maxLength: Int,
@@ -180,14 +183,20 @@ private fun flattenEntityToPlainText(
     appendPlainChunks(text, maxLength, acc)
 }
 
-// Every piece but the tail completes; the tail stays open as verbatim content
+// Every piece but the tail completes; the tail stays open as verbatim content. A
+// whitespace-only piece can never be sent — the server trims message text and rejects
+// blank text with a 400 — so it drops instead of shipping an unsendable chunk; this is
+// the one place chunking departs from no-character-loss, and it takes a whitespace run
+// at least maxLength long to reach
 private fun appendPlainChunks(
     text: String,
     maxLength: Int,
     acc: EntityChunkAccumulator,
 ) {
     val chunks = plainChunks(text, maxLength)
-    chunks.subList(0, chunks.size - 1).forEach { acc.pieces += EntityText(it, emptyList()) }
+    chunks.subList(0, chunks.size - 1).forEach {
+        if (!it.isBlank()) acc.pieces += EntityText(it, emptyList())
+    }
     acc.appendVerbatim(chunks.last())
 }
 
@@ -462,7 +471,13 @@ private fun flattenEntityWithLead(
         acc.appendVerbatim((if (keepLead) lead else "") + chunks.first())
         return
     }
-    acc.pieces += EntityText((if (keepLead) lead else "") + chunks.first(), emptyList())
-    for (i in 1 until chunks.size - 1) acc.pieces += EntityText(chunks[i], emptyList())
+    // See appendPlainChunks: blank pieces drop — the tail merges with whatever follows
+    // inside the accumulator, so only the completed pieces need the check (a blank first
+    // piece implies a blank lead: real leads are markers, never blank)
+    val firstPiece = (if (keepLead) lead else "") + chunks.first()
+    if (!firstPiece.isBlank()) acc.pieces += EntityText(firstPiece, emptyList())
+    for (i in 1 until chunks.size - 1) {
+        if (!chunks[i].isBlank()) acc.pieces += EntityText(chunks[i], emptyList())
+    }
     acc.appendVerbatim(chunks.last())
 }

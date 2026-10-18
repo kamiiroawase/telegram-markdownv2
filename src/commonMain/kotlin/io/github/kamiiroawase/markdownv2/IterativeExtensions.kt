@@ -68,10 +68,16 @@ private object IterativeTaskListPostProcessor : PostProcessor {
         val text = paragraph.firstChild as? Text ?: return
         val literal = text.literal
         if (literal.length < 4) return
+        val marker = literal.take(3)
         val checked =
-            when (literal.take(3)) {
-                "[ ]" -> false
-                "[x]", "[X]" -> true
+            when {
+                marker == "[x]" || marker == "[X]" -> true
+
+                // Upstream's bracket class is [xX\s]: any single whitespace inside the
+                // brackets is an unchecked box, not just the plain space — "- [\t] x"
+                // parses as a task item there, so it must here too
+                marker[0] == '[' && marker[2] == ']' && marker[1].isWhitespace() -> false
+
                 else -> return
             }
         val after = literal[3]

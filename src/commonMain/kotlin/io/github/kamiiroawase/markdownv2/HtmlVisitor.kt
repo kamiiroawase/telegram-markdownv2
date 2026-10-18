@@ -295,6 +295,13 @@ internal class HtmlVisitor(
     }
 
     override fun visit(emphasis: Emphasis) {
+        if (codeDepth > 0) {
+            // Telegram forbids entities nested inside code ("Pre and Code can't contain
+            // nested entities"): the tags drop, the content renders as plain code text —
+            // the same degradation the MarkdownV2 twin's silent emphasis entries make
+            visitChildren(emphasis)
+            return
+        }
         if (!enterInline()) {
             appendEscapedHtmlPlainText(sb, emphasis)
             return
@@ -311,6 +318,11 @@ internal class HtmlVisitor(
     }
 
     override fun visit(strongEmphasis: StrongEmphasis) {
+        if (codeDepth > 0) {
+            // See visit(emphasis): the tags drop inside an open code entity
+            visitChildren(strongEmphasis)
+            return
+        }
         if (!enterInline()) {
             appendEscapedHtmlPlainText(sb, strongEmphasis)
             return
@@ -328,6 +340,11 @@ internal class HtmlVisitor(
     override fun visit(customNode: CustomNode) {
         when (customNode) {
             is Strikethrough -> {
+                if (codeDepth > 0) {
+                    // See visit(emphasis): the tags drop inside an open code entity
+                    visitChildren(customNode)
+                    return
+                }
                 if (!enterInline()) {
                     appendEscapedHtmlPlainText(sb, customNode)
                     return
@@ -438,8 +455,10 @@ internal class HtmlVisitor(
         val destination = link.destination.orEmpty()
         // Telegram rejects link entities with an empty URL, and links cannot nest (a nested
         // Link cannot come out of CommonMark parsing; the guard covers hand-built ASTs) —
-        // degrade to the link text alone in both cases
-        if (destination.isEmpty() || linkEntityOpen()) {
+        // degrade to the link text alone in both cases. A link entity inside an open code
+        // entity is equally illegal ("Pre and Code can't contain nested entities"): the
+        // label text stays, the link drops
+        if (destination.isEmpty() || linkEntityOpen() || codeDepth > 0) {
             visitChildren(link)
             return
         }
@@ -474,7 +493,9 @@ internal class HtmlVisitor(
     // single-level — Telegram links cannot nest
     override fun visit(image: Image) {
         val destination = image.destination.orEmpty()
-        if (destination.isEmpty() || linkEntityOpen()) {
+        // See visit(link): empty URL, nesting and open code entities all degrade to the
+        // alt text alone
+        if (destination.isEmpty() || linkEntityOpen() || codeDepth > 0) {
             visitChildren(image)
             return
         }
@@ -589,6 +610,14 @@ internal class HtmlVisitor(
             codeDepth++
             return
         }
+        if (codeDepth > 0) {
+            // Any other formatting tag inside an open code entity would nest an entity
+            // Telegram rejects ("Pre and Code can't contain nested entities"): the tag
+            // drops — merged keeps the closer matched and emission-free, the content
+            // continues as plain code text (the MarkdownV2 twin's silent entries)
+            openTags.addLast(OpenInlineTag(mapped, html = true, seq = nextSeq++, merged = true))
+            return
+        }
         val openStart = sb.length
         sb.append('<').append(mapped).append('>')
         openTags.addLast(OpenInlineTag(mapped, html = true, seq = seq(), openStart = openStart, openLength = mapped.length + 2))
@@ -596,8 +625,9 @@ internal class HtmlVisitor(
     }
 
     // <tg-emoji> passes through with its emoji-id attribute — one of the constructs only
-    // the HTML parse mode can express. The id must decode to digits (custom emoji ids
-    // are numeric); anything else degrades to literal text like every unknown tag
+    // the HTML parse mode can express. The id must decode to a positive int64 value
+    // (custom emoji ids are numeric); anything else degrades to literal text like every
+    // unknown tag
     private fun renderEmojiTag(
         tag: String,
         parts: TagParts,
@@ -614,6 +644,12 @@ internal class HtmlVisitor(
                 }
             }
             sb.append(escapeHtmlText(tag))
+            return
+        }
+        if (codeDepth > 0) {
+            // A custom emoji entity can't nest inside code either: the tags drop, the
+            // emoji char renders as plain code text (merged keeps the closer silent)
+            openTags.addLast(OpenInlineTag("tg-emoji", html = true, seq = seq(), merged = true))
             return
         }
         val id = tgEmojiIdOf(parts.attrs)
@@ -655,6 +691,13 @@ internal class HtmlVisitor(
         if (linkEntityOpen()) {
             openTags.addLast(OpenAnchorTag("", sb.length, sb.length, nextSeq++, nested = true))
             sb.append(escapeHtmlText(tag))
+            return
+        }
+        // A link entity can't nest inside an open code entity: the tags drop silently —
+        // the href-less sentinel shape, whose closer emits nothing — and the label text
+        // continues as plain code text
+        if (codeDepth > 0) {
+            openTags.addLast(OpenAnchorTag("", sb.length, sb.length, nextSeq++))
             return
         }
         // href="" is treated like a missing href: the empty URL degrades to plain text

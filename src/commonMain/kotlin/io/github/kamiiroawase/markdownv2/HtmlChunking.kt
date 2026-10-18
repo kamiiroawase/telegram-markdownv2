@@ -175,7 +175,9 @@ private fun chunkHtmlFence(
     // See shrinkHtmlFence: a blank first line appends nothing yet still counts as placed,
     // or the newline joining the next line would be lost. Placing no line is different
     // from placing a blank one only until the split fires: there the pending blank lines
-    // drop (the piece guards on real content), matching the MarkdownV2 twin's guard
+    // drop (the piece guards on real content), the one lossless-chunking exception —
+    // whitespace Telegram would never display inside the re-opened fence; the MarkdownV2
+    // twin's guard makes the same drop
     var hasLine = false
     for (line in lines) {
         val joiner = if (hasLine) "\n" else ""
@@ -466,8 +468,16 @@ private fun flattenWithHtmlLead(
         return
     }
     // No trimming: a piece edge can land on a space of the original text, and trimming
-    // it would drop a character the flattening paths promise to preserve
-    acc.pieces += (if (keepLead) lead else "") + escaped.first()
-    for (i in 1 until escaped.size - 1) acc.pieces += escaped[i]
+    // it would drop a character the flattening paths promise to preserve. A piece that
+    // is whitespace all the way through is the exception — the server trims message text
+    // and rejects blank text with a 400, so it drops instead of shipping an unsendable
+    // chunk (reaching it takes a whitespace run at least maxLength long; a blank first
+    // piece implies a blank lead, and real leads are markers, never blank); the tail
+    // stays regardless, merging with whatever follows inside the accumulator
+    val firstPiece = (if (keepLead) lead else "") + escaped.first()
+    if (!firstPiece.isBlank()) acc.pieces += firstPiece
+    for (i in 1 until escaped.size - 1) {
+        if (!escaped[i].isBlank()) acc.pieces += escaped[i]
+    }
     acc.appendVerbatim(escaped.last())
 }

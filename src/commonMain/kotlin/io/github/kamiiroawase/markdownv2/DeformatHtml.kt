@@ -49,9 +49,9 @@ private fun appendTagText(
 ) {
     val parts =
         parseHtmlTag("<$inner>") ?: run {
-            // Not a well-formed tag after all — emit it literally, angle bracket already
-            // accounted for by the caller's scan
-            sb.append(inner)
+            // Not a well-formed tag after all — emit it literally; the caller's scan
+            // consumed both angle brackets, so both return here
+            sb.append('<').append(inner).append('>')
             return
         }
     if (parts.name == "a") {

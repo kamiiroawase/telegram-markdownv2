@@ -325,6 +325,32 @@ class HtmlRenderTest {
     }
 
     @Test
+    fun tgEmojiWithZeroIdStaysLiteral() {
+        // Custom emoji ids are positive int64 values — "0" fails the server-side parse
+        assertEquals(
+            "&lt;tg-emoji emoji-id=\"0\"&gt;x&lt;/tg-emoji&gt;",
+            TelegramHtml.render("<tg-emoji emoji-id=\"0\">x</tg-emoji>"),
+        )
+    }
+
+    @Test
+    fun tgEmojiWithOverflowingIdStaysLiteral() {
+        assertEquals(
+            "&lt;tg-emoji emoji-id=\"99999999999999999999\"&gt;x&lt;/tg-emoji&gt;",
+            TelegramHtml.render("<tg-emoji emoji-id=\"99999999999999999999\">x</tg-emoji>"),
+        )
+    }
+
+    @Test
+    fun tgEmojiWithUnicodeDigitIdStaysLiteral() {
+        // toLongOrNull parses ASCII digits only, matching the server's int64 parse
+        assertEquals(
+            "&lt;tg-emoji emoji-id=\"٥٣٦\"&gt;x&lt;/tg-emoji&gt;",
+            TelegramHtml.render("<tg-emoji emoji-id=\"٥٣٦\">x</tg-emoji>"),
+        )
+    }
+
+    @Test
     fun unclosedInlineTagCompletesAtOutput() {
         assertEquals("a <b>bold</b>", TelegramHtml.render("a <b>bold"))
     }
@@ -417,6 +443,36 @@ class HtmlRenderTest {
     @Test
     fun htmlCodeInsideHtmlCodeMerges() {
         assertEquals("<code>abc</code>", TelegramHtml.render("<code>a<kbd>b</kbd>c</code>"))
+    }
+
+    // "Pre and Code can't contain nested entities" — every formatting construct inside
+    // an open code entity drops its tags and keeps its content as plain code text,
+    // the same silent degradation the MarkdownV2 twin makes
+
+    @Test
+    fun markdownEmphasisInsideHtmlCodeDropsItsTags() {
+        assertEquals("<code>a b c</code>", TelegramHtml.render("<code>a *b* c</code>"))
+        assertEquals("<code>a b c</code>", TelegramHtml.render("<code>a **b** c</code>"))
+    }
+
+    @Test
+    fun htmlFormattingTagsInsideHtmlCodeDropSilently() {
+        assertEquals("<code>a b c</code>", TelegramHtml.render("<code>a <b>b</b> c</code>"))
+        assertEquals("<code>a b c</code>", TelegramHtml.render("<code>a <i>b</i> c</code>"))
+        assertEquals("<code>a b c</code>", TelegramHtml.render("<code>a <u>b</u> c</code>"))
+        assertEquals("<code>a b c</code>", TelegramHtml.render("<code>a <s>b</s> c</code>"))
+        assertEquals("<code>a b c</code>", TelegramHtml.render("<code>a <tg-spoiler>b</tg-spoiler> c</code>"))
+    }
+
+    @Test
+    fun linksInsideHtmlCodeDegradeToLabelText() {
+        assertEquals("<code>a b c</code>", TelegramHtml.render("<code>a [b](u) c</code>"))
+        assertEquals("<code>x</code>", TelegramHtml.render("<code><a href=\"u\">x</a></code>"))
+    }
+
+    @Test
+    fun tgEmojiInsideHtmlCodeDropsItsTags() {
+        assertEquals("<code>x</code>", TelegramHtml.render("<code><tg-emoji emoji-id=\"1\">x</tg-emoji></code>"))
     }
 
     @Test
@@ -513,6 +569,13 @@ class HtmlRenderTest {
         val rendered = TelegramHtml.render("[t](http://x?a=&amp;b=2)")
         assertEquals("<a href=\"http://x?a=&amp;amp;b=2\">t</a>", rendered)
         assertEquals("t (http://x?a=&amp;b=2)", deformatHtml(rendered))
+    }
+
+    @Test
+    fun deformatKeepsMalformedTagBrackets() {
+        // Pre-fix both angle brackets vanished ("a <1a> b" de-formatted to "a 1a b") —
+        // the degradation must stay lossless like the unterminated-< case
+        assertEquals("a <1a> b", deformatHtml("a <1a> b"))
     }
 
     // ---------- depth-cap flattening escapes ----------

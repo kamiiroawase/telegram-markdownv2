@@ -132,7 +132,10 @@ public object TelegramHtml {
      *
      * Chunking semantics match the [renderChunked] string overload: blocks are packed
      * whole where they fit, oversized blocks split along their natural seams, every chunk
-     * is independently valid Telegram HTML, and no character is dropped. [maxLength]
+     * is independently valid Telegram HTML, and no character is dropped — save whitespace
+     * that could never display anyway: pending blank lines at the top of a split code
+     * block drop when the seam fires before real content joins them, and an all-whitespace
+     * flattened piece drops because the server rejects blank messages. [maxLength]
      * below [MIN_CHUNK_LENGTH] returns the full render as a single chunk; unknown
      * block/inline node types from third-party extensions degrade to plain content.
      */

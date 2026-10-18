@@ -350,6 +350,65 @@ class EntityRenderTest {
         assertEquals(listOf(MessageEntity(MessageEntityType.CODE, 0, 7)), result.entities)
     }
 
+    // "Pre and Code can't contain nested entities" — every formatting construct inside
+    // an open code range drops its range and keeps its content as plain code text, the
+    // degradation the MarkdownV2 twin's silent tags make
+
+    @Test
+    fun markdownEmphasisInsideCodeRangeDropsItsRange() {
+        val result = TelegramEntities.render("<code>a *b* c</code>")
+        assertEquals("a b c", result.text)
+        assertEquals(listOf(MessageEntity(MessageEntityType.CODE, 0, 5)), result.entities)
+    }
+
+    @Test
+    fun htmlFormattingTagsInsideCodeRangeDropTheirRanges() {
+        val result = TelegramEntities.render("<code>a <b>b</b> c</code>")
+        assertEquals("a b c", result.text)
+        assertEquals(listOf(MessageEntity(MessageEntityType.CODE, 0, 5)), result.entities)
+        val italic = TelegramEntities.render("<code>a <i>b</i> c</code>")
+        assertEquals("a b c", italic.text)
+        assertEquals(listOf(MessageEntity(MessageEntityType.CODE, 0, 5)), italic.entities)
+        val spoiler = TelegramEntities.render("<code>a <tg-spoiler>b</tg-spoiler> c</code>")
+        assertEquals("a b c", spoiler.text)
+        assertEquals(listOf(MessageEntity(MessageEntityType.CODE, 0, 5)), spoiler.entities)
+    }
+
+    @Test
+    fun linksInsideCodeRangeDegradeToLabelText() {
+        val markdown = TelegramEntities.render("<code>a [b](u) c</code>")
+        assertEquals("a b c", markdown.text)
+        assertEquals(listOf(MessageEntity(MessageEntityType.CODE, 0, 5)), markdown.entities)
+        val anchor = TelegramEntities.render("<code><a href=\"u\">x</a></code>")
+        assertEquals("x", anchor.text)
+        assertEquals(listOf(MessageEntity(MessageEntityType.CODE, 0, 1)), anchor.entities)
+    }
+
+    @Test
+    fun tgEmojiInsideCodeRangeDropsItsEntity() {
+        val result = TelegramEntities.render("<code><tg-emoji emoji-id=\"1\">x</tg-emoji></code>")
+        assertEquals("x", result.text)
+        assertEquals(listOf(MessageEntity(MessageEntityType.CODE, 0, 1)), result.entities)
+    }
+
+    @Test
+    fun tgEmojiWithOutOfRangeIdStaysVisibleText() {
+        // Custom emoji ids are positive int64 values — "0", an overflow run and Unicode
+        // digits all fail the server-side parse and degrade like a missing id
+        assertEquals(
+            EntityText("<tg-emoji emoji-id=\"0\">x</tg-emoji>", emptyList()),
+            TelegramEntities.render("<tg-emoji emoji-id=\"0\">x</tg-emoji>"),
+        )
+        assertEquals(
+            EntityText("<tg-emoji emoji-id=\"99999999999999999999\">x</tg-emoji>", emptyList()),
+            TelegramEntities.render("<tg-emoji emoji-id=\"99999999999999999999\">x</tg-emoji>"),
+        )
+        assertEquals(
+            EntityText("<tg-emoji emoji-id=\"٥٣٦\">x</tg-emoji>", emptyList()),
+            TelegramEntities.render("<tg-emoji emoji-id=\"٥٣٦\">x</tg-emoji>"),
+        )
+    }
+
     @Test
     fun htmlBlockDegradesToPreRange() {
         val result = TelegramEntities.render("<div>\ncontent\n</div>")

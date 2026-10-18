@@ -24,9 +24,10 @@ dependencies {
 ```
 
 ```kotlin
+import io.github.kamiiroawase.markdownv2.ChunkDecoration
 import io.github.kamiiroawase.markdownv2.MarkdownV2
-import io.github.kamiiroawase.markdownv2.TelegramHtml
 import io.github.kamiiroawase.markdownv2.TelegramEntities
+import io.github.kamiiroawase.markdownv2.TelegramHtml
 
 // parse_mode = MarkdownV2
 val text = MarkdownV2.render("**hello** world")                        // 直接发送
@@ -82,6 +83,9 @@ import eu.vendeli.tgbot.types.component.ParseMode
 import eu.vendeli.tgbot.types.msg.EntityType
 import eu.vendeli.tgbot.types.msg.MessageEntity
 import io.github.kamiiroawase.markdownv2.MessageEntity as TmMessageEntity
+import io.github.kamiiroawase.markdownv2.MessageEntityType
+import io.github.kamiiroawase.markdownv2.TelegramEntities
+import io.github.kamiiroawase.markdownv2.TelegramHtml
 
 // HTML：parse_mode = HTML
 sendMessage(TelegramHtml.render(reply))
@@ -140,12 +144,14 @@ editMessageText(first.messageId, pages[++page].text)
 ## 已知限制
 
 - 解析后端与 commonmark-java 的行为差异：HTML 块识别较弱（`<!-- -->`、`<!DOCTYPE>` 按段落内联处理）；强调内部的闭合 HTML 标签（如 `*a<b>x</b>*` 中的 `</b>`）不被识别为行内 HTML
-- 超过 100 层的引用 / 列表 / 行内强调平铺为纯文本（防病态输入栈溢出）
+- 超过 100 层的引用 / 列表 / 行内强调平铺为纯文本（防病态输入栈溢出）；平铺的连续块之间没有分隔符，深层内容可能黏连成词
 - 病态深嵌套的主要耗时在上游解析器：数千层嵌套列表（约 4MB 输入）端到端秒级，九成在 commonmark-kotlin 解析；接受不可信输入的服务应自行限制输入规模
 - 超长内容先完整渲染再收缩（两遍策略）；截断收缩按重试收敛，最坏 O(n²)——4096 默认上限下无感
 - MarkdownV2 不是普通 Markdown：`__` 是下划线不是粗体，不要把渲染结果再当普通 Markdown 二次加工
 - 官方 task-list / autolink 扩展的后处理器递归遍历块树，深嵌套输入会栈溢出（mingwX64 实测 1500 层引用）——默认集合挂的是库内行为对齐的迭代版替代品（internal 实现，产出与官方一致的节点类型）；footnotes 官方版无此问题，直接采用
 - HTML 端的块级输入 HTML（`<div>` 等）仍降级为 `<pre>` 转义文本，不透传；可折叠引用（`<blockquote expandable>`）同样不支持
+- entities 端对引用套引用（`> > x`）产出嵌套的 blockquote 区间——Bot API 格式化规则禁止 blockquote 嵌套，但服务端发送时静默修复（丢弃内层区间），消息照常送达；对原始区间数组做严格校验的消费方需自行去重
+- 分片的"不丢字符"有两个纯空白例外：代码块顶部尚未拼接真实内容的空行在接缝触发时丢弃；全空白的扁平化分片丢弃（服务端拒绝空白消息）——丢失的都是 Telegram 永远不会显示的空白
 
 ## 开发
 
@@ -159,7 +165,7 @@ cd telegram-markdownv2
 
 API 参考（Dokka）随 main 分支推送自动部署到 [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/)。
 
-575 个行为级测试（输入/输出断言）外加一个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量——正是它抓住了下述两个行首 `>` 缺陷），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
+596 个测试——595 个行为级（输入/输出断言）外加 1 个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量——正是它抓住了下述两个行首 `>` 缺陷），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
 
 ## 许可
 

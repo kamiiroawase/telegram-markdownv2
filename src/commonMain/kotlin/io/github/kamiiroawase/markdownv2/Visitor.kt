@@ -228,13 +228,20 @@ internal fun extractHref(attrs: String): String? = extractAttribute(attrs, "href
 
 /**
  * Extracts a tg-emoji tag's emoji-id attribute and validates it the way both output
- * formats require: the value must decode to digits only (custom emoji ids are numeric);
- * absent, empty or non-numeric yields null — the degradation trigger.
+ * formats require: custom emoji ids are positive int64 values, so the decoded value
+ * must be ASCII digits forming a Long above zero — "0", a run overflowing int64, and
+ * Unicode digits all draw a 400 "Invalid custom emoji identifier specified" from the
+ * server, so they degrade like an absent id (the ASCII guard matters because
+ * toLongOrNull goes through Character.digit, which happily parses Unicode digits).
+ * Absent, empty or out-of-range yields null — the degradation trigger.
  */
 internal fun tgEmojiIdOf(attrs: String): String? =
     extractAttribute(attrs, "emoji-id")
         ?.let(::decodeHtmlEntities)
-        ?.takeIf { it.isNotEmpty() && it.all { char -> char.isDigit() } }
+        ?.takeIf { value ->
+            val id = value.toLongOrNull()
+            value.isNotEmpty() && value.all { it in '0'..'9' } && id != null && id > 0L
+        }
 
 /**
  * Decodes the supported HTML entities (`&amp;`, `&#38;`, `&#x26;`, …) in attribute values
@@ -645,13 +652,13 @@ internal class Visitor(
 
     override fun visit(emphasis: Emphasis) {
         if (!enterInline()) {
-            appendPlainText(sb, emphasis)
+            sb.append(escapedPlainText(emphasis))
             return
         }
         // A '_' opening onto a trailing underscore marker would glue (see
         // atUnderscoreGlue) — flatten to plain text, the depth-cap degradation
         if (atUnderscoreGlue()) {
-            appendPlainText(sb, emphasis)
+            sb.append(escapedPlainText(emphasis))
             exitInline()
             return
         }
@@ -679,7 +686,7 @@ internal class Visitor(
 
     override fun visit(strongEmphasis: StrongEmphasis) {
         if (!enterInline()) {
-            appendPlainText(sb, strongEmphasis)
+            sb.append(escapedPlainText(strongEmphasis))
             return
         }
         val seq = nextSeq++
@@ -696,7 +703,7 @@ internal class Visitor(
         when (customNode) {
             is Strikethrough -> {
                 if (!enterInline()) {
-                    appendPlainText(sb, customNode)
+                    sb.append(escapedPlainText(customNode))
                     return
                 }
                 val seq = nextSeq++
@@ -832,9 +839,7 @@ internal class Visitor(
                 // visible text the unextended parse shows
                 val body =
                     if (depth + 1 >= MAX_RENDER_DEPTH) {
-                        val plain = StringBuilder()
-                        appendPlainText(plain, customBlock)
-                        plain.toString().trimEnd('\n')
+                        escapedPlainText(customBlock).trimEnd('\n')
                     } else {
                         val visitor = Visitor(depth + 1, options, inListItem = true)
                         visitor.visitChildren(customBlock)
@@ -1216,9 +1221,7 @@ internal class Visitor(
     // renderChild)
     private fun renderChild(node: Node): String =
         if (depth + 1 >= MAX_RENDER_DEPTH) {
-            val plain = StringBuilder()
-            appendPlainText(plain, node)
-            plain.toString().trimEnd('\n')
+            escapedPlainText(node).trimEnd('\n')
         } else {
             val visitor = Visitor(depth + 1, options, inListItem = true)
             visitor.visitChildren(node)
@@ -1233,12 +1236,25 @@ internal class Visitor(
     // context, where any deeper quote degrades alike
     private fun renderQuoteChild(node: Node): String =
         if (depth + 1 >= MAX_RENDER_DEPTH) {
-            val plain = StringBuilder()
-            appendPlainText(plain, node)
-            plain.toString().trimEnd('\n')
+            escapedPlainText(node).trimEnd('\n')
         } else {
             val visitor = Visitor(depth + 1, options, inListItem = inListItem)
             node.accept(visitor)
             visitor.output().trimEnd('\n')
         }
+
+    // appendPlainText flattens with no output-format escaping (the entities protocol
+    // needs none); the degradation paths above land that text in MarkdownV2 output, so it
+    // escapes on the way in — text-escaped outside code entities, code-escaped inside one
+    // (a glue degradation can fire while an HTML code entity is open, and a \_ there
+    // would show the backslash). The HTML twin's appendEscapedHtmlPlainText is the same
+    // shape. One caveat inherited from appendPlainText: consecutive block children of the
+    // flattened subtree join with no separator, so pathological depth-capped structure
+    // can render words run together — content over formatting, at 100+ levels of nesting
+    private fun escapedPlainText(node: Node): String {
+        val plain = StringBuilder()
+        appendPlainText(plain, node)
+        val text = plain.toString()
+        return if (htmlCodeDepth > 0) escapeCode(text) else escapeText(text)
+    }
 }

@@ -202,7 +202,14 @@ internal class EntityVisitor(
     // A quote is one blockquote range over its children's text — no line-prefix
     // grammar, no wrapper tags, so quotes inside list items keep their formatting (the
     // MarkdownV2 render must degrade them there). An all-blank quote renders nothing:
-    // an empty range is no quote at all
+    // an empty range is no quote at all.
+    //
+    // Known deviation, pinned as designed: a quote nested inside a quote emits a
+    // blockquote range over child ranges that include the inner quote's own blockquote —
+    // Bot API formatting rules say blockquote entities can't nest. The server repairs
+    // this silently (the inner range drops at send time), every range stays in bounds,
+    // and deduplicating across the visitor and the truncation/chunking re-assembly
+    // paths would trade that cosmetic overlap for three divergent code paths
     override fun visit(blockQuote: BlockQuote) {
         val start = sb.length
         var appended = false
@@ -280,6 +287,14 @@ internal class EntityVisitor(
     }
 
     override fun visit(emphasis: Emphasis) {
+        if (codeDepth > 0) {
+            // Telegram forbids entities nested inside code ("Pre and Code can't contain
+            // nested entities"): the range never opens, the content renders as plain code
+            // text — the same degradation the MarkdownV2 twin's silent emphasis entries
+            // make (the string twins drop the tags outright)
+            visitChildren(emphasis)
+            return
+        }
         if (!enterInline()) {
             appendPlainText(sb, emphasis)
             return
@@ -293,6 +308,11 @@ internal class EntityVisitor(
     }
 
     override fun visit(strongEmphasis: StrongEmphasis) {
+        if (codeDepth > 0) {
+            // See visit(emphasis): the range never opens inside an open code range
+            visitChildren(strongEmphasis)
+            return
+        }
         if (!enterInline()) {
             appendPlainText(sb, strongEmphasis)
             return
@@ -308,6 +328,11 @@ internal class EntityVisitor(
     override fun visit(customNode: CustomNode) {
         when (customNode) {
             is Strikethrough -> {
+                if (codeDepth > 0) {
+                    // See visit(emphasis): the range never opens inside an open code range
+                    visitChildren(customNode)
+                    return
+                }
                 if (!enterInline()) {
                     appendPlainText(sb, customNode)
                     return
@@ -400,8 +425,10 @@ internal class EntityVisitor(
         val destination = link.destination.orEmpty()
         // Telegram rejects text_link entities with an empty URL, and links cannot nest
         // (a nested Link cannot come out of CommonMark parsing; the guard covers
-        // hand-built ASTs) — degrade to the link text alone in both cases
-        if (destination.isEmpty() || linkEntityOpen()) {
+        // hand-built ASTs) — degrade to the link text alone in both cases. A link entity
+        // inside an open code range is equally illegal ("Pre and Code can't contain
+        // nested entities"): the label text stays, the link drops
+        if (destination.isEmpty() || linkEntityOpen() || codeDepth > 0) {
             visitChildren(link)
             return
         }
@@ -424,7 +451,9 @@ internal class EntityVisitor(
     // visit(link)). Nested inside another link only the alt text survives
     override fun visit(image: Image) {
         val destination = image.destination.orEmpty()
-        if (destination.isEmpty() || linkEntityOpen()) {
+        // See visit(link): empty URL, nesting and open code ranges all degrade to the
+        // alt text alone
+        if (destination.isEmpty() || linkEntityOpen() || codeDepth > 0) {
             visitChildren(image)
             return
         }
@@ -533,13 +562,24 @@ internal class EntityVisitor(
             codeDepth++
             return
         }
+        if (codeDepth > 0) {
+            // Any other formatting tag inside an open code range would nest an entity
+            // Telegram rejects ("Pre and Code can't contain nested entities"): the tag
+            // drops — merged keeps the closer matched and emission-free, the content
+            // continues as plain code text (the MarkdownV2 twin's silent entries)
+            openRanges.addLast(
+                OpenRange(mapped, sb.length, "", null, null, nextSeq++, html = true, merged = true),
+            )
+            return
+        }
         openRanges.addLast(OpenRange(mapped, sb.length, "", null, null, nextSeq++, html = true))
         if (mapped == MessageEntityType.CODE) codeDepth++
     }
 
     // <tg-emoji> maps to the custom_emoji entity — one of the constructs only the
-    // entities protocol expresses natively. The id must decode to digits (custom emoji
-    // ids are numeric); anything else degrades to visible text like every unknown tag
+    // entities protocol expresses natively. The id must decode to a positive int64 value
+    // (custom emoji ids are numeric); anything else degrades to visible text like every
+    // unknown tag
     private fun renderEmojiTag(
         tag: String,
         parts: TagParts,
@@ -549,13 +589,32 @@ internal class EntityVisitor(
         if (parts.closing) {
             if (!parts.selfClosing) {
                 val top = openRanges.lastOrNull()
-                if (top != null && top.html && top.type == MessageEntityType.CUSTOM_EMOJI && !top.merged) {
+                // Merged entries match too: a tag degraded inside an open code range
+                // closes as silently as it opened
+                if (top != null && top.html && top.type == MessageEntityType.CUSTOM_EMOJI) {
                     openRanges.removeLast()
                     closeRange(top)
                     return
                 }
             }
             sb.append(tag)
+            return
+        }
+        if (codeDepth > 0) {
+            // A custom emoji entity can't nest inside code: the tags drop, the emoji char
+            // renders as plain code text (merged keeps the closer silent)
+            openRanges.addLast(
+                OpenRange(
+                    MessageEntityType.CUSTOM_EMOJI,
+                    sb.length,
+                    "",
+                    null,
+                    null,
+                    nextSeq++,
+                    html = true,
+                    merged = true,
+                ),
+            )
             return
         }
         val id =
@@ -615,6 +674,23 @@ internal class EntityVisitor(
                 ),
             )
             sb.append(tag)
+            return
+        }
+        // A link entity can't nest inside an open code range: the tags drop silently —
+        // the empty-url sentinel shape, whose closer emits nothing — and the label text
+        // continues as plain code text
+        if (codeDepth > 0) {
+            openRanges.addLast(
+                OpenRange(
+                    MessageEntityType.TEXT_LINK,
+                    sb.length,
+                    "",
+                    null,
+                    null,
+                    nextSeq++,
+                    html = true,
+                ),
+            )
             return
         }
         // href="" is treated like a missing href: the empty URL degrades to plain text

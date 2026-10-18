@@ -261,6 +261,18 @@ class ExtensionsTest {
     }
 
     @Test
+    fun taskMarkerAcceptsAnyWhitespaceInsideBrackets() {
+        // Upstream's bracket class is [xX\s]: a tab (or any single whitespace) inside
+        // the brackets is an unchecked box, not a literal — pre-fix only "[ ]" counted.
+        // \r would normalize to a line ending at parse time, so the second case uses
+        // the vertical tab, the other member of Java's \s that is not one
+        assertEquals("• \\[ \\] tabbed", MarkdownV2.render("- [\t] tabbed"))
+        // 11.toChar() is U+000B, the vertical tab — the other member of Java's \s that
+        // is not a line ending at parse time; kept programmatic to keep the source ASCII
+        assertEquals("• \\[ \\] vtab", MarkdownV2.render("- [" + 11.toChar() + "] vtab"))
+    }
+
+    @Test
     fun orderedTaskListMarksMdv2() {
         assertEquals("1\\. \\[ \\] a\n2\\. \\[x\\] b", MarkdownV2.render("1. [ ] a\n2. [x] b"))
     }

@@ -1157,6 +1157,54 @@ class RenderTest {
         assertTrue(result.contains("x"))
     }
 
+    // ---------- glue/depth-cap flattening escapes ----------
+
+    // Both degradation paths flatten to plain text; pre-fix the literals landed raw in
+    // the MarkdownV2 output, so any special character shipped unescaped and Telegram
+    // rejected the whole message
+
+    @Test
+    fun glueDegradedEmphasisEscapesSpecialCharacters() {
+        assertEquals("_a_b\\.c", MarkdownV2.render("<i>a</i>*b.c*"))
+        assertEquals("_a_b\\>c", MarkdownV2.render("<i>a</i>*b>c*"))
+        assertEquals("text _a_b \\(c\\) \\- d\\! more", MarkdownV2.render("text <i>a</i>*b (c) - d!* more"))
+        assertTelegramParseable(MarkdownV2.render("<i>a</i>*b <x> c*"), "glueEscape")
+    }
+
+    @Test
+    fun depthCappedEmphasisFlattenEscapesSpecialCharacters() {
+        var node: Node = Text("a.b")
+        repeat(150) { node = Emphasis("_").apply { appendChild(node) } }
+        val paragraph = Paragraph()
+        paragraph.appendChild(node)
+        val result = MarkdownV2.render(paragraph)
+        assertTrue(result.contains("a\\.b"), "raw dot leaked: $result")
+        assertTelegramParseable(result, "depthCapEmphasisEscape")
+    }
+
+    @Test
+    fun depthCappedStrikethroughFlattenEscapesSpecialCharacters() {
+        var node: Node = Text("a.b")
+        repeat(150) { node = Strikethrough("~~").apply { appendChild(node) } }
+        val paragraph = Paragraph()
+        paragraph.appendChild(node)
+        val result = MarkdownV2.render(paragraph)
+        assertTrue(result.contains("a\\.b"), "raw dot leaked: $result")
+        assertTelegramParseable(result, "depthCapStrikeEscape")
+    }
+
+    @Test
+    fun depthCappedListFlattenEscapesSpecialCharacters() {
+        // The innermost items flatten through renderChild — the escaped twin of the
+        // HTML side's depthCapListFlattenEscapesHtml sweep
+        val content =
+            (0 until 106).joinToString("\n") { "  ".repeat(it) + "- L$it" } +
+                "\n" + "  ".repeat(106) + "- text.d\n"
+        val result = MarkdownV2.render(content)
+        assertTrue(result.contains("text\\.d"), "raw dot leaked: ${result.takeLast(80)}")
+        assertTelegramParseable(result, "depthCapListEscape")
+    }
+
     // ---------- HTML emphasis tags inside an open code entity ----------
 
     // A code-family tag inside <code> merges (its tags drop); pre-fix the emphasis

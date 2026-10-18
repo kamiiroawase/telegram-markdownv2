@@ -184,7 +184,11 @@ public object MarkdownV2 {
      *
      * Chunking semantics match the [renderChunked] string overload: blocks are packed whole
      * where they fit, oversized blocks split along their natural seams, every chunk is
-     * independently valid MarkdownV2, and no character is dropped. [maxLength] of 1 or less
+     * independently valid MarkdownV2, and no character is dropped — save whitespace that
+     * could never display anyway: pending blank lines at the top of a split code block
+     * drop when the seam fires before real content joins them, and an all-whitespace
+     * flattened piece drops because the server rejects blank messages. [maxLength] of 1 or
+     * less
      * returns the full render as a single chunk (chunking needs room for at least one
      * escaped character); unknown block/inline node types from third-party extensions
      * degrade to plain content.

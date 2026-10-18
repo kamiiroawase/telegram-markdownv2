@@ -176,7 +176,11 @@ private fun shrinkRenderedCode(
     val lines = rendered.lines()
     val open = lines.first()
     val close = lines.last()
-    if (open.length + close.length + 1 > budget) return ""
+    // A blank middle line needs open + '\n' + '\n' + close (the line itself and the one
+    // before the closing fence), so this guard must reserve both newlines — at
+    // open+close+1 nothing fits, not even the blank line, and "" lets the caller fall
+    // back to plain text
+    if (open.length + close.length + 2 > budget) return ""
 
     val sb = StringBuilder(open)
     for (line in lines.subList(1, lines.size - 1)) {

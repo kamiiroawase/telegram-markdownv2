@@ -43,6 +43,23 @@ class EntityChunkingTest {
     }
 
     @Test
+    fun whitespaceRunNeverYieldsABlankChunk() {
+        // A whitespace-only piece can never be sent — the server trims message text and
+        // rejects blank text with a 400 — so it drops; pre-fix a 700-space run with a
+        // 300 limit shipped blank chunks. The joined text loses only whitespace Telegram
+        // would never display
+        val chunks = TelegramEntities.renderChunked("a" + " ".repeat(700) + "b", 300)
+        assertTrue(chunks.size >= 2)
+        chunks.forEach { chunk ->
+            assertTrue(chunk.text.isNotBlank(), "blank chunk")
+            assertTrue(chunk.text.length <= 300, "chunk of ${chunk.text.length}")
+            assertEntitiesValid(chunk, "whitespaceRun")
+        }
+        assertTrue(chunks.first().text.startsWith("a"))
+        assertTrue(chunks.last().text.endsWith("b"))
+    }
+
+    @Test
     fun codeBlockLinesCarryPreRangePerChunk() {
         val code = (1..1000).joinToString("\n") { "line $it" }
         val chunks = TelegramEntities.renderChunked("```kotlin\n$code\n```", maxMessageLength)

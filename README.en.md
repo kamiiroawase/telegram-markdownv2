@@ -25,9 +25,10 @@ dependencies {
 ```
 
 ```kotlin
+import io.github.kamiiroawase.markdownv2.ChunkDecoration
 import io.github.kamiiroawase.markdownv2.MarkdownV2
-import io.github.kamiiroawase.markdownv2.TelegramHtml
 import io.github.kamiiroawase.markdownv2.TelegramEntities
+import io.github.kamiiroawase.markdownv2.TelegramHtml
 
 // parse_mode = MarkdownV2
 val text = MarkdownV2.render("**hello** world")                        // send as-is
@@ -88,6 +89,9 @@ import eu.vendeli.tgbot.types.component.ParseMode
 import eu.vendeli.tgbot.types.msg.EntityType
 import eu.vendeli.tgbot.types.msg.MessageEntity
 import io.github.kamiiroawase.markdownv2.MessageEntity as TmMessageEntity
+import io.github.kamiiroawase.markdownv2.MessageEntityType
+import io.github.kamiiroawase.markdownv2.TelegramEntities
+import io.github.kamiiroawase.markdownv2.TelegramHtml
 
 // HTML: parse_mode = HTML
 sendMessage(TelegramHtml.render(reply))
@@ -151,12 +155,14 @@ output directly — `entitiesJson()` is the ready-made value for the request bod
 ## Known limitations
 
 - Parser differences vs commonmark-java: weaker HTML block detection (`<!-- -->`, `<!DOCTYPE>` treated as inline paragraph content); a closing HTML tag inside emphasis (the `</b>` in `*a<b>x</b>*`) is not recognized as inline HTML
-- Quote/list/inline-emphasis nesting beyond 100 levels flattens to plain text (stack safety on pathological input)
+- Quote/list/inline-emphasis nesting beyond 100 levels flattens to plain text (stack safety on pathological input); flattened consecutive blocks join with no separator, so deeply nested content can render as run-together words
 - Pathologically deep nesting spends its time in the upstream parser: a multi-thousand-level nested list (~4MB input) takes seconds end to end, ~90% of it inside commonmark-kotlin parsing; services accepting untrusted input should cap input size themselves
 - Over-length content renders fully first, then shrinks (two passes); the shrink retry loop is worst-case O(n²) — negligible at the default 4096 limit
 - MarkdownV2 is not plain Markdown: `__` is underline, not bold; don't post-process rendered output as ordinary Markdown
 - The upstream task-list and autolink extensions post-process with recursive tree walks that stack-overflow on deeply nested input (measured on mingwX64 at a 1500-level quote chain) — the default set installs this library's behavior-matched iterative stand-ins (internal implementations emitting the same node types); the official footnotes extension has no such recursion and is used as-is
 - The HTML side still degrades block-level input HTML (`<div>` and friends) to escaped text inside a `<pre>` instead of passing it through; expandable blockquotes (`<blockquote expandable>`) are likewise unsupported
+- The entities side emits nested blockquote ranges for a quote inside a quote (`> > x`) — the Bot API formatting rules say blockquote entities can't nest, but the server repairs this silently at send time (the inner range drops) and the message delivers; consumers that strictly validate the raw entity array need to deduplicate themselves
+- Chunking has two whitespace-only exceptions to no-character-loss: pending blank lines at the top of a split code block drop when the seam fires before real content joins them, and an all-whitespace flattened piece drops because the server rejects blank messages — everything lost is whitespace Telegram would never display
 
 ## Development
 
@@ -170,7 +176,7 @@ cd telegram-markdownv2
 
 The API reference (Dokka) deploys to [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/) on every main push.
 
-575 behavior-level tests (input/output assertions) plus a seeded random-document property test (150 seeds, a generator over random combinations of emphasis/code/links/quotes/lists/task lists/tables/footnotes/autolinks/raw HTML/emoji asserting every invariant for all three formats — it is what caught the two line-initial '>' defects below), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
+596 tests — 595 behavior-level (input/output assertions) plus one seeded random-document property test (150 seeds, a generator over random combinations of emphasis/code/links/quotes/lists/task lists/tables/footnotes/autolinks/raw HTML/emoji asserting every invariant for all three formats — it is what caught the two line-initial '>' defects below), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
 
 ## License
 

@@ -45,6 +45,23 @@ class HtmlChunkingTest {
     }
 
     @Test
+    fun whitespaceRunNeverYieldsABlankChunk() {
+        // A whitespace-only flattened piece can never be sent — the server trims message
+        // text and rejects blank text with a 400 — so it drops; pre-fix a 700-space run
+        // with a 300 limit shipped blank chunks. The joined text loses only whitespace
+        // Telegram would never display
+        val chunks = TelegramHtml.renderChunked("a" + " ".repeat(700) + "b", 300)
+        assertTrue(chunks.size >= 2)
+        chunks.forEach { chunk ->
+            assertTrue(chunk.isNotBlank(), "blank chunk")
+            assertTrue(chunk.length <= 300, "chunk of ${chunk.length}")
+            assertTelegramHtmlParseable(chunk, "whitespaceRun")
+        }
+        assertTrue(chunks.first().startsWith("a"))
+        assertTrue(chunks.last().endsWith("b"))
+    }
+
+    @Test
     fun codeBlockLinesDistributeAcrossClosedPres() {
         val code = (1..1000).joinToString("\n") { "line $it" }
         val content = "```\n$code\n```"
