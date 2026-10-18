@@ -215,6 +215,109 @@ internal fun removeEscapes(text: String): String =
         }
     }
 
+// The tag set Telegram's HTML parse mode documents support for (br included: this
+// library emits a plain newline, but the parser accepts the tag)
+private val HTML_SUPPORTED_TAGS =
+    setOf("b", "i", "u", "s", "code", "pre", "a", "blockquote", "tg-spoiler", "tg-emoji", "br")
+
+private val HTML_ENTITY = Regex("^&(amp|lt|gt|quot|#[0-9]+|#[xX][0-9a-fA-F]+);")
+
+/**
+ * Asserts [output] is a message tdlib's HTML parser — the parser the Bot API runs with
+ * parse_mode = HTML — accepts, for the subset this library emits. The rules:
+ *
+ * - text never contains a bare `<` or `>` and every `&` opens a well-formed entity the
+ *   parser resolves (the five named forms this renderer emits, plus numeric references);
+ * - only documented tags appear, and they nest properly: a closing tag matches the
+ *   innermost open one, and nothing is left open at the end;
+ * - `<a>` carries a non-empty href, never nests inside another link, and its label is
+ *   not blank (Telegram rejects empty link entities);
+ * - `<tg-emoji>` carries a numeric emoji-id;
+ * - `<pre>` holds text and at most one language-marked `<code>` wrapper (the shape
+ *   Telegram's own examples document), and code never nests a second code level.
+ *
+ * Every HTML render, truncation and chunk piece must pass here.
+ */
+internal fun assertTelegramHtmlParseable(
+    output: String,
+    context: String,
+) {
+    fun fail(message: String): Nothing = throw AssertionError("$message ($context): $output")
+
+    val stack = ArrayDeque<String>()
+    // Links cannot nest, so at most one anchor is ever open — one flag suffices
+    var anchorHasText = false
+    var index = 0
+    while (index < output.length) {
+        val char = output[index]
+        when (char) {
+            '<' -> {
+                val end = output.indexOf('>', index + 1)
+                if (end == -1) fail("unterminated tag")
+                val inner = output.substring(index + 1, end)
+                if (inner.isEmpty()) fail("empty tag")
+                val closing = inner[0] == '/'
+                val body = if (closing) inner.substring(1) else inner
+                val name = body.takeWhile { it.isLetterOrDigit() || it == '-' }
+                if (name.isEmpty() || !name[0].isLetter()) fail("malformed tag name in <$inner>")
+                val attrs = body.substring(name.length)
+                val tag = name.lowercase()
+                if (tag !in HTML_SUPPORTED_TAGS) fail("unsupported tag <$name>")
+                if (tag == "br") {
+                    index = end + 1
+                    continue
+                }
+                val top = stack.lastOrNull()
+                if (!closing) {
+                    // The content restrictions bind openings only: a closing tag against
+                    // its own match on top of the stack is exactly the legal close
+                    if (top == "code") fail("<$tag> inside <code>")
+                    if (top == "pre" && tag != "code") fail("<$tag> inside <pre>")
+                    if (tag == "code" && "code" in stack) fail("nested code")
+                    if (tag == "pre" && "pre" in stack) fail("nested pre")
+                    if (tag == "code" && top == "pre" && !attrs.matches(Regex("^ class=\"language-[\\w+#-]*\"$"))) {
+                        fail("code inside pre must carry the language class")
+                    }
+                    if (tag == "a") {
+                        if ("a" in stack) fail("nested link entities")
+                        if (!attrs.matches(Regex("^ href=\".+\"$"))) fail("anchor without a non-empty href")
+                    }
+                    if (tag == "tg-emoji" && !attrs.matches(Regex("^ emoji-id=\"\\d+\"$"))) {
+                        fail("tg-emoji without a numeric emoji-id")
+                    }
+                    if (tag != "a" && tag != "code" && tag != "tg-emoji" && attrs.isNotBlank()) {
+                        fail("unexpected attributes on <$tag>")
+                    }
+                    stack.addLast(tag)
+                } else {
+                    if (top != tag) fail("</$tag> closes <$top>")
+                    if (tag == "a") {
+                        if (!anchorHasText) fail("empty link label")
+                        anchorHasText = false
+                    }
+                    stack.removeLast()
+                }
+                index = end + 1
+            }
+
+            '>' -> {
+                fail("bare '>' in text")
+            }
+
+            '&' -> {
+                val match = HTML_ENTITY.find(output.substring(index)) ?: fail("bare or malformed entity")
+                index += match.value.length
+            }
+
+            else -> {
+                if (!char.isWhitespace()) anchorHasText = true
+                index++
+            }
+        }
+    }
+    if (stack.isNotEmpty()) fail("unclosed <${stack.last()}>")
+}
+
 // Structured shapes for the limit-sweep invariant tests: every shrink/seam path (the four
 // fence-wrapped kinds, lists and nesting, quotes, headings, paragraph inline nodes,
 // surrogate pairs) at a range of limits. The exact-output tests pin hand-picked lengths;

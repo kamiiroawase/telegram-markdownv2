@@ -29,12 +29,12 @@ import org.commonmark.node.ThematicBreak
 
 // Maximum nesting depth for structural rendering: deeper quotes/lists/emphasis flatten to
 // plain text, preventing pathological input (e.g. thousand-level quote chains) from
-// exhausting the call stack
-private const val MAX_RENDER_DEPTH = 100
+// exhausting the call stack. Shared with HtmlVisitor.kt, whose structure caps alike
+internal const val MAX_RENDER_DEPTH = 100
 
 // Stack sentinel: a nested anchor literalized while an outer link is open; its closing tag
-// is treated literally as well
-private const val NESTED_LITERAL_ANCHOR = "nested-literal"
+// is treated literally as well. Shared with HtmlVisitor.kt, whose anchors literalize alike
+internal const val NESTED_LITERAL_ANCHOR = "nested-literal"
 
 // One entry per open inline entity, whichever kind pushed it — Markdown emphasis (this
 // visitor's own visits), HTML emphasis tags, HTML anchors — because their closers must
@@ -95,7 +95,7 @@ private class OpenAnchor(
 
 // A parsed inline-HTML tag: the lowercased name, the raw attribute string, whether the
 // tag closes, and whether its trailing slash read as self-closing
-private class TagParts(
+internal class TagParts(
     val closing: Boolean,
     val name: String,
     val attrs: String,
@@ -112,8 +112,12 @@ private class TagParts(
  * closing `>` after the tag name, whitespace, or a value's closing quote — an unquoted
  * value swallows its trailing slash (HTML5). An unclosed quote, a missing `>`, or
  * content after the `>` makes the whole tag unmatched; the caller escapes the literal.
+ * Tag names follow the CommonMark grammar `[A-Za-z][A-Za-z0-9-]*` — the hyphen keeps
+ * hyphenated names like tg-spoiler whole rather than splitting them into a name and a
+ * bogus attribute run (both rendering paths leave such names unmapped either way, so the
+ * MarkdownV2 output does not change).
  */
-private fun parseHtmlTag(tag: String): TagParts? {
+internal fun parseHtmlTag(tag: String): TagParts? {
     var index = 0
     if (index >= tag.length || tag[index] != '<') return null
     index++
@@ -122,7 +126,7 @@ private fun parseHtmlTag(tag: String): TagParts? {
     val nameStart = index
     if (index >= tag.length || !tag[index].isAsciiLetter()) return null
     index++
-    while (index < tag.length && tag[index].isAsciiLetterOrDigit()) index++
+    while (index < tag.length && (tag[index].isAsciiLetterOrDigit() || tag[index] == '-')) index++
     val name = tag.substring(nameStart, index).lowercase()
 
     val attrsStart = index
@@ -163,6 +167,119 @@ private fun parseHtmlTag(tag: String): TagParts? {
 private fun Char.isAsciiLetter(): Boolean = this in 'a'..'z' || this in 'A'..'Z'
 
 private fun Char.isAsciiLetterOrDigit(): Boolean = isAsciiLetter() || this in '0'..'9'
+
+// Attribute walking and entity decoding of HTML tags — shared by both output formats'
+// inline-HTML handling (the MarkdownV2 visitor carries decoded hrefs into its link
+// entities, the HTML visitor into its anchor attributes)
+
+/**
+ * Extracts one attribute's raw value from a tag's attribute string by walking name/value
+ * pairs left to right (linear, no regex). Quoted values are skipped as a whole, so an
+ * `href=` appearing inside another attribute's value (`title="href=x"`) cannot be mistaken
+ * for the real attribute; attribute names are compared case-insensitively (HTML5), and the
+ * value may be double-quoted, single-quoted or unquoted. Returns null when the attribute
+ * is absent, the raw (still entity-encoded) value otherwise — decoding stays with the
+ * caller, whose output format escapes differently.
+ */
+internal fun extractAttribute(
+    attrs: String,
+    name: String,
+): String? {
+    var index = 0
+    while (index < attrs.length) {
+        while (index < attrs.length && attrs[index].isWhitespace()) index++
+        if (index >= attrs.length) break
+        val nameStart = index
+        while (index < attrs.length && attrs[index] != '=' && !attrs[index].isWhitespace()) index++
+        val current = attrs.substring(nameStart, index)
+        while (index < attrs.length && attrs[index].isWhitespace()) index++
+        var value: String? = null
+        if (index < attrs.length && attrs[index] == '=') {
+            index++
+            while (index < attrs.length && attrs[index].isWhitespace()) index++
+            value =
+                if (index < attrs.length && (attrs[index] == '"' || attrs[index] == '\'')) {
+                    val quote = attrs[index]
+                    index++
+                    val valueStart = index
+                    while (index < attrs.length && attrs[index] != quote) index++
+                    attrs.substring(valueStart, index).also { if (index < attrs.length) index++ }
+                } else {
+                    // HTML5 unquoted value: ends at whitespace (a '>' cannot occur — the
+                    // tag parser already split it off)
+                    val valueStart = index
+                    while (index < attrs.length && !attrs[index].isWhitespace()) index++
+                    attrs.substring(valueStart, index)
+                }
+        }
+        if (current.equals(name, ignoreCase = true)) return value
+    }
+    return null
+}
+
+/**
+ * Extracts the href attribute from a tag's attribute string (see [extractAttribute]) and
+ * decodes its entities; absent or empty yields null — the empty URL is the degradation
+ * trigger in both output formats.
+ */
+internal fun extractHref(attrs: String): String? = extractAttribute(attrs, "href")?.takeIf { it.isNotEmpty() }?.let(::decodeHtmlEntities)
+
+/**
+ * Decodes the supported HTML entities (`&amp;`, `&#38;`, `&#x26;`, …) in attribute values
+ * and de-formatted text; `&` without a well-formed entity stays literal. Browsers decode
+ * entities in attributes before using the value, so an href extracted raw would link to
+ * the wrong URL.
+ */
+internal fun decodeHtmlEntities(text: String): String {
+    if ('&' !in text) return text
+    val sb = StringBuilder(text.length)
+    var index = 0
+    while (index < text.length) {
+        val char = text[index]
+        if (char != '&') {
+            sb.append(char)
+            index++
+            continue
+        }
+        val end = text.indexOf(';', index + 1)
+        // An entity body is 1-10 chars here: at least one char between & and ;, at most
+        // &#x10FFFF; — anything longer cannot be a supported entity and stays literal
+        if (end == -1 || end - index < 2 || end - index > 10) {
+            sb.append(char)
+            index++
+            continue
+        }
+        val decoded = decodeEntity(text.substring(index + 1, end))
+        if (decoded == null) {
+            sb.append(char)
+            index++
+        } else {
+            sb.append(decoded)
+            index = end + 1
+        }
+    }
+    return sb.toString()
+}
+
+private fun decodeEntity(body: String): String? =
+    when {
+        body.startsWith("#") -> decodeCharRef(body.substring(1))
+        else -> NAMED_ENTITIES[body]
+    }
+
+private fun decodeCharRef(digits: String): String? {
+    val codePoint =
+        when {
+            digits.startsWith("x") || digits.startsWith("X") -> digits.substring(1).toIntOrNull(16)
+            else -> digits.toIntOrNull()
+        } ?: return null
+    // 0 joins the rejects: the NUL it would decode to is not valid message text for
+    // Telegram — the reference stays literal like every other malformed one
+    if (codePoint <= 0 || codePoint > 0x10FFFF || codePoint in 0xD800..0xDFFF) return null
+    if (codePoint <= 0xFFFF) return codePoint.toChar().toString()
+    val offset = codePoint - 0x10000
+    return (0xD800 + (offset shr 10)).toChar().toString() + (0xDC00 + (offset and 0x3FF)).toChar().toString()
+}
 
 // Whether [output] ends with a backtick that is not the tail of an escape sequence:
 // content backticks always escape (\`), so an unescaped trailing one is a just-closed
@@ -935,106 +1052,6 @@ internal class Visitor(
         val href = extractHref(attrs)
         openEntities.addLast(OpenAnchor(href.orEmpty(), sb.length, sb.length + 1, nextSeq++))
         return if (href == null) "" else "["
-    }
-
-    /**
-     * Extracts the href attribute from a tag's attribute string by walking name/value pairs
-     * left to right (linear, no regex). Quoted values are skipped as a whole, so an `href=`
-     * appearing inside another attribute's value (`title="href=x"`) cannot be mistaken for
-     * the real attribute; attribute names are compared case-insensitively (HTML5), and the
-     * value may be double-quoted, single-quoted or unquoted. Returns null when the attribute
-     * is absent or empty.
-     */
-    private fun extractHref(attrs: String): String? {
-        var index = 0
-        while (index < attrs.length) {
-            while (index < attrs.length && attrs[index].isWhitespace()) index++
-            if (index >= attrs.length) break
-            val nameStart = index
-            while (index < attrs.length && attrs[index] != '=' && !attrs[index].isWhitespace()) index++
-            val name = attrs.substring(nameStart, index)
-            while (index < attrs.length && attrs[index].isWhitespace()) index++
-            var value: String? = null
-            if (index < attrs.length && attrs[index] == '=') {
-                index++
-                while (index < attrs.length && attrs[index].isWhitespace()) index++
-                value =
-                    if (index < attrs.length && (attrs[index] == '"' || attrs[index] == '\'')) {
-                        val quote = attrs[index]
-                        index++
-                        val valueStart = index
-                        while (index < attrs.length && attrs[index] != quote) index++
-                        attrs.substring(valueStart, index).also { if (index < attrs.length) index++ }
-                    } else {
-                        // HTML5 unquoted value: ends at whitespace (a '>' cannot occur — the
-                        // tag regex already split it off)
-                        val valueStart = index
-                        while (index < attrs.length && !attrs[index].isWhitespace()) index++
-                        attrs.substring(valueStart, index)
-                    }
-            }
-            if (name.equals("href", ignoreCase = true)) {
-                return value?.takeIf { it.isNotEmpty() }?.let(::decodeHtmlEntities)
-            }
-        }
-        return null
-    }
-
-    /**
-     * Decodes the supported HTML entities (`&amp;`, `&#38;`, `&#x26;`, …) in URL attribute
-     * values; `&` without a well-formed entity stays literal. Browsers decode entities in
-     * attributes before using the value, so an href extracted raw would link to the wrong
-     * URL.
-     */
-    private fun decodeHtmlEntities(text: String): String {
-        if ('&' !in text) return text
-        val sb = StringBuilder(text.length)
-        var index = 0
-        while (index < text.length) {
-            val char = text[index]
-            if (char != '&') {
-                sb.append(char)
-                index++
-                continue
-            }
-            val end = text.indexOf(';', index + 1)
-            // An entity body is 1-10 chars here: at least one char between & and ;, at most
-            // &#x10FFFF; — anything longer cannot be a supported entity and stays literal
-            if (end == -1 || end - index < 2 || end - index > 10) {
-                sb.append(char)
-                index++
-                continue
-            }
-            val decoded = decodeEntity(text.substring(index + 1, end))
-            if (decoded == null) {
-                sb.append(char)
-                index++
-            } else {
-                sb.append(decoded)
-                index = end + 1
-            }
-        }
-        return sb.toString()
-    }
-
-    private fun decodeEntity(body: String): String? =
-        when {
-            body.startsWith("#") -> decodeCharRef(body.substring(1))
-            else -> NAMED_ENTITIES[body]
-        }
-
-    private fun decodeCharRef(digits: String): String? {
-        val codePoint =
-            when {
-                digits.startsWith("x") || digits.startsWith("X") -> digits.substring(1).toIntOrNull(16)
-                else -> digits.toIntOrNull()
-            } ?: return null
-        // 0 joins the rejects: the NUL it would decode to is not valid message text for
-        // Telegram — the reference stays literal like every other malformed one
-        if (codePoint <= 0 || codePoint > 0x10FFFF || codePoint in 0xD800..0xDFFF) return null
-        if (codePoint <= 0xFFFF) return codePoint.toChar().toString()
-        val offset = codePoint - 0x10000
-        return (0xD800 + (offset shr 10)).toChar().toString() + (0xDC00 + (offset and 0x3FF)).toChar()
     }
 
     private fun linkEntityOpen(): Boolean = openEntities.any { it is OpenAnchor } || openMarkdownLinks > 0

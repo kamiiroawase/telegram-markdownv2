@@ -39,3 +39,17 @@ public final class io/github/kamiiroawase/markdownv2/RenderOptionsKt {
 	public static final fun defaultDisplayWidth (I)I
 }
 
+public final class io/github/kamiiroawase/markdownv2/TelegramHtml {
+	public static final field INSTANCE Lio/github/kamiiroawase/markdownv2/TelegramHtml;
+	public static final field MIN_CHUNK_LENGTH I
+	public final fun escape (Ljava/lang/String;)Ljava/lang/String;
+	public final fun render (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/lang/String;
+	public final fun render (Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/lang/String;
+	public static synthetic fun render$default (Lio/github/kamiiroawase/markdownv2/TelegramHtml;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/lang/String;
+	public static synthetic fun render$default (Lio/github/kamiiroawase/markdownv2/TelegramHtml;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/lang/String;
+	public final fun renderChunked (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public final fun renderChunked (Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramHtml;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramHtml;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+}
+

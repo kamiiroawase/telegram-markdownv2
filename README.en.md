@@ -4,7 +4,7 @@
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.kamiiroawase/telegram-markdownv2.svg)](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
-Kotlin Multiplatform library that converts **CommonMark (incl. GFM tables & strikethrough) into Telegram MarkdownV2**, with structure-preserving truncation or lossless chunking for over-length content (Telegram caps messages at 4096 characters; chunks sent in order deliver all the content — no character is dropped, entities straddling a seam close per piece). Built for LLM bot output — model replies are arbitrary Markdown of unpredictable structure, frequently containing constructs Telegram cannot render.
+Kotlin Multiplatform library that converts **CommonMark (incl. GFM tables & strikethrough) into Telegram MarkdownV2 or HTML**, with structure-preserving truncation or lossless chunking for over-length content (Telegram caps messages at 4096 characters; chunks sent in order deliver all the content — no character is dropped, entities straddling a seam close per piece). Built for LLM bot output — model replies are arbitrary Markdown of unpredictable structure, frequently containing constructs Telegram cannot render.
 
 [中文版](README.md)
 
@@ -26,18 +26,33 @@ dependencies {
 
 ```kotlin
 import io.github.kamiiroawase.markdownv2.MarkdownV2
+import io.github.kamiiroawase.markdownv2.TelegramHtml
 
-val text = MarkdownV2.render("**hello** world")                        // send with parse_mode = MarkdownV2
+// parse_mode = MarkdownV2
+val text = MarkdownV2.render("**hello** world")                        // send as-is
 val clipped = MarkdownV2.render(reply, MarkdownV2.MAX_MESSAGE_LENGTH)  // over-limit truncation, still valid MarkdownV2
 val parts = MarkdownV2.renderChunked(reply)                            // lossless chunks, each <= 4096 and independently valid
 val literal = MarkdownV2.escape(userInput)                             // escape dynamic text when hand-assembling MarkdownV2
 val fallback = MarkdownV2.toPlainText(rejectedPart)                    // de-format a rejected piece, resend without parse_mode
+
+// parse_mode = HTML — both entries share the parser, RenderOptions and the
+// truncation/chunking semantics
+val html = TelegramHtml.render("**hello** <tg-spoiler>world</tg-spoiler>")   // tg-spoiler and tg-emoji pass through
+val htmlParts = TelegramHtml.renderChunked(reply)                            // same lossless chunking, each piece valid HTML
+val htmlLiteral = TelegramHtml.escape(userInput)                             // escapes & < > (attributes also escape ")
 ```
 
 - All 19 escapable characters (Telegram's 18 official special characters plus the backslash) escaped; inline code / code blocks / link URLs follow their own escaping rules
 - Unsupported constructs degrade gracefully: tables become aligned code blocks (cell cap and display-width measure configurable via `RenderOptions`), HTML maps to entities or literal text, a blockquote inside a list item degrades to its content (the Bot API accepts an unescaped `>` only at a line start — one behind a list marker or continuation indent gets the whole message rejected with 400), and underscore-family emphasis that would glue onto a neighboring `_`/`__` marker degrades (the parser re-pairs touching markers into entities it cannot close)
 - Truncation and chunking preserve structure: code fences close, unclosed entities complete, quote and list prefixes survive line by line, escape sequences and surrogate pairs never split; when nothing structural fits, the fallback is escaped plain text
 - Pass a custom `Parser` built on top of `MarkdownV2.defaultExtensions` for more Markdown extensions (footnotes, autolink, …); unknown extension nodes traverse as plain content without crashing
+
+### How the HTML side differs
+
+- Escaping is uniform everywhere: `&`, `<`, `>` in text, `"` additionally in attribute values — none of MarkdownV2's context-narrowed rules
+- A quote is a `<blockquote>` wrapper tag rather than a line-start `>` prefix, so **a quote inside a list item keeps its formatting** (the MarkdownV2 side must degrade it); an all-blank quote renders nothing (the MarkdownV2 side keeps a bare `>` marker)
+- `<tg-spoiler>` and `<tg-emoji emoji-id="…">` from inline input HTML pass through as-is — constructs MarkdownV2 cannot express; a fenced code block with a language maps to `<pre><code class="language-x">` (which Telegram syntax-highlights)
+- Chunking needs room for one escape unit — 5 characters, an `&amp;` (`TelegramHtml.MIN_CHUNK_LENGTH`); below that the full render returns as a single chunk
 
 ## Known limitations
 
@@ -46,6 +61,7 @@ val fallback = MarkdownV2.toPlainText(rejectedPart)                    // de-for
 - Pathologically deep nesting spends its time in the upstream parser: a multi-thousand-level nested list (~4MB input) takes seconds end to end, ~90% of it inside commonmark-kotlin parsing; services accepting untrusted input should cap input size themselves
 - Over-length content renders fully first, then shrinks (two passes); the shrink retry loop is worst-case O(n²) — negligible at the default 4096 limit
 - MarkdownV2 is not plain Markdown: `__` is underline, not bold; don't post-process rendered output as ordinary Markdown
+- The HTML side still degrades block-level input HTML (`<div>` and friends) to escaped text inside a `<pre>` instead of passing it through; expandable blockquotes (`<blockquote expandable>`) are likewise unsupported
 
 ## Development
 
@@ -57,7 +73,7 @@ cd telegram-markdownv2
 ./gradlew benchmark    # perf benchmark: typical messages ~0.1 ms, 1M characters ~10 ms; CI re-runs attach the output to every GitHub Release
 ```
 
-321 behavior-level tests (input/output assertions), running on every platform. Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
+430 behavior-level tests (input/output assertions), running on every platform; every HTML-side output additionally passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), as the MarkdownV2 side does (`assertTelegramParseable`). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
 
 ## License
 

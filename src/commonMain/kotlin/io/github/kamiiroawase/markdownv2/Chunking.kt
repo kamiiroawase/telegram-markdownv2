@@ -100,7 +100,8 @@ private fun chunkBlockInto(
 /**
  * The chunking pipeline's shared output state: completed pieces plus the in-progress chunk,
  * flowing through every seam so an oversized block's last piece can stay open for the
- * caller's next content to pack alongside.
+ * caller's next content to pack alongside. Shared with the HTML chunking pipeline
+ * (HtmlChunking.kt), whose pieces follow the same rendered/verbatim distinction.
  *
  * [verbatimTail] distinguishes the two content kinds that meet here. Rendered structure
  * flushes trimmed — its trailing whitespace is block-separator junk. Flattened escaped
@@ -108,7 +109,7 @@ private fun chunkBlockInto(
  * code line's trailing space, say) that the losslessness guarantee forbids dropping;
  * trimming flushes used to drop exactly those characters at the flatten-to-flush boundary.
  */
-private class ChunkAccumulator {
+internal class ChunkAccumulator {
     val pieces: MutableList<String> = mutableListOf()
     val current: StringBuilder = StringBuilder()
     var verbatimTail = false
