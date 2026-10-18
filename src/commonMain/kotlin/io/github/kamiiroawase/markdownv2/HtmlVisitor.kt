@@ -59,6 +59,11 @@ private class OpenInlineTag(
     val openLength: Int = 0,
     val merged: Boolean = false,
     val url: String? = null,
+    // A merged code-family entry that merged into an open code entity took a codeDepth
+    // unit on push and must return it on close; one merged into a custom-emoji fallback
+    // took none — the formatting tags that stay legal inside an emoji (bold, italic, …)
+    // must not see a code depth no code entity owns
+    val ownsCodeDepth: Boolean = false,
 ) : OpenTag
 
 // An open anchor — a Markdown link, a Markdown image or an HTML <a>: the href ("" when
@@ -80,12 +85,13 @@ private class OpenAnchorTag(
  * label that closes over them) or at output time, always latest-opened first so the
  * output stays properly nested; code tags cannot span blocks ("Pre and Code can't
  * contain nested entities") and complete at every block start, while anchors
- * additionally complete before <pre>-emitting blocks (a pre entity may not sit inside
- * a link entity); block quotes wrap in <blockquote> tags (no line-prefix grammar to
- * satisfy, so — unlike the MarkdownV2 visitor — a quote inside a list item keeps its
- * formatting; nested quotes flatten into one wrapper — Bot API formatting rules say
- * blockquote entities can't nest); tables degrade to aligned text via
- * [renderTableLines].
+ * additionally complete before <pre>-emitting blocks and block quotes (neither a pre
+ * nor a blockquote wrapper may sit inside a link entity — the entities documentation's
+ * "Cannot be nested inside other entities"); block quotes wrap in <blockquote> tags
+ * (no line-prefix grammar to satisfy, so — unlike the MarkdownV2 visitor — a quote
+ * inside a list item keeps its formatting; nested quotes flatten into one wrapper —
+ * Bot API formatting rules say blockquote entities can't nest); tables degrade to
+ * aligned text via [renderTableLines].
  *
  * The output is valid Telegram HTML everywhere: text escapes `<`, `>` and `&` uniformly
  * (the escape set does not narrow inside code entities), attribute values additionally
@@ -159,9 +165,10 @@ internal class HtmlVisitor(
         outputTime: Boolean = false,
     ) {
         if (entity.merged) {
-            // A merged entry emitted no opener — its closer emits nothing either. It owns
-            // a depth unit exactly like the entry it merged into (see renderHtmlInlineTag)
-            if (entity.tag == "code") codeDepth--
+            // A merged entry emitted no opener — its closer emits nothing either; only a
+            // merge into an open code entity returns the depth unit its push took (a
+            // custom-emoji merge never took one — see ownsCodeDepth)
+            if (entity.tag == "code" && entity.ownsCodeDepth) codeDepth--
             return
         }
         val contentStart = entity.openStart + entity.openLength
@@ -268,9 +275,11 @@ internal class HtmlVisitor(
         val pieces = mutableListOf<String>()
         appendQuoteChildren(blockQuote, pieces, 0)
         if (pieces.isEmpty()) return
-        // A code entity from an earlier block completes first — the wrapper is a block
-        // tag, and Telegram rejects block tags inside inline code
-        completeOpenInlineCodeTags()
+        // Code entities and anchors from an earlier block complete first — the wrapper
+        // is a block-level entity: Telegram rejects block tags inside inline code, and a
+        // blockquote may no more sit inside a link entity than a pre can (the entities
+        // documentation's "Cannot be nested inside other entities")
+        completeOpenInlineCodeAndAnchorTags()
         sb.append("<blockquote>")
         sb.append(pieces.joinToString("\n\n"))
         sb.append("</blockquote>\n\n")
@@ -361,6 +370,12 @@ internal class HtmlVisitor(
             // meaning in HTML and render exactly as the MarkdownV2 render shows them
             // inside a code entity
             sb.append('`').append(escapeHtmlText(code.literal)).append('`')
+        } else if (customEmojiOpen()) {
+            // A code entity can't nest inside a custom emoji ("all other entities can't
+            // contain each other"): the span's content renders as the fallback's plain
+            // text, tags and backticks both dropped — the same silent degradation the
+            // tag path makes of a code-family tag there (see renderHtmlInlineTag)
+            sb.append(escapeHtmlText(code.literal))
         } else {
             sb.append("<code>")
             sb.append(escapeHtmlText(code.literal))
@@ -572,20 +587,23 @@ internal class HtmlVisitor(
         val labelStart = sb.length
         visitChildren(link)
         openMarkdownLinks--
-        // Telegram also rejects link entities with empty text: a label that renders to no
-        // visible text (no children, whitespace-only, or children like a lone HTML
-        // comment) degrades to the bare escaped URL. Rewinding is safe — inside a label
-        // every pushed tag was accompanied by output, so a blank label left nothing open
-        if (regionIsBlank(labelStart)) {
-            sb.setLength(openStart)
-            sb.append(escapeHtmlText(destination))
-            return
-        }
         // Whatever HTML opened inside the label closes before the link does: left open it
         // would cross the </a> boundary into crossed tags, or leak codeDepth onto the text
         // after the link. Anchors opened inside are all literalized sentinels (the entry
         // guard saw to that), so they close silently here
         completeOpenedAfter(entrySeq)
+        // Telegram also rejects link entities with empty text: a label that renders to no
+        // visible text (no children, whitespace-only, or children like a lone HTML
+        // comment) degrades to the bare escaped URL. The check must see the
+        // post-completion state — an unclosed inner tag as the label's whole content
+        // passes any earlier blank test on its opener's strength, then rewinds to
+        // nothing and would leave the empty <a></a> pair behind. Rewinding is safe: the
+        // completion has already popped everything the label opened
+        if (regionIsBlank(labelStart)) {
+            sb.setLength(openStart)
+            sb.append(escapeHtmlText(destination))
+            return
+        }
         sb.append("</a>")
     }
 
@@ -643,14 +661,15 @@ internal class HtmlVisitor(
         val labelStart = sb.length
         visitChildren(image)
         openMarkdownLinks--
-        // See visit(link): a label with no visible text degrades to the bare escaped URL
+        // See visit(link): HTML opened inside the alt text closes before the link does,
+        // and the empty-label degradation checks the post-completion state — an unclosed
+        // inner tag as the alt's whole content rewinds only at that completion
+        completeOpenedAfter(entrySeq)
         if (regionIsBlank(labelStart)) {
             sb.setLength(openStart)
             sb.append(escapeHtmlText(destination))
             return
         }
-        // See visit(link): HTML opened inside the alt text closes before the link does
-        completeOpenedAfter(entrySeq)
         sb.append("</a>")
     }
 
@@ -762,10 +781,19 @@ internal class HtmlVisitor(
         }
         if (mapped == "code" && codeDepth > 0) {
             // A code-family tag never nests a second code level: inside an open code
-            // entity it merges into it (nested code renders exactly as single code), the
-            // tags dropping while the content continues code-styled
-            openTags.addLast(OpenInlineTag("code", html = true, seq = nextSeq++, merged = true))
+            // entity it merges into it (nested code renders exactly as single code),
+            // the tags dropping while the content continues code-styled
+            openTags.addLast(OpenInlineTag("code", html = true, seq = nextSeq++, merged = true, ownsCodeDepth = true))
             codeDepth++
+            return
+        }
+        if (mapped == "code" && customEmojiOpen()) {
+            // A code entity can't nest inside a custom emoji either ("all other entities
+            // can't contain each other"): the tags drop — merged keeps the closer matched
+            // and emission-free — and the content continues as plain fallback text. No
+            // depth unit: the emoji is no code entity, and the formatting tags that stay
+            // legal inside it (bold, italic, …) must keep their own tags
+            openTags.addLast(OpenInlineTag("code", html = true, seq = nextSeq++, merged = true))
             return
         }
         if (codeDepth > 0) {
@@ -906,6 +934,14 @@ internal class HtmlVisitor(
     // way the twin's code-depth emoji sentinel does
     private fun linkEntityOpen(): Boolean =
         openTags.any { it is OpenAnchorTag || (it is OpenInlineTag && it.tag == "tg-emoji") } || openMarkdownLinks > 0
+
+    // Whether a real custom-emoji entity is open: a tg-emoji entry that emitted its
+    // opener — not one of the merged no-output degradations, which sit inside a code
+    // entity or a link and are no custom emoji at all. "All other entities can't contain
+    // each other" bars a code entity from nesting inside one, so code-family content
+    // renders as plain fallback text while one is open (see visit(code) and
+    // renderHtmlInlineTag)
+    private fun customEmojiOpen(): Boolean = openTags.any { it is OpenInlineTag && it.tag == "tg-emoji" && !it.merged }
 
     // Whether the output region starting at [start] renders no visible text: empty or
     // whitespace only. The label callers check it immediately after the label's children,

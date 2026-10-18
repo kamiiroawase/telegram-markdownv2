@@ -757,4 +757,20 @@ class TruncationTest {
         assertEquals(">> c1…", result)
         assertTelegramParseable(result, "nestedQuoteCodeDegrade")
     }
+
+    @Test
+    fun plainFallbackKeepsAutolinkAndCustomEmojiDisplayText() {
+        // plainText's UrlFallback carve-outs, shared by every format's truncation
+        // fallback: a label that IS the destination never gains " (url)" (the suffix
+        // used to duplicate an autolink's URL inside the cut), and the custom emoji
+        // image spelling never surfaces its internal tg:// destination
+        assertEquals(
+            "see https://e\\.com/x end plus…",
+            MarkdownV2.render("see https://e.com/x end plus many words to overflow the budget", 30),
+        )
+        assertEquals(
+            "• 😀 tttttt…",
+            MarkdownV2.render("- ![😀](tg://emoji?id=5368324170671202286) " + "t".repeat(40), 12),
+        )
+    }
 }

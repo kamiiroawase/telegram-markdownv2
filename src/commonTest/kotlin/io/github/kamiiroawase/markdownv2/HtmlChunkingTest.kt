@@ -176,6 +176,20 @@ class HtmlChunkingTest {
     }
 
     @Test
+    fun unclosedAnchorFlushesItsHrefAtEndOfInput() {
+        // deformatHtml's no-target-loss trade: an anchor that never closes still owns
+        // its href — the remaining stack flushes at end of input, innermost first (the
+        // order a run of matching closes would take). Pre-fix the href dropped entirely
+        // ("label"), where the MarkdownV2 twin keeps the target ("[a](u" → "[a](u")
+        assertEquals("label (u)", deformatHtml("<a href=\"u\">label"))
+        assertEquals("xy (u2) (u1)", deformatHtml("<a href=\"u1\">x<a href=\"u2\">y"))
+        // An empty href emits no tail, exactly like a matched close
+        assertEquals("label", deformatHtml("<a href=\"\">label"))
+        // A matched close still takes its tail at the tag, not at the end
+        assertEquals("a (u) b", deformatHtml("<a href=\"u\">a</a> b"))
+    }
+
+    @Test
     fun entityHeavyTextNeverSplitsAnEntity() {
         val content = "&<>".repeat(2000)
         val chunks = TelegramHtml.renderChunked(content, 17)
@@ -345,6 +359,39 @@ class HtmlChunkingTest {
         val blankLine = TelegramHtml.renderChunked("```\n" + " ".repeat(300) + "\nreal\n```", 100)
         assertEquals(listOf("<pre>real</pre>"), blankLine)
         blankLine.forEach { assertTelegramHtmlParseable(it, "fenceBlankLineSeam") }
+    }
+
+    // ---------- nested quotes keep one wrapper level per piece ----------
+
+    @Test
+    fun nestedQuoteChunksFlattenedIntoSingleWrappers() {
+        // The chunking twin of the truncation seam's flattening: the full render flattens
+        // a nested quote into one wrapper, so every piece carries at most one level —
+        // pre-fix the quote seam wrapped the inner quote's own <blockquote> inside the
+        // outer wrapper whenever the inner level happened to fit
+        val content = "> > small\n>\n> " + "y".repeat(100)
+        val chunks = TelegramHtml.renderChunked(content, 60)
+        assertEquals(
+            listOf(
+                "<blockquote>small</blockquote>",
+                "<blockquote>" + "y".repeat(35) + "</blockquote>",
+                "<blockquote>" + "y".repeat(35) + "</blockquote>",
+                "<blockquote>" + "y".repeat(30) + "</blockquote>",
+            ),
+            chunks,
+        )
+        chunks.forEach { assertTelegramHtmlParseable(it, "nestedQuoteChunkFlatten") }
+    }
+
+    @Test
+    fun tripleNestedQuoteChunksOneWrapperPerPiece() {
+        val chunks = TelegramHtml.renderChunked("> > > " + "x".repeat(80), 30)
+        assertTrue(chunks.isNotEmpty())
+        chunks.forEach { chunk ->
+            assertTrue(chunk.length <= 30, "over-long chunk: $chunk")
+            assertEquals(1, Regex("<blockquote>").findAll(chunk).count(), "nested wrapper: $chunk")
+            assertTelegramHtmlParseable(chunk, "tripleNestedQuoteChunk")
+        }
     }
 }
 

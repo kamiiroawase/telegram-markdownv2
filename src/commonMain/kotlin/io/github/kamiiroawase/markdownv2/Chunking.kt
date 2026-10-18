@@ -398,10 +398,12 @@ private fun chunkQuote(
  * prefixes decomposes to its lines: each line fits a chunk alone (inner pieces cap at
  * the inner limit, so every line does), except the lines of a fence pair, which
  * regroup with their markers re-emitted per chunk — splitting between them would strand
- * an unterminated fence. Nested-quote children keep piece granularity only: their lines
- * already carry the inner level's markers, and a deeper level's fence markers hide
- * behind them, so pairing markers from text alone cannot be exact — an overflowing
- * nested piece flattens instead (the tier the old path always took).
+ * an unterminated fence. A fence inside a list item opens behind the item's marker
+ * ("• ```") and closes behind the continuation indent ("  ```"); the pairing sees
+ * through both shapes (isFenceMarkerLine). Nested-quote children keep piece granularity
+ * only: their lines already carry the inner level's markers, and a deeper level's fence
+ * markers hide behind them, so pairing markers from text alone cannot be exact — an
+ * overflowing nested piece flattens instead (the tier the old path always took).
  */
 private fun appendStructuredQuoteChild(
     node: Node,
@@ -456,10 +458,14 @@ private fun appendStructuredQuoteChild(
             val line = lines[index]
             if (isFenceMarkerLine(line)) {
                 // Markers pair sequentially: a fence's opener matches the next marker
-                // line as its closer. The renderers always emit both, fences never
-                // nest, and no rendered line outside a fence can mimic a marker — both
-                // code escapers escape content backticks, and the language run's filter
-                // admits no '>' — so the pairing is exact
+                // line as its closer. The renderers always emit both and fences never
+                // nest. A fence inside a list item opens behind the item's marker and
+                // closes behind the continuation indent — real fence lines a bare
+                // "```"-line-start test used to miss, stranding openers and closers on
+                // different chunks — so the classification strips that structure first.
+                // Mimics stay impossible the other way around: both code escapers
+                // escape content backticks, the language run's filter admits no '>',
+                // and text-side backticks escape alike — the pairing is exact
                 var end = index + 1
                 while (end < lines.size && !isFenceMarkerLine(lines[end])) end++
                 if (end < lines.size) {
@@ -543,15 +549,35 @@ private fun packPrefixedFence(
     return produced
 }
 
-// A fence marker line as the renderers emit it: bare "```" or "```" plus the filtered
-// language run (letters/digits/-/+/#, ≤ 32 — the Visitor's fence filter). Both code
-// escapers escape content backticks, so no escaped line can start with an unescaped one
-private fun isFenceMarkerLine(line: String): Boolean =
-    line.startsWith("```") &&
-        (
-            line.length == 3 ||
-                (line.length <= 35 && line.substring(3).all { it.isLetterOrDigit() || it == '-' || it == '+' || it == '#' })
-        )
+// A fence marker line as the renderers emit it: "```" or "```" plus the filtered language
+// run (letters/digits/-/+/#, ≤ 32 — the Visitor's fence filter), optionally behind the
+// list structure a fence inside a list item carries — a continuation indent (applyPrefix)
+// and/or a rendered list marker ("• ", "N\. ") when the fence opens the item's first line,
+// so "• ```", "  ```" and "1\. ```kotlin" classify alike. Both code escapers escape
+// content backticks and text-side backticks escape the same way, so no line outside a
+// fence — flattened escaped text, paragraph content, another item's marker-bearing text
+// line — can carry an unescaped one behind that structure: the classification is exact
+private fun isFenceMarkerLine(line: String): Boolean {
+    var index = 0
+    while (index < line.length && line[index] == ' ') index++
+    if (line.startsWith("• ", index)) {
+        index += 2
+    } else {
+        val markerStart = index
+        while (index < line.length && line[index] in '0'..'9') index++
+        // The ordered marker's dot escapes in MarkdownV2 output; digits without that
+        // tail are content and leave the scan where it stands
+        if (index > markerStart && line.startsWith("\\. ", index)) {
+            index += 3
+        } else {
+            index = markerStart
+        }
+    }
+    if (!line.startsWith("```", index)) return false
+    val language = line.substring(index + 3)
+    return language.isEmpty() ||
+        (language.length <= 32 && language.all { it.isLetterOrDigit() || it == '-' || it == '+' || it == '#' })
+}
 
 // Resolves the escape sequences of already-escaped rendered text (\ + any char — inside
 // code entities every backslash starts a pair, and escapeText/escapeCode never emit a

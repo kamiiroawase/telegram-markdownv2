@@ -829,4 +829,80 @@ class HtmlRenderTest {
             TelegramHtml.render("```rust ignore\ncode\n```"),
         )
     }
+
+    // ---------- the seventh audit round: post-rewind empty labels, quote-anchor completion, emoji code ----------
+
+    @Test
+    fun unclosedTagAsTheWholeLabelDegradesToBareUrl() {
+        // The label's blank test must see the post-completion state: an unclosed inner
+        // tag as the label's only content passes any earlier blank test on its opener's
+        // strength, then rewinds to nothing at the completion and used to leave the
+        // empty <a></a> pair Telegram rejects
+        assertEquals("https://e.com", TelegramHtml.render("[<b>](https://e.com)"))
+        assertEquals("https://e.com", TelegramHtml.render("[<code>](https://e.com)"))
+        assertEquals("https://e.com", TelegramHtml.render("[<em>](https://e.com)"))
+        assertEquals("https://e.com", TelegramHtml.render("[<strong>](https://e.com)"))
+        assertEquals("https://e.com", TelegramHtml.render("[<u>](https://e.com)"))
+        assertEquals("https://e.com", TelegramHtml.render("[<s>](https://e.com)"))
+        assertEquals("https://e.com", TelegramHtml.render("[<tg-spoiler>](https://e.com)"))
+        // The image anchor twin makes the same trade of its alt text
+        assertEquals("https://e.com", TelegramHtml.render("![<b>](https://e.com)"))
+        // Contrast: a matched empty pair already rewound during the label, and an
+        // unclosed tag with content closes inside the label as before
+        assertEquals("https://e.com", TelegramHtml.render("[<b></b>](https://e.com)"))
+        assertEquals(
+            "<a href=\"https://e.com\"><code>x</code></a>",
+            TelegramHtml.render("[<code>x](https://e.com)"),
+        )
+        assertTelegramHtmlParseable(TelegramHtml.render("[<b>](https://e.com)"), "unclosedTagLabel")
+    }
+
+    @Test
+    fun blockquoteCompletesOpenAnchor() {
+        // The wrapper is a block-level entity like <pre>: an anchor left open across the
+        // block boundary would put the blockquote inside the link entity — the same
+        // "Cannot be nested inside other entities" the pre path completes against. The
+        // quote's own orphan </a> stays visible escaped text, exactly as inside a pre
+        val output = TelegramHtml.render("x <a href=\"https://e.com/u\">y\n\n> q</a>")
+        assertEquals(
+            "x <a href=\"https://e.com/u\">y</a>\n\n<blockquote>q&lt;/a&gt;</blockquote>",
+            output,
+        )
+        assertTelegramHtmlParseable(output, "blockquoteCompletesAnchor")
+    }
+
+    @Test
+    fun codeInsideCustomEmojiDegradesToPlainText() {
+        // "All other entities can't contain each other": a code entity may not nest
+        // inside a custom emoji, so code-family tags and spans drop their tags and their
+        // content renders as plain fallback text — the tag path, its kbd synonym and the
+        // image syntax's markdown span alike
+        assertEquals(
+            "<tg-emoji emoji-id=\"5\">x</tg-emoji>",
+            TelegramHtml.render("<tg-emoji emoji-id=\"5\"><code>x</code></tg-emoji>"),
+        )
+        assertEquals(
+            "<tg-emoji emoji-id=\"5\">x</tg-emoji>",
+            TelegramHtml.render("<tg-emoji emoji-id=\"5\"><kbd>x</kbd></tg-emoji>"),
+        )
+        assertEquals("<tg-emoji emoji-id=\"5\">x</tg-emoji>", TelegramHtml.render("![`x`](tg://emoji?id=5)"))
+        assertEquals(
+            "<tg-emoji emoji-id=\"5\">a x b</tg-emoji>",
+            TelegramHtml.render("<tg-emoji emoji-id=\"5\">a `x` b</tg-emoji>"),
+        )
+        assertTelegramHtmlParseable(
+            TelegramHtml.render("<tg-emoji emoji-id=\"5\"><code>x</code></tg-emoji>"),
+            "codeInsideCustomEmoji",
+        )
+    }
+
+    @Test
+    fun boldStaysFormattedInsideCustomEmoji() {
+        // Only the code family degrades inside a custom emoji: the bold family is legal
+        // there ("can contain and be part of any other entity"), so its tags stay
+        assertEquals(
+            "<tg-emoji emoji-id=\"5\"><b>x</b></tg-emoji>",
+            TelegramHtml.render("<tg-emoji emoji-id=\"5\"><b>x</b></tg-emoji>"),
+        )
+    }
 }

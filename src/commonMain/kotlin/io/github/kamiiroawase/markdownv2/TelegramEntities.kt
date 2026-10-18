@@ -107,7 +107,10 @@ public object TelegramEntities {
      *
      * Chunking semantics match the string formats: blocks are packed whole where they
      * fit, oversized blocks split along their natural seams, every chunk's entities
-     * reference its own text (offsets re-based per chunk), and no character is dropped.
+     * reference its own text (offsets re-based per chunk), and no character is dropped
+     * beyond two exceptions: whitespace that could never display anyway, and a structural
+     * marker (a list marker or heading hashes) at limits too small to hold it beside a
+     * first content unit — body text itself never drops.
      * Structural formatting re-establishes per chunk — a split quote carries a
      * blockquote range on every piece — while an inline range straddling a seam clamps
      * into the piece holding its start (the string formats close their entities at
@@ -134,7 +137,10 @@ public object TelegramEntities {
      * whole where they fit, oversized blocks split along their natural seams, every
      * chunk's entities reference its own text, and no character is dropped — save
      * whitespace that could never display anyway: an all-whitespace flattened piece drops
-     * because the server rejects blank messages. [maxLength]
+     * because the server rejects blank messages. A structural marker — a list marker or
+     * heading hashes — is the one further casualty: it drops at limits too small to hold
+     * the marker beside a first content unit, so the body text (which never drops) fits.
+     * [maxLength]
      * below [MIN_CHUNK_LENGTH] returns the full render as a single chunk; unknown
      * block/inline node types from third-party extensions degrade to plain content.
      */

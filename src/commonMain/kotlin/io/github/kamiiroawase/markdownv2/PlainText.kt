@@ -22,7 +22,11 @@ import org.commonmark.node.Text
  * so the flattening paths never silently drop a link target — and one whose children
  * contribute no visible text falls back to its destination, mirroring the renderer's
  * empty-label degradation to the bare escaped URL (without it the truncation/chunking
- * fallbacks would drop such content entirely).
+ * fallbacks would drop such content entirely). Two carve-outs keep the flattened text at the
+ * text Telegram actually displays: a label that IS the destination (an autolink, or an
+ * `[u](u)` spelling) never gains the suffix — the URL is already the visible text, and the
+ * suffix would duplicate it — and the custom emoji image spelling (`tg://emoji?id=…`)
+ * never surfaces its internal URL at all (deformat draws both of those lines too).
  */
 internal fun appendPlainText(
     sb: StringBuilder,
@@ -39,10 +43,16 @@ internal fun appendPlainText(
         when (current) {
             is UrlFallback -> {
                 openLinks--
-                if (sb.substring(current.start).isBlank()) {
+                // The label region as appended: the children were processed before this
+                // marker popped, so everything from the push position is their text
+                val label = sb.substring(current.start)
+                if (label.isBlank()) {
                     sb.setLength(current.start)
                     sb.append(current.url)
-                } else if (openLinks == 0) {
+                } else if (openLinks == 0 && label != current.url) {
+                    // A label that IS the destination (an autolink, or an [u](u) spelling)
+                    // already shows the URL as its visible text — the suffix would
+                    // duplicate it (deformat's link handling draws the same line)
                     sb.append(" (").append(current.url).append(')')
                 }
             }
@@ -115,7 +125,15 @@ internal fun appendPlainText(
 
             is Image -> {
                 val destination = current.destination
-                if (!destination.isNullOrEmpty()) {
+                // The Bot API's custom emoji spelling (tg://emoji?id=…, see
+                // tgEmojiUrlIdOf): the renderer emits the fallback as a custom_emoji range
+                // and never displays the destination, so the plain view must not surface
+                // the internal URL either — no " (url)" suffix, and a blank fallback
+                // renders nothing at all (the renderer's empty-entity degradation; the
+                // deformat twin emits the label alone too). Any other destination — an
+                // invalid id the renderer itself treats as an ordinary image included —
+                // keeps the ordinary image handling
+                if (!destination.isNullOrEmpty() && tgEmojiUrlIdOf(destination) == null) {
                     stack.addLast(UrlFallback(destination, sb.length))
                     openLinks++
                 }

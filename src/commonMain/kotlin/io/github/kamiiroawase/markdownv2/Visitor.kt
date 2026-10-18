@@ -270,6 +270,148 @@ internal fun tgEmojiUrlIdOf(destination: String): String? {
 }
 
 /**
+ * Best-effort check that a custom emoji fallback region spells exactly one regular
+ * emoji — the shape Telegram requires (a custom_emoji entity must wrap one emoji; the
+ * server silently ignores anything else, so shipping the syntax would lose the
+ * formatting intent without any error). [label] is the already-rendered label region
+ * (this visitor's escaped output): every escape pair is literal content, so only a
+ * keycap base may arrive escaped and any other escaped char is text. Errs inclusive —
+ * a false acceptance costs the same silent ignore the degrade would, while a false
+ * rejection drops a working custom emoji, so the pictographic base set is generous
+ * (whole U+1F000-1FAFF plus the classic BMP emoji blocks). One cluster means one base
+ * with optional VS16/skin-tone modifiers, ZWJ-joined further bases (family emoji and
+ * the like), one keycap form (base + FE0F? + 20E3), one regional-indicator pair (a
+ * flag), or one subdivision-flag tag sequence (1F3F4 + tags + cancel tag).
+ */
+internal fun isSingleEmojiFallback(label: String): Boolean {
+    // The region may carry surrounding whitespace the entity does not count — a space
+    // around the fallback, or the block separator still pending at output time
+    val trimmed = label.trim()
+    if (trimmed.isEmpty()) return false
+    val end = emojiClusterEnd(trimmed, 0)
+    // -1 (no cluster at all) never equals a non-empty label's length; a shorter end
+    // means a second cluster or trailing text followed the one cluster
+    return end == trimmed.length
+}
+
+// The index one past the first emoji cluster starting at [start], or -1 when [start]
+// holds no cluster
+private fun emojiClusterEnd(
+    label: String,
+    start: Int,
+): Int {
+    if (start >= label.length) return -1
+
+    // An escape pair is literal content: among the keycap bases only the digit never
+    // escapes ('#' and '*' are MarkdownV2 specials), so an escaped char must be one of
+    // the three bases with the enclosing keycap mark behind it
+    if (label[start] == '\\') {
+        if (start + 1 >= label.length) return -1
+        val base = label[start + 1]
+        if (base !in '0'..'9' && base != '#' && base != '*') return -1
+        return keycapEnd(label, start + 2)
+    }
+    if (label[start] in '0'..'9') return keycapEnd(label, start + 1)
+
+    val codePoint = labelCodePointAt(label, start)
+    if (codePoint == 0x1F3F4) {
+        // A subdivision flag: the black flag base plus tag characters closed by the
+        // cancel tag; a bare black flag falls through as an ordinary pictographic base
+        var index = start + 2
+        while (index < label.length && labelCodePointAt(label, index) in 0xE0020..0xE007E) {
+            index += labelCharWidth(label, index)
+        }
+        if (index < label.length && labelCodePointAt(label, index) == 0xE007F) return index + 2
+    } else if (codePoint in 0x1F1E6..0x1F1FF) {
+        // A regional-indicator pair is one flag; a longer run leaves a second cluster
+        // behind, which the exactly-one check rejects
+        if (start + 2 >= label.length) return -1
+        val second = labelCodePointAt(label, start + 2)
+        return if (second in 0x1F1E6..0x1F1FF) start + 4 else -1
+    }
+
+    if (!isEmojiBase(codePoint)) return -1
+    // The base plus any run of presentation modifiers and skin tones, with ZWJ joining
+    // further bases into the one cluster
+    var index = start
+    while (true) {
+        index += labelCharWidth(label, index)
+        var joined = false
+        while (index < label.length) {
+            val char = label[index]
+            if (char == '\uFE0F') {
+                index++
+            } else if (char == '\u200D') {
+                joined = true
+                index++
+                break
+            } else if (
+                labelCharWidth(label, index) == 2 &&
+                labelCodePointAt(label, index) in 0x1F3FB..0x1F3FF
+            ) {
+                index += 2
+            } else {
+                break
+            }
+        }
+        if (!joined) return index
+        // After the joiner another base must follow (a pictographic base or a single
+        // regional indicator — the pieces ZWJ families and split flags build on)
+        if (index >= label.length) return -1
+        val next = labelCodePointAt(label, index)
+        if (next !in 0x1F1E6..0x1F1FF && !isEmojiBase(next)) return -1
+    }
+}
+
+// A keycap base has been consumed; the optional VS16 and the mandatory enclosing mark
+// follow, or the digits were plain text
+private fun keycapEnd(
+    label: String,
+    start: Int,
+): Int {
+    var index = start
+    if (index < label.length && label[index] == '\uFE0F') index++
+    return if (index < label.length && label[index] == '\u20E3') index + 1 else -1
+}
+
+// Generous pictographic base set: every supplementary pictographic block (assigned or
+// not) plus the BMP blocks emoji draw on — see isSingleEmojiFallback for the erring
+private fun isEmojiBase(codePoint: Int): Boolean =
+    codePoint in 0x1F000..0x1FAFF ||
+        codePoint in 0x2190..0x21FF ||
+        codePoint in 0x2300..0x23FF ||
+        codePoint in 0x2460..0x24FF ||
+        codePoint in 0x25A0..0x25FF ||
+        codePoint in 0x2600..0x27BF ||
+        codePoint in 0x2900..0x297F ||
+        codePoint in 0x2B00..0x2BFF ||
+        codePoint == 0x00A9 ||
+        codePoint == 0x00AE ||
+        codePoint == 0x203C ||
+        codePoint == 0x2049 ||
+        codePoint == 0x2122 ||
+        codePoint == 0x2139 ||
+        codePoint == 0x3030 ||
+        codePoint == 0x303D ||
+        codePoint == 0x3297 ||
+        codePoint == 0x3299
+
+private fun labelCodePointAt(
+    label: String,
+    index: Int,
+): Int =
+    if (isSurrogatePairAt(label, index)) {
+        0x10000 + ((label[index].code - 0xD800) shl 10) + (label[index + 1].code - 0xDC00)
+    } else {
+        label[index].code
+    }
+
+private fun labelCharWidth(
+    label: String,
+    index: Int,
+): Int = if (isSurrogatePairAt(label, index)) 2 else 1
+
+/**
  * Decodes the supported HTML entities (`&amp;`, `&#38;`, `&#x26;`, …) in attribute values
  * and de-formatted text; `&` without a well-formed entity stays literal. Browsers decode
  * entities in attributes before using the value, so an href extracted raw would link to
@@ -489,11 +631,19 @@ internal class Visitor(
                             sb.setLength(entity.openPosition - 1)
                         }
 
-                        entity.marker == "||" && sb.substring(entity.openPosition).trimEnd('\n').isEmpty() -> {
-                            // An empty spoiler entity rewinds its opener for the same
-                            // reason: || onto || is the empty entity Telegram rejects,
-                            // and the tags carried no visible text
-                            sb.setLength(entity.openPosition - 2)
+                        (entity.marker == "||" || entity.marker == "*" || entity.marker == "~") &&
+                            sb.substring(entity.openPosition).trimEnd().isEmpty() -> {
+                            // An empty spoiler, bold or strikethrough entity rewinds its
+                            // opener for the same reason: the closer glued straight onto
+                            // the opener is the empty entity Telegram drops (pre-fix the
+                            // bold and strikethrough closers emitted unconditionally),
+                            // and the tags carried no visible text, so nothing is lost.
+                            // Whitespace-only content counts as empty at output time
+                            // alone: the body trim below strips it at code depth zero,
+                            // which would strand the closer as a fresh empty entity —
+                            // the underscore family reaches the same trade through
+                            // outputGlue instead
+                            sb.setLength(entity.openPosition - entity.marker.length)
                         }
 
                         (entity.marker == "_" || entity.marker == "__") && outputGlue(closers) -> {
@@ -528,6 +678,15 @@ internal class Visitor(
                             // (regionIsBlank covers the whitespace-only label too)
                             sb.setLength(entity.openBracket)
                             sb.append(escapeTextInContext(entity.url))
+                        }
+
+                        entity.emoji && !isSingleEmojiFallback(sb.substring(entity.labelStart)) -> {
+                            // See renderEmojiTag: an invalid fallback drops the ![ opener
+                            // only — the fallback text ships as plain content. Inner
+                            // entities popped first left balanced markers behind (their
+                            // openers sit in the region, their closers ahead in this
+                            // builder), so the deletion strands nothing
+                            sb.deleteRange(entity.openBracket, entity.openBracket + 2)
                         }
 
                         else -> {
@@ -729,6 +888,15 @@ internal class Visitor(
             sb.append(escapedPlainText(emphasis))
             return
         }
+        // Inside an HTML code entity the '_' marker would surface as a literal character
+        // (only \` and \\ count there) and change what Telegram displays — the source's
+        // "*x*" would render as "_x_": drop the markers, keep the content, the same
+        // degradation the HTML and entities formats make of emphasis inside code
+        if (htmlCodeDepth > 0) {
+            visitChildren(emphasis)
+            exitInline()
+            return
+        }
         // A '_' opening onto a trailing underscore marker would glue (see
         // atUnderscoreGlue) — flatten to plain text, the depth-cap degradation
         if (atUnderscoreGlue()) {
@@ -763,11 +931,29 @@ internal class Visitor(
             sb.append(escapedPlainText(strongEmphasis))
             return
         }
+        // See visit(emphasis): inside an HTML code entity the '*' markers would surface
+        // as literal characters; drop them, keep the content
+        if (htmlCodeDepth > 0) {
+            visitChildren(strongEmphasis)
+            exitInline()
+            return
+        }
         val seq = nextSeq++
-        openEntities.addLast(OpenEmphasisMarker("*", html = false, seq = seq))
+        val entry =
+            OpenEmphasisMarker("*", html = false, seq = seq, openPosition = sb.length + 1)
+        openEntities.addLast(entry)
         sb.append('*')
         visitChildren(strongEmphasis)
         completeOpenedAfter(seq)
+        // An empty entity (the parser never forms one from "*"; hand-built ASTs reach
+        // it) rewinds its opener — * straight onto * is the empty entity every other
+        // marker family rewinds too, and Telegram drops it with any URL it carried
+        if (sb.length == entry.openPosition) {
+            openEntities.removeLast()
+            sb.setLength(entry.openPosition - 1)
+            exitInline()
+            return
+        }
         sb.append('*')
         openEntities.removeLast()
         exitInline()
@@ -780,11 +966,27 @@ internal class Visitor(
                     sb.append(escapedPlainText(customNode))
                     return
                 }
+                // See visit(emphasis): inside an HTML code entity the '~' markers would
+                // surface as literal characters; drop them, keep the content
+                if (htmlCodeDepth > 0) {
+                    visitChildren(customNode)
+                    exitInline()
+                    return
+                }
                 val seq = nextSeq++
-                openEntities.addLast(OpenEmphasisMarker("~", html = false, seq = seq))
+                val entry =
+                    OpenEmphasisMarker("~", html = false, seq = seq, openPosition = sb.length + 1)
+                openEntities.addLast(entry)
                 sb.append('~')
                 visitChildren(customNode)
                 completeOpenedAfter(seq)
+                // See visit(strongEmphasis): an empty entity rewinds its opener
+                if (sb.length == entry.openPosition) {
+                    openEntities.removeLast()
+                    sb.setLength(entry.openPosition - 1)
+                    exitInline()
+                    return
+                }
                 sb.append('~')
                 openEntities.removeLast()
                 exitInline()
@@ -839,9 +1041,14 @@ internal class Visitor(
                             sb.setLength(entity.openPosition - 1)
                         }
 
-                        entity.marker == "||" && sb.length == entity.openPosition -> {
-                            // See output(): an empty spoiler entity rewinds alike
-                            sb.setLength(entity.openPosition - 2)
+                        (entity.marker == "||" || entity.marker == "*" || entity.marker == "~") &&
+                            sb.length == entity.openPosition -> {
+                            // See output(): an empty spoiler, bold or strikethrough
+                            // entity rewinds alike — the closer glued onto the opener
+                            // is the empty entity Telegram drops. The position compare
+                            // is exact here (mid-children, whitespace is content), the
+                            // blank-region tolerance belongs to output time alone
+                            sb.setLength(entity.openPosition - entity.marker.length)
                         }
 
                         (entity.marker == "_" || entity.marker == "__") && atUnderscoreGlue() -> {
@@ -870,6 +1077,13 @@ internal class Visitor(
                             // latest open entry, so the rewind discards only whitespace
                             sb.setLength(entity.openBracket)
                             sb.append(escapeTextInContext(entity.url))
+                        }
+
+                        entity.emoji && !isSingleEmojiFallback(sb.substring(entity.labelStart)) -> {
+                            // See renderEmojiTag: an invalid fallback drops the ![ opener
+                            // only — the fallback text ships as plain content, and inner
+                            // entities already closed with balanced markers above it
+                            sb.deleteRange(entity.openBracket, entity.openBracket + 2)
                         }
 
                         else -> {
@@ -996,23 +1210,26 @@ internal class Visitor(
         val labelStart = sb.length
         visitChildren(link)
         openMarkdownLinks--
-        // Telegram also rejects link entities with empty text: a label that renders to
-        // no visible text (no children, whitespace-only, or children like a lone HTML
-        // comment) degrades to the bare escaped URL — the same blank test output() applies
-        // to anchors left unclosed at output time. Rewinding is safe — inside a label every
-        // pushed entity marker is accompanied by output, so a blank label left nothing
-        // open on the stack
-        if (regionIsBlank(labelStart)) {
-            sb.setLength(openBracket)
-            sb.append(escapeTextInContext(destination))
-            return
-        }
         // Whatever HTML opened inside the label closes before the link does: left open it
         // would cross the ](url) boundary into invalid entities, or leak htmlCodeDepth
         // escaping onto the text after the link. Anchors opened inside are all
         // literalized sentinels (the entry guard saw to that), so they close silently
         // here instead of lingering to degrade later links
         completeOpenedAfter(entrySeq)
+        // Telegram also rejects link entities with empty text: a label that renders to
+        // no visible text (no children, whitespace-only, or children like a lone HTML
+        // comment) degrades to the bare escaped URL — the same blank test output() applies
+        // to anchors left unclosed at output time. The completion must run before the
+        // test: an unclosed tag that was the label's only content now rewinds as the
+        // empty entity it rendered to (its markers drop), so the blank test sees the
+        // label that ships — pre-fix it passed on the tag's opener marker and the link
+        // completed into a [](url)-shaped entity whose URL Telegram drops with it.
+        // Rewinding is safe — a blank label left nothing open on the stack
+        if (regionIsBlank(labelStart)) {
+            sb.setLength(openBracket)
+            sb.append(escapeTextInContext(destination))
+            return
+        }
         sb.append("](").append(escapeUrlInContext(destination)).append(')')
     }
 
@@ -1037,17 +1254,27 @@ internal class Visitor(
                 val labelStart = sb.length
                 visitChildren(image)
                 openMarkdownLinks--
+                // See visit(link): HTML opened inside the fallback closes before the
+                // emoji does — left open it would cross the ](url) boundary; links
+                // opened inside degraded by the openMarkdownLinks guard
+                completeOpenedAfter(entrySeq)
                 // Telegram requires the fallback: one that renders to no visible text
                 // degrades to the bare escaped URL, the same trade visit(link) makes
+                // (the completion runs first so an unclosed tag as the fallback's only
+                // content counts as blank — see visit(link))
                 if (regionIsBlank(labelStart)) {
                     sb.setLength(openBracket)
                     sb.append(escapeTextInContext(destination))
                     return
                 }
-                // See visit(link): HTML opened inside the fallback closes before the
-                // emoji does — left open it would cross the ](url) boundary; links
-                // opened inside degraded by the openMarkdownLinks guard
-                completeOpenedAfter(entrySeq)
+                // The fallback must be exactly one regular emoji (see
+                // isSingleEmojiFallback): anything else is an entity the server
+                // silently ignores, so the syntax degrades to the plain fallback text
+                // — the same degrade the in-link path makes of the whole tag
+                if (!isSingleEmojiFallback(sb.substring(labelStart))) {
+                    sb.deleteRange(openBracket, openBracket + 2)
+                    return
+                }
                 sb
                     .append("](")
                     .append(TG_EMOJI_URL_PREFIX)
@@ -1067,14 +1294,16 @@ internal class Visitor(
         val labelStart = sb.length
         visitChildren(image)
         openMarkdownLinks--
+        // See visit(link): HTML opened inside the alt text closes before the link does,
+        // and the blank test runs after the completion so a label whose only content
+        // was an unclosed tag counts as blank
+        completeOpenedAfter(entrySeq)
         // See visit(link): a label with no visible text degrades to the bare escaped URL
         if (regionIsBlank(labelStart)) {
             sb.setLength(openBracket)
             sb.append(escapeTextInContext(destination))
             return
         }
-        // See visit(link): HTML opened inside the alt text closes before the link does
-        completeOpenedAfter(entrySeq)
         sb.append("](").append(escapeUrlInContext(destination)).append(')')
     }
 
@@ -1170,6 +1399,14 @@ internal class Visitor(
                     sb.setLength(top.openPosition - 2)
                     return ""
                 }
+                // An empty bold or strikethrough pair rewinds alike: * straight onto *
+                // (and ~ onto ~) is the empty entity every other marker family rewinds,
+                // and the tags carried no visible text, so nothing is lost
+                if ((marker == "*" || marker == "~") && sb.length == top.openPosition) {
+                    openEntities.removeLast()
+                    sb.setLength(top.openPosition - 1)
+                    return ""
+                }
                 openEntities.removeLast()
                 // LOUD and MERGED entries own a depth unit; a SUPPRESSED one never took
                 // one (and a non-code marker has none to give back either)
@@ -1233,7 +1470,7 @@ internal class Visitor(
             when {
                 marker == "`" && delimiter == CodeDelimiter.LOUD -> sb.length + 1
                 marker == "_" || marker == "__" -> sb.length + marker.length
-                marker == "||" -> sb.length + 2
+                marker == "||" || marker == "*" || marker == "~" -> sb.length + marker.length
                 else -> -1
             }
         openEntities.addLast(
@@ -1321,6 +1558,16 @@ internal class Visitor(
                         // visit(link) makes
                         sb.setLength(top.openBracket)
                         escapeTextInContext(top.url)
+                    }
+
+                    !isSingleEmojiFallback(sb.substring(top.labelStart)) -> {
+                        // The fallback must be exactly one regular emoji (see
+                        // isSingleEmojiFallback): an entity the server silently ignores
+                        // never opens — drop the ![ opener only, the fallback text ships
+                        // as plain inline content, the same degrade the in-link path
+                        // makes of the whole tag
+                        sb.deleteRange(top.openBracket, top.openBracket + 2)
+                        ""
                     }
 
                     else -> {

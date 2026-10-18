@@ -308,4 +308,33 @@ class EntityChunkingTest {
         val chunks = TelegramEntities.renderChunked(content, 10)
         assertEquals(TelegramEntities.render(content).text, chunks.joinToString("") { it.text })
     }
+
+    // ---------- plain-fallback carve-outs: autolink URLs and custom emoji destinations ----------
+
+    @Test
+    fun autolinkNeverDuplicatesItsUrlAtTheFlattenSeam() {
+        // plainText's link fallback used to append " (url)" even when the label IS the
+        // destination (an autolink): the flattened node carried the URL twice and the
+        // joined chunks read "see https://e.com/x?a=1 (https://e.com/x?a=1) end". The
+        // label-equals-destination carve-out keeps the joined text at the full render's
+        val content = "see https://e.com/x?a=1 end"
+        val chunks = TelegramEntities.renderChunked(content, 16)
+        assertEquals(TelegramEntities.render(content).text, chunks.joinToString("") { it.text })
+        chunks.forEach { assertEntitiesValid(it, "autolink seam") }
+    }
+
+    @Test
+    fun customEmojiImageNeverLeaksItsTgUrlAtTheFlattenSeam() {
+        // The tg://emoji?id= destination is internal — no render ever displays it. The
+        // item's plain fallback used to surface " (tg://emoji?id=…)" as visible text;
+        // the joined chunks must equal the full render's text (the fallback emoji plus
+        // the item body)
+        val content = "- ![😀](tg://emoji?id=5368324170671202286) tailtailtail"
+        val chunks = TelegramEntities.renderChunked(content, 8)
+        assertEquals(TelegramEntities.render(content).text, chunks.joinToString("") { it.text })
+        chunks.forEach { chunk ->
+            assertTrue(chunk.text.length <= 8, "over-long chunk: $chunk")
+            assertEntitiesValid(chunk, "custom emoji seam")
+        }
+    }
 }

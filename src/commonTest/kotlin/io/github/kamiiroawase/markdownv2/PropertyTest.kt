@@ -64,7 +64,7 @@ class PropertyTest {
     private fun randomContent(random: Random): String =
         buildString {
             repeat(random.nextInt(1, 10)) {
-                when (random.nextInt(10)) {
+                when (random.nextInt(12)) {
                     0 -> {
                         append(randomLine(random))
                     }
@@ -109,6 +109,29 @@ class PropertyTest {
 
                     8 -> {
                         append(randomLine(random)).append(" [^1]\n\n[^1]: ").append(randomLine(random))
+                    }
+
+                    9 -> {
+                        // A quoted list item holding a fenced code block: the fence
+                        // opens behind the item marker and closes behind the continuation
+                        // indent, so the quote seam's fence pairing must see through
+                        // list structure (a bare line-start read stranded unterminated
+                        // fences across chunks)
+                        append("> - ```\n")
+                        repeat(random.nextInt(2, 10)) {
+                            append(">   code ").append(randomWord(random)).append('\n')
+                        }
+                        append(">   ```")
+                    }
+
+                    10 -> {
+                        // The table twin: a quoted ordered item whose GFM table renders
+                        // fence-wrapped behind the escaped-dot marker
+                        append("> 1. | a | b |\n>    | --- | --- |\n>    | ")
+                            .append(randomWord(random))
+                            .append(" | ")
+                            .append(randomWord(random))
+                            .append(" |")
                     }
 
                     else -> {

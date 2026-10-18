@@ -274,13 +274,22 @@ private fun chunkHtmlQuote(
 ) {
     // Content children pre-rendered: the walk below needs them twice (packing and
     // oversized splits), and pre-collecting lets an all-blank quote return before
-    // touching the accumulator
+    // touching the accumulator. The chain is the flattened one (see
+    // flattenedQuoteChildren) — a nested quote splices its children into this level
+    // instead of wrapping a second <blockquote> inside the wrapper, the flattening the
+    // full render makes; a quote the flattening left in place at its depth cap renders
+    // as escaped plain text, the visitor's own cap fallback
     val children = mutableListOf<Pair<Node, String>>()
-    var child = quote.firstChild
-    while (child != null) {
-        val rendered = renderHtmlBlock(child, depth + 1, options)
+    for (child in flattenedQuoteChildren(quote, depth)) {
+        val rendered =
+            if (child is BlockQuote) {
+                val plain = StringBuilder()
+                appendPlainText(plain, child)
+                escapeHtmlText(plain.toString().trimEnd('\n'))
+            } else {
+                renderHtmlBlock(child, depth + 1, options)
+            }
         if (rendered.isNotBlank()) children += child to rendered
-        child = child.next
     }
     if (children.isEmpty()) return
 
@@ -329,9 +338,17 @@ private fun chunkHtmlQuote(
             } else {
                 // The child alone overflows even a fresh wrapper: chunk it at the inner
                 // limit and wrap each of its pieces — the wrapper pair is itself valid
-                // standing content, so every piece closes and reopens independently
+                // standing content, so every piece closes and reopens independently. A
+                // depth-capped nested quote (a BlockQuote entry) flattens to verbatim
+                // text instead: its own wrapper is the forbidden nesting, and
+                // re-entering the quote seam on it would recurse once per remaining level
                 val temp = ChunkAccumulator()
-                chunkHtmlBlockInto(node, rendered, innerLimit, depth + 1, options, temp)
+                if (node is BlockQuote) {
+                    val text = flattenTextOfHtml(node, depth + 1, options)
+                    if (text.isNotBlank()) appendHtmlVerbatimChunks(text, innerLimit, temp)
+                } else {
+                    chunkHtmlBlockInto(node, rendered, innerLimit, depth + 1, options, temp)
+                }
                 temp.finish().forEach { piece ->
                     pieces += HTML_QUOTE_OPEN + piece + HTML_QUOTE_CLOSE
                 }

@@ -254,4 +254,42 @@ class HtmlTruncationTest {
         assertEquals("• [ ] bbbbbbbbbbbbb…", result)
         assertTelegramHtmlParseable(result, "taskItemTruncated")
     }
+
+    // ---------- nested quotes keep the full render's single flattened wrapper ----------
+
+    @Test
+    fun nestedQuoteTruncatesFlattenedLikeTheFullRender() {
+        // Bot API formatting rules say blockquote entities can't nest: the full render
+        // flattens a nested quote into the outer wrapper, and the truncated prefix must
+        // keep that shape — pre-fix the shrink seam wrapped the inner quote's own
+        // <blockquote> inside the outer one whenever the inner level happened to fit
+        val content = "> > small\n>\n> " + "y".repeat(100)
+        val result = TelegramHtml.render(content, 60)
+        assertEquals("<blockquote>small\n\n" + "y".repeat(27) + "</blockquote>…", result)
+        assertTelegramHtmlParseable(result, "nestedQuoteTruncationFlatten")
+    }
+
+    @Test
+    fun tripleNestedQuoteTruncatesToOneWrapper() {
+        val result = TelegramHtml.render("> > > " + "x".repeat(80), 50)
+        assertEquals(1, Regex("<blockquote>").findAll(result).count())
+        assertTrue(result.startsWith("<blockquote>"))
+        assertTrue(result.endsWith("</blockquote>…"))
+        assertTelegramHtmlParseable(result, "tripleNestedQuoteTruncation")
+    }
+
+    @Test
+    fun plainFallbackKeepsAutolinkAndCustomEmojiDisplayText() {
+        // See the MarkdownV2 twin: plainText's UrlFallback carve-outs keep the flattened
+        // text at the display text — an autolink's URL is not duplicated and the custom
+        // emoji spelling's internal tg:// destination never leaks into the cut
+        assertEquals(
+            "see https://e.com/x end plus…",
+            TelegramHtml.render("see https://e.com/x end plus many words to overflow the budget", 30),
+        )
+        assertEquals(
+            "• 😀 tttttt…",
+            TelegramHtml.render("- ![😀](tg://emoji?id=5368324170671202286) " + "t".repeat(40), 12),
+        )
+    }
 }

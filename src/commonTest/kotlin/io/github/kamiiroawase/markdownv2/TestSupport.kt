@@ -307,6 +307,11 @@ internal fun assertTelegramHtmlParseable(
                     if (top == "pre" && tag != "code") fail("<$tag> inside <pre>")
                     if (tag == "code" && "code" in stack) fail("nested code")
                     if (tag == "pre" && "pre" in stack) fail("nested pre")
+                    // Officially "blockquote and expandable_blockquote entities can't be
+                    // nested" — a wrapper inside a wrapper is the forbidden shape (the
+                    // MarkdownV2 port below makes no such check: its glued ">>" markers
+                    // are that format's pinned, documented deviation)
+                    if (tag == "blockquote" && "blockquote" in stack) fail("nested blockquote entities")
                     if (tag == "code" && top == "pre" && !attrs.matches(Regex("^ class=\"language-[\\w+#-]*\"$"))) {
                         fail("code inside pre must carry the language class")
                     }
@@ -368,6 +373,19 @@ internal fun sweepContents(): List<String> =
         )
         add("1. item with a long body " + "word ".repeat(12) + "\n2. short\n3. " + "more ".repeat(15))
         add("> quote line one\n> quote line two\n>\n> - quoted item one\n> - quoted item two")
+        // Top-level nested quotes with enough body to force truncation and chunking
+        // splits: every seam must flatten them into a single wrapper level exactly like
+        // the full render — Bot API formatting rules say blockquote entities can't nest
+        // (see assertTelegramHtmlParseable's rule)
+        add("> > inner aaaa bbbb\n>\n> outer cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll")
+        add("> > " + "quote ".repeat(30))
+        // A quoted list item holding a fenced code block: the fence opens behind the
+        // item marker and closes behind the continuation indent, so every seam's fence
+        // pairing must see through list structure — a bare "```" line-start read
+        // strands openers and closers on different chunks; the ordered twin crosses the
+        // escaped-dot marker shape
+        add("> - ```\n>   code aaaa\n>   code bbbb\n>   code cccc\n>   ```")
+        add("> 1. ```\n>    code dddd\n>    code eeee\n>    ```")
         // Quotes inside list items degrade (their '>' markers cannot sit at a line start
         // behind list structure), so the sweep also crosses the degradation's budget
         // arithmetic: multi-paragraph, fenced and nested-quote bodies

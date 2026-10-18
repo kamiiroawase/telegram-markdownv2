@@ -111,7 +111,10 @@ public object TelegramHtml {
      * Chunking semantics match the MarkdownV2 twin: blocks are packed whole where they
      * fit, oversized blocks split along their natural seams, every chunk is
      * independently valid HTML (tags balance within a piece), and no character is
-     * dropped. [maxLength] defaults to [MarkdownV2.MAX_MESSAGE_LENGTH]; below
+     * dropped beyond two exceptions: whitespace that could never display anyway, and a
+     * structural marker (a list marker or heading hashes) at limits too small to hold it
+     * beside a first content unit — body text itself never drops.
+     * [maxLength] defaults to [MarkdownV2.MAX_MESSAGE_LENGTH]; below
      * [MIN_CHUNK_LENGTH] (one escape unit — the five characters of "&amp;") chunking
      * cannot guarantee both validity and progress, and the full render returns as a
      * single chunk; content that renders to nothing yields an empty list.
@@ -136,7 +139,10 @@ public object TelegramHtml {
      * is independently valid Telegram HTML, and no character is dropped — save whitespace
      * that could never display anyway: pending blank lines at the top of a split code
      * block drop when the seam fires before real content joins them, and an all-whitespace
-     * flattened piece drops because the server rejects blank messages. [maxLength]
+     * flattened piece drops because the server rejects blank messages. A structural
+     * marker — a list marker or heading hashes — is the one further casualty: it drops at
+     * limits too small to hold the marker beside a first content unit, so the body text
+     * (which never drops) fits. [maxLength]
      * below [MIN_CHUNK_LENGTH] returns the full render as a single chunk; unknown
      * block/inline node types from third-party extensions degrade to plain content.
      */

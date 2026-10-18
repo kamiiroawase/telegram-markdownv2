@@ -261,10 +261,45 @@ private fun plainHtmlListItem(
     return sb.toString()
 }
 
+// The flattened child chain of a block quote, shared by this pipeline's shrinkHtmlQuote
+// and the chunking side's chunkHtmlQuote: nested quote children splice their own children
+// into the chain — the flattening visit(blockQuote)/appendQuoteChildren makes in the full
+// render — because Bot API formatting rules say blockquote entities can't nest, and a cut
+// that wrapped a child quote's own <blockquote> inside this level's wrapper would ship
+// exactly that forbidden nesting. A nested quote at or beyond the render depth cap stays
+// a BlockQuote entry for the consumer to degrade to escaped plain text (the visitor's own
+// cap fallback, see MAX_RENDER_DEPTH); the walk itself recurses at most MAX_RENDER_DEPTH
+// levels for the same cap
+internal fun flattenedQuoteChildren(
+    quote: Node,
+    depth: Int,
+): List<Node> {
+    val flat = mutableListOf<Node>()
+
+    fun walk(
+        blockQuote: Node,
+        level: Int,
+    ) {
+        var child = blockQuote.firstChild
+        while (child != null) {
+            if (child is BlockQuote && depth + level + 1 < MAX_RENDER_DEPTH) {
+                walk(child, level + 1)
+            } else {
+                flat += child
+            }
+            child = child.next
+        }
+    }
+
+    walk(quote, 0)
+    return flat
+}
+
 // The quote wraps its surviving children in one <blockquote> pair. The wrapper is a
 // fixed overhead counted up front — no per-line cost outside the budget, so unlike the
 // MarkdownV2 shrinkQuoteTail no re-shrink retry exists here: the arithmetic is exact the
-// first time
+// first time. Children walk the flattened chain (see flattenedQuoteChildren) — a nested
+// quote never brings its own wrapper into this one
 private fun shrinkHtmlQuote(
     quote: BlockQuote,
     budget: Int,
@@ -276,24 +311,27 @@ private fun shrinkHtmlQuote(
     if (innerBudget <= 0) return ""
 
     val parts = StringBuilder()
-    var node = quote.firstChild
-    while (node != null) {
+    for (node in flattenedQuoteChildren(quote, depth)) {
         // See renderHtmlBlocks: check the budget before rendering the child
         val separator = if (parts.isEmpty()) "" else "\n\n"
         val remaining = innerBudget - parts.length - separator.length
         if (remaining <= 0) break
 
+        if (node is BlockQuote) {
+            // A nested quote the flattening left in place sits at the render depth cap:
+            // its subtree is escaped plain text truncated to the room left (the
+            // visitor's own cap fallback), never a second wrapper
+            val tail = plainHtmlQuotedTail(node, remaining)
+            if (tail.isNotEmpty()) parts.append(separator).append(tail)
+            continue
+        }
         val rendered = renderHtmlBlock(node, depth + 1, options)
         // A blank-rendering child is no-content and skips — exactly as visit(blockQuote)
         // and chunkHtmlQuote skip it. The blank line between quote paragraphs belongs to
         // the "\n\n" join between the surviving pieces, never to a child
-        if (rendered.isBlank()) {
-            node = node.next
-            continue
-        }
+        if (rendered.isBlank()) continue
         if (rendered.length <= remaining) {
             parts.append(separator).append(rendered)
-            node = node.next
         } else {
             val shrunk = shrinkHtml(node, remaining, depth + 1, retriable = false, options)
             // A nested level too small to shrink at all degrades to escaped plain text —

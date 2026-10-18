@@ -199,4 +199,29 @@ class EntityTruncationTest {
         )
         assertEntitiesValid(truncated, "truncatedQuoteCloseOrder")
     }
+
+    // ---------- plain-fallback carve-outs: autolink URLs and custom emoji destinations ----------
+
+    @Test
+    fun autolinkTruncationFallbackDoesNotDuplicateTheUrl() {
+        // The paragraph's plain fallback flattens the line group through plainText: a
+        // label that IS the destination never gains " (url)" — the suffix used to
+        // duplicate the autolink's URL inside the cut ("see https://e.com/x
+        // (https://e.c…")
+        assertEquals(
+            EntityText("see https://e.com/x end plus…", emptyList()),
+            TelegramEntities.render("see https://e.com/x end plus many words to overflow the budget", 30),
+        )
+    }
+
+    @Test
+    fun customEmojiTruncationFallbackDoesNotLeakTheTgUrl() {
+        // The item's plain fallback used to surface the internal tg://emoji?id= URL as
+        // visible text ("• 😀 (t…"); the full render displays only the fallback emoji,
+        // and so does the cut
+        assertEquals(
+            EntityText("• 😀 ta…", emptyList()),
+            TelegramEntities.render("- ![😀](tg://emoji?id=5368324170671202286) tailtailtail", 8),
+        )
+    }
 }

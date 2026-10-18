@@ -163,7 +163,10 @@ public object MarkdownV2 {
      * Blocks are packed whole while they fit; a block longer than [maxLength] on its own
      * splits along its natural seams (code lines, list items, quote children, paragraph
      * lines, inline nodes); a seam that still exceeds the limit flattens to escaped plain
-     * text, preserving every character. Each chunk is independently valid MarkdownV2 —
+     * text, preserving every character — save whitespace that could never display anyway,
+     * and a structural marker (a list marker or heading hashes) at limits too small to
+     * hold it beside a first content unit; body text itself never drops.
+     * Each chunk is independently valid MarkdownV2 —
      * entities are completed at chunk boundaries, never split mid-marker, and list
      * numbering continues across chunks. [maxLength] defaults to [MAX_MESSAGE_LENGTH];
      * 1 or less returns the full render as a single chunk (chunking needs room for at
@@ -190,7 +193,10 @@ public object MarkdownV2 {
      * independently valid MarkdownV2, and no character is dropped — save whitespace that
      * could never display anyway: pending blank lines at the top of a split code block
      * drop when the seam fires before real content joins them, and an all-whitespace
-     * flattened piece drops because the server rejects blank messages. [maxLength] of 1 or
+     * flattened piece drops because the server rejects blank messages. A structural
+     * marker — a list marker or heading hashes — is the one further casualty: it drops at
+     * limits too small to hold the marker beside a first content unit, so the body text
+     * (which never drops) fits. [maxLength] of 1 or
      * less
      * returns the full render as a single chunk (chunking needs room for at least one
      * escaped character); unknown block/inline node types from third-party extensions

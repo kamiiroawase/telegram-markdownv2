@@ -736,4 +736,97 @@ class ChunkingTest {
             assertTelegramParseable(piece, "fenceSeamBlankLine")
         }
     }
+
+    // ---------- quoted list items holding fence-wrapped blocks (fifth audit) ----------
+
+    @Test
+    fun chunkedQuoteListCodeFenceRegroupsMarkersPerChunk() {
+        // The quote seam's per-line decomposition paired fence lines only on a bare
+        // "```" line start, but a fence inside a list item opens behind the item marker
+        // ("• ```") and closes behind the continuation indent ("  ```"): the pair went
+        // unrecognized and the chunk boundary stranded an unterminated fence on both
+        // sides (pre-fix: ["> • ```\n>   c", ">   ```"], each unsendable — "Can't find
+        // end of the entity"). The fence now regroups with both markers re-emitted on
+        // every chunk, the bullet keeping its association on the opener line
+        val pieces = MarkdownV2.renderChunked("> - ```\n>   c\n>   ```", 20)
+        assertEquals(listOf("> • ```\n  c\n> ```"), pieces)
+        assertTelegramParseable(pieces.single(), "quoteListFence")
+    }
+
+    @Test
+    fun chunkedQuoteOrderedListCodeFenceRegroupsMarkersPerChunk() {
+        // The ordered twin: the marker's escaped dot ("1\. ") sat between the line
+        // start and the fence — the same blind spot as the bullet and the indent
+        val pieces = MarkdownV2.renderChunked("> 1. ```\n>    c1\n>    c2\n>    ```", 28)
+        assertEquals(listOf("> 1\\. ```\n   c1\n   c2\n> ```"), pieces)
+        assertTelegramParseable(pieces.single(), "quoteOrderedListFence")
+    }
+
+    @Test
+    fun chunkedQuoteListTableDegradesToFenceGroupsNotStrandedMarkers() {
+        // The table (fence-wrapped render) twin of the code-fence shape
+        val pieces = MarkdownV2.renderChunked("> - | a | b |\n>   | --- | --- |\n>   | 1 | 2 |", 61)
+        pieces.forEach { piece ->
+            assertTrue(piece.length <= 61, "over-long piece: $piece")
+            assertTelegramParseable(piece, "quoteListTable")
+            assertEquals(0, Regex("```").findAll(piece).count() % 2, "stranded fence: $piece")
+        }
+        assertTrue(pieces.joinToString("").contains("| a"), "table content lost: $pieces")
+    }
+
+    @Test
+    fun chunkedQuoteListHtmlBlockNeverStrandsTheFence() {
+        // The HTML block twin (also fence-wrapped inside the item)
+        val pieces = MarkdownV2.renderChunked("> - <div>\n>   x\n>   </div>", 34)
+        pieces.forEach { piece ->
+            assertTrue(piece.length <= 34, "over-long piece: $piece")
+            assertTelegramParseable(piece, "quoteListHtmlBlock")
+            assertEquals(0, Regex("```").findAll(piece).count() % 2, "stranded fence: $piece")
+        }
+        assertTrue(pieces.joinToString("").contains("<div>"), "html content lost: $pieces")
+    }
+
+    @Test
+    fun chunkedQuoteListLongFenceStaysSendableAtTheDefaultLimit() {
+        // The default-4096 window: the item fits the inner limit but its "> "-prefixed
+        // lines overflow it, so the decomposition fires at scale — every chunk must
+        // stay sendable (pre-fix two of the three chunks carried a stranded fence
+        // marker and drew a 400 "can't parse entities")
+        val content = "intro text\n\n> - ```\n" + (1..800).joinToString("") { ">   x\n" } + ">   ```\n"
+        val chunks = MarkdownV2.renderChunked(content)
+        assertTrue(chunks.size > 1, "expected a split: ${chunks.size}")
+        chunks.forEach { chunk ->
+            assertTrue(chunk.length <= 4096, "over-long chunk: ${chunk.length}")
+            assertTelegramParseable(chunk, "quoteListFenceDefaultLimit")
+        }
+        assertEquals(content.count { it == 'x' }, chunks.sumOf { it.count { c -> c == 'x' } }, "code content lost")
+    }
+
+    @Test
+    fun chunkedQuoteListFenceShapesHoldAcrossLimitSweep() {
+        // All four fence-wrapped kinds as quoted list items, swept across the limits:
+        // every piece in limit, parseable, and no fence split — each regrouped fence
+        // carries both markers, so a stranded one shows up as an odd marker count
+        for (content in listOf(
+            "> - ```\n>   c\n>   ```",
+            "> 1. ```\n>    c1\n>    c2\n>    ```",
+            "> - | a | b |\n>   | --- | --- |\n>   | 1 | 2 |",
+            "> - <div>\n>   x\n>   </div>",
+        )) {
+            for (length in 2..120) {
+                for (chunk in MarkdownV2.renderChunked(content, length)) {
+                    assertTrue(
+                        chunk.length <= length,
+                        "len=$length gave ${chunk.length}: ${chunk.take(50).replace("\n", "\\n")}",
+                    )
+                    assertTelegramParseable(chunk, "quoteListFenceSweep len=$length")
+                    assertEquals(
+                        0,
+                        Regex("```").findAll(chunk).count() % 2,
+                        "stranded fence marker at len=$length: $chunk",
+                    )
+                }
+            }
+        }
+    }
 }

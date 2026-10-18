@@ -9,7 +9,8 @@ package io.github.kamiiroawase.markdownv2
  *
  * The input is expected to be this library's output; arbitrary strings degrade
  * best-effort but losslessly — a '<' with no closing '>' stays literal, an unrecognized
- * entity reference stays as written — and the call never throws.
+ * entity reference stays as written, an anchor that never closes flushes its href at
+ * end of input — and the call never throws.
  */
 internal fun deformatHtml(rendered: String): String {
     if ('<' !in rendered && '&' !in rendered) return rendered
@@ -35,6 +36,16 @@ internal fun deformatHtml(rendered: String): String {
         } else {
             sb.append(char)
             index++
+        }
+    }
+    // An anchor that never closed still owns its href: flush the remaining stack here,
+    // innermost first — the order a run of matching closes would take — so the
+    // no-target-loss trade holds on unterminated shapes too (the MarkdownV2 twin's
+    // degradation keeps the target the same way: "[a](u" stays "[a](u")
+    while (openUrls.isNotEmpty()) {
+        val url = openUrls.removeLast()
+        if (url.isNotEmpty()) {
+            sb.append(" (").append(url).append(')')
         }
     }
     return decodeHtmlEntities(sb.toString())

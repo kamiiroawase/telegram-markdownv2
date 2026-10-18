@@ -313,4 +313,21 @@ class PlainTextTest {
         // dropping both pipes from the plain text)
         assertEquals("a|b|c", MarkdownV2.toPlainText("a|b|c"))
     }
+
+    @Test
+    fun unterminatedCodeSpanKeepsItsOpeningDelimiter() {
+        // The never-closed-markers-return-literally contract: an emphasis marker that
+        // never closes re-inserts itself, and the code span's opening delimiter must not
+        // vanish either (pre-fix "`abc" de-formed to "abc" and "[`abc" to "[abc" — one
+        // character silently lost on malformed input, where the link degradation keeps
+        // every bracket)
+        assertEquals("`abc", MarkdownV2.toPlainText("`abc"))
+        assertEquals("[`abc", MarkdownV2.toPlainText("[`abc"))
+        assertEquals("a `b", MarkdownV2.toPlainText("a `b"))
+        assertEquals("`", MarkdownV2.toPlainText("`"))
+        assertEquals("`a\nb", MarkdownV2.toPlainText("`a\nb"))
+        assertEquals("`a", MarkdownV2.toPlainText("> `a"))
+        // A closed span still drops both delimiters
+        assertEquals("code", MarkdownV2.toPlainText("`code`"))
+    }
 }

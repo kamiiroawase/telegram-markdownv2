@@ -21,8 +21,9 @@ package io.github.kamiiroawase.markdownv2
  * URL — the render of a bare autolink — stays the single URL), and
  * `![fallback](tg://emoji?id=…)` resolves to the bare fallback, the text Telegram
  * displays for a custom emoji. Even malformed input
- * loses nothing: an emphasis marker that never closes is re-inserted literally, and
- * unterminated code spans / labels / URLs keep their content as text.
+ * loses nothing: an emphasis marker that never closes is re-inserted literally, an
+ * unterminated code span keeps its content with its opening delimiter, and unterminated
+ * labels / URLs keep their content as text.
  */
 internal fun deformat(rendered: String): String {
     val sb = StringBuilder(rendered.length)
@@ -178,8 +179,9 @@ private fun matchMarkerRun(
  * list context (indent, markers) stays — the markers belong to the quote, not the code;
  * a content '>' beyond the depth survives (escapeCode leaves '>' unescaped, so the depth
  * is the only separator between marker and content — the same trade skipPre makes for
- * fenced blocks). Unterminated, the rest of the string is content. Returns the index
- * after the closing backtick (or the end).
+ * fenced blocks). Unterminated, the rest of the string is content and the opening
+ * delimiter re-inserts itself literally ahead of it. Returns the index after the
+ * closing backtick (or the end).
  */
 private fun appendCodeContent(
     rendered: String,
@@ -187,6 +189,9 @@ private fun appendCodeContent(
     sb: StringBuilder,
     quoteDepth: Int,
 ): Int {
+    // The output position the opening delimiter sits at: an unterminated span splices it
+    // back in right there, ahead of the content the scan placed (see the loop's end)
+    val openPosition = sb.length
     var index = from + 1
     while (index < rendered.length) {
         val char = rendered[index]
@@ -219,6 +224,10 @@ private fun appendCodeContent(
             }
         }
     }
+    // Unterminated: the content placed above stays, and the never-closed opening
+    // delimiter returns literally ahead of it — the same contract reopenUnmatched keeps
+    // for emphasis markers, so arbitrary input loses nothing ("`abc" stays "`abc")
+    sb.insert(openPosition, '`')
     return index
 }
 

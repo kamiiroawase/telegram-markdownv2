@@ -21,6 +21,7 @@ import org.commonmark.node.Node
 import org.commonmark.node.OrderedList
 import org.commonmark.node.Paragraph
 import org.commonmark.node.SoftLineBreak
+import org.commonmark.node.StrongEmphasis
 import org.commonmark.node.Text
 import org.commonmark.parser.Parser
 import kotlin.test.Test
@@ -1722,9 +1723,11 @@ class RenderTest {
     fun strayClosingAnchorNeverClosesEmojiAnchor() {
         // The two anchor kinds pair only with their own closers: a mistyped </a> on an
         // open <tg-emoji> stays visible (escaped) instead of silently completing the
-        // custom emoji with the wrong tag
+        // custom emoji with the wrong tag. The fallback "x" is not one emoji, so the
+        // custom emoji syntax itself degrades to the plain fallback text (see
+        // customEmojiFallbackMustBeExactlyOneEmoji) and the stray tag renders as text
         val output = MarkdownV2.render("<tg-emoji emoji-id=\"5368324170671202286\">x</a>")
-        assertEquals("![x</a\\>](tg://emoji?id=5368324170671202286)", output)
+        assertEquals("x</a\\>", output)
         assertTelegramParseable(output, "strayAnchorCloserOnEmoji")
     }
 
@@ -1735,5 +1738,156 @@ class RenderTest {
         // by code rules there, the same context switch text itself makes
         assertEquals("`http://a_b.com`", MarkdownV2.render("<code>[](http://a_b.com)</code>"))
         assertEquals("`a_b`", MarkdownV2.render("<code><a href=\"a_b\"> </a></code>"))
+    }
+
+// ---------- the seventh audit round: empty bold/strike rewinds, label-final blankness, code-silent emphasis, emoji fallback validation ----------
+
+    @Test
+    fun emptyBoldAndStrikePairsDrop() {
+        // The closer glued straight onto the opener is the empty entity every other
+        // marker family already rewound; the tags carry no visible text, so the drop
+        // loses nothing (pre-fix: "a**c", "a~~c")
+        assertEquals("ac", MarkdownV2.render("a<b></b>c"))
+        assertEquals("ac", MarkdownV2.render("a<strong></strong>c"))
+        assertEquals("ac", MarkdownV2.render("a<s></s>c"))
+        assertEquals("ac", MarkdownV2.render("a<del></del>c"))
+        assertEquals("ac", MarkdownV2.render("a<strike></strike>c"))
+        assertEquals("x  y", MarkdownV2.render("x <b></b> y"))
+        assertEquals("a  b", MarkdownV2.render("a <b><!-- c --></b> b"))
+    }
+
+    @Test
+    fun unclosedEmptyBoldAndStrikeRewindAtOutputTime() {
+        // At output time the trailing separator whitespace the body trim strips counts
+        // as blank: the closer would ship as a fresh empty entity (pre-fix "a<b> " and
+        // "a<tg-spoiler> " completed into "a**" and "a||||")
+        assertEquals("a", MarkdownV2.render("a<b> "))
+        assertEquals("a", MarkdownV2.render("a <b> <!-- c -->"))
+        assertEquals("a", MarkdownV2.render("a<s> "))
+        assertEquals("a", MarkdownV2.render("a<tg-spoiler> "))
+        // A bold emptied by an inner empty pair rewinds too (LIFO rewinds compose)
+        assertEquals("a", MarkdownV2.render("a<b><s></s>"))
+    }
+
+    @Test
+    fun emptyBoldPairAdjacentEntitiesKeepTheirOwnMarkers() {
+        assertEquals("*x*", MarkdownV2.render("<b></b><b>x</b>"))
+        assertEquals("*x*", MarkdownV2.render("<b>x</b><b></b>"))
+        assertEquals("~x~", MarkdownV2.render("<s></s><s>x</s>"))
+        // An italic opening straight behind the rewound pair still takes the glue
+        // degradation on the earlier italic's closer
+        assertEquals("_a_b", MarkdownV2.render("<i>a</i><b></b><i>b</i>"))
+        // A code span after the rewind opens normally — no marker is left to glue onto
+        assertEquals("a `x`", MarkdownV2.render("a<b></b> <code>x</code>"))
+        assertTelegramParseable(MarkdownV2.render("<b></b><b>x</b> y"), "emptyBoldAdjacent")
+    }
+
+    @Test
+    fun emptyEmphasisNodesRewindViaAst() {
+        // The parser never forms empty emphasis from "*"; hand-built ASTs reach the
+        // rewind paths of the Markdown-side visits
+        val paragraph = Paragraph()
+        paragraph.appendChild(Text("a"))
+        paragraph.appendChild(StrongEmphasis("**"))
+        paragraph.appendChild(Strikethrough("~~"))
+        paragraph.appendChild(Text("b"))
+        assertEquals("ab", MarkdownV2.render(paragraph))
+    }
+
+    @Test
+    fun unclosedTagAsSoleLabelContentDegradesToBareUrlForEveryFamily() {
+        // The blank test runs after the label's inner entities complete now: an
+        // unclosed tag as the label's only content rewinds as the empty entity it
+        // rendered to, so the link degrades to the bare escaped URL instead of
+        // shipping an empty [](url)-shaped entity whose URL Telegram drops with it
+        // (pre-fix "[<b>](u)" gave "[](u)")
+        assertEquals("u", MarkdownV2.render("[<b>](u)"))
+        assertEquals("u", MarkdownV2.render("[<strong>](u)"))
+        assertEquals("u", MarkdownV2.render("[<i>](u)"))
+        assertEquals("u", MarkdownV2.render("[<em>](u)"))
+        assertEquals("u", MarkdownV2.render("[<u>](u)"))
+        assertEquals("u", MarkdownV2.render("[<ins>](u)"))
+        assertEquals("u", MarkdownV2.render("[<s>](u)"))
+        assertEquals("u", MarkdownV2.render("[<del>](u)"))
+        assertEquals("u", MarkdownV2.render("[<strike>](u)"))
+        assertEquals("u", MarkdownV2.render("[<code>](u)"))
+        assertEquals("u", MarkdownV2.render("[<kbd>](u)"))
+        assertEquals("u", MarkdownV2.render("[<samp>](u)"))
+        assertEquals("u", MarkdownV2.render("[<tt>](u)"))
+        assertEquals("u", MarkdownV2.render("[<tg-spoiler>](u)"))
+        assertEquals("u", MarkdownV2.render("[<tg-emoji emoji-id=\"5\">](u)"))
+        assertEquals("https://e\\.com", MarkdownV2.render("[<b>](https://e.com)"))
+        // A matched empty pair as the label's only content reaches the same degrade
+        assertEquals("u", MarkdownV2.render("[<b></b>](u)"))
+        assertEquals("u", MarkdownV2.render("[<s></s>](u)"))
+        assertEquals("u", MarkdownV2.render("[<code></code>](u)"))
+        // Image shapes alike — the plain link degradation and the custom emoji syntax
+        assertEquals("u", MarkdownV2.render("![<b>](u)"))
+        assertEquals("tg://emoji?id\\=5", MarkdownV2.render("![<b>](tg://emoji?id=5)"))
+        // An anchor tag as sole content literalizes visibly (links cannot nest), so its
+        // label is not blank and the outer link survives
+        assertEquals("[<a href\\=\"x\"\\>](u)", MarkdownV2.render("[<a href=\"x\">](u)"))
+        assertTelegramParseable(MarkdownV2.render("[<b>](https://e.com) and [<code>](t)"), "unclosedTagSoleLabel")
+    }
+
+    @Test
+    fun markdownEmphasisInsideHtmlCodeDropsMarkers() {
+        // Inside a code entity only \` and \\ count: a raw '_'/'*'/'~' marker surfaces
+        // as a literal character and changes what Telegram displays (pre-fix
+        // <code>a *b* c</code> showed "a _b_ c"). The markers drop, the content stays
+        // — the same degradation the HTML and entities formats make
+        assertEquals("`a b c`", MarkdownV2.render("<code>a *b* c</code>"))
+        assertEquals("`a b c`", MarkdownV2.render("<code>a **b** c</code>"))
+        assertEquals("`a b c`", MarkdownV2.render("<kbd>a _b_ c</kbd>"))
+        assertEquals("`a b c`", MarkdownV2.render("<samp>a __b__ c</samp>"))
+        assertEquals("`a b c`", MarkdownV2.render("<tt>a ~~b~~ c</tt>"))
+        // All-format agreement on the displayed text
+        assertEquals("a b c", TelegramEntities.render("<code>a *b* c</code>").text)
+        assertEquals("a b c", MarkdownV2.toPlainText(MarkdownV2.render("<code>a *b* c</code>")))
+    }
+
+    @Test
+    fun customEmojiCompoundFallbacksStayCustomEmoji() {
+        // One emoji cluster in every compound shape: skin tone, ZWJ family, flag pair,
+        // subdivision-flag tag sequence, keycap (the '#' base arrives escaped in the
+        // rendered label; the digits never escape)
+        val fallbacks = listOf("😀", "👋🏽", "👨‍👩‍👧", "🇺🇸", "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "1️⃣", "#️⃣")
+        for (fallback in fallbacks) {
+            // escape(): a '#' keycap base renders escaped in the label ("\#️⃣"); every
+            // other fallback char is not MarkdownV2-special
+            val expected = "![" + MarkdownV2.escape(fallback) + "](tg://emoji?id=5368324170671202286)"
+            assertEquals(expected, MarkdownV2.render("![$fallback](tg://emoji?id=5368324170671202286)"), "fallback: $fallback")
+            assertEquals(
+                expected,
+                MarkdownV2.render("<tg-emoji emoji-id=\"5368324170671202286\">$fallback</tg-emoji>"),
+                "fallback: $fallback",
+            )
+            assertTelegramParseable(expected, "compound fallback $fallback")
+        }
+    }
+
+    @Test
+    fun customEmojiFallbackMustBeExactlyOneEmoji() {
+        // A custom_emoji entity must wrap exactly one emoji; the server silently
+        // ignores anything else, so an invalid fallback degrades to the plain fallback
+        // text — the same degrade the in-link path makes of the whole tag (pre-fix the
+        // ignored entity shipped anyway)
+        assertEquals("hello", MarkdownV2.render("<tg-emoji emoji-id=\"5368324170671202286\">hello</tg-emoji>"))
+        assertEquals("hello", MarkdownV2.render("![hello](tg://emoji?id=5368324170671202286)"))
+        assertEquals("😀👍", MarkdownV2.render("![😀👍](tg://emoji?id=5368324170671202286)"))
+        assertEquals("😀👍", MarkdownV2.render("<tg-emoji emoji-id=\"5368324170671202286\">😀👍</tg-emoji>"))
+        assertEquals("a😀", MarkdownV2.render("![a😀](tg://emoji?id=5368324170671202286)"))
+        assertEquals("😀a", MarkdownV2.render("<tg-emoji emoji-id=\"5368324170671202286\">😀a</tg-emoji>"))
+        // Two flags are two emoji, not one cluster
+        assertEquals("🇺🇸🇬🇧", MarkdownV2.render("![🇺🇸🇬🇧](tg://emoji?id=5368324170671202286)"))
+        // The fallback's own formatting survives the degrade
+        assertEquals("*hi*", MarkdownV2.render("<tg-emoji emoji-id=\"5368324170671202286\"><b>hi</b></tg-emoji>"))
+        assertEquals("`c`", MarkdownV2.render("![`c`](tg://emoji?id=5368324170671202286)"))
+        // An unclosed tag with a valid fallback still completes as custom emoji
+        assertEquals("x ![👍](tg://emoji?id=5368324170671202286)", MarkdownV2.render("x <tg-emoji emoji-id=\"5368324170671202286\">👍"))
+        assertTelegramParseable(
+            MarkdownV2.render("<tg-emoji emoji-id=\"5368324170671202286\">hello</tg-emoji> ![😀👍](tg://emoji?id=5368324170671202286)"),
+            "invalidEmojiFallbacks",
+        )
     }
 }
