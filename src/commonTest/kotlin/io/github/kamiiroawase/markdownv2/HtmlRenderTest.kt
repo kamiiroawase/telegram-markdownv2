@@ -2,6 +2,7 @@ package io.github.kamiiroawase.markdownv2
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -512,5 +513,41 @@ class HtmlRenderTest {
         val rendered = TelegramHtml.render("[t](http://x?a=&amp;b=2)")
         assertEquals("<a href=\"http://x?a=&amp;amp;b=2\">t</a>", rendered)
         assertEquals("t (http://x?a=&amp;b=2)", deformatHtml(rendered))
+    }
+
+    // ---------- depth-cap flattening escapes ----------
+
+    // Past MAX_RENDER_DEPTH a subtree flattens to plain text; pre-fix that text landed
+    // in the HTML output unescaped, so a deep-enough structure containing '&'/'<b>'
+    // produced output the Bot API rejects. Every fallback site escapes now — these
+    // sweep the list-item, quote-child and inline-emphasis paths
+    @Test
+    fun depthCapListFlattenEscapesHtml() {
+        val content =
+            (0 until 106).joinToString("\n") { "  ".repeat(it) + "- L$it" } +
+                "\n" + "  ".repeat(106) + "- text & <b>bold</b>\n"
+        val output = TelegramHtml.render(content)
+        assertTrue(output.contains("text &amp; &lt;b&gt;bold&lt;/b&gt;"), "raw markup leaked: ${output.takeLast(80)}")
+        assertFalse(output.contains("<b>bold"), "unescaped tag survived: ${output.takeLast(80)}")
+        assertTelegramHtmlParseable(output, "depthCapListFlatten")
+    }
+
+    @Test
+    fun depthCapQuoteFlattenEscapesHtml() {
+        val output = TelegramHtml.render(">".repeat(110) + " text & <b>bold</b>")
+        assertTrue(output.contains("text &amp; &lt;b&gt;bold&lt;/b&gt;"), "raw markup leaked: ${output.takeLast(80)}")
+        assertFalse(output.contains("<b>bold"), "unescaped tag survived: ${output.takeLast(80)}")
+        assertTelegramHtmlParseable(output, "depthCapQuoteFlatten")
+    }
+
+    @Test
+    fun depthCapInlineEmphasisFlattenEscapesHtml() {
+        // 105 levels of Markdown-nested emphasis: past the inline cap the inner levels
+        // flatten through the same escaped fallback
+        val content = "*".repeat(210) + "text & <b>bold</b>" + "*".repeat(210)
+        val output = TelegramHtml.render(content)
+        assertTrue(output.contains("text &amp; &lt;b&gt;bold&lt;/b&gt;"), "raw markup leaked: ${output.takeLast(80)}")
+        assertFalse(output.contains("<b>bold"), "unescaped tag survived: ${output.takeLast(80)}")
+        assertTelegramHtmlParseable(output, "depthCapInlineEmphasisFlatten")
     }
 }

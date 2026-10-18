@@ -1035,6 +1035,18 @@ internal class Visitor(
             )
             return ""
         }
+        // An emphasis-family tag inside an open code entity emits no marker either: the
+        // entity's content is literal, and `*`/`_`/`~`/`__` there would surface as
+        // visible characters (inside code only ` and \ carry meaning — the entities
+        // twin drops the tags outright). The entry goes silent — no opener, its closer
+        // emits nothing, the same shape as the glue degradation above — and the content
+        // renders code-escaped in place
+        if (marker != "`" && htmlCodeDepth > 0) {
+            openEntities.addLast(
+                OpenEmphasisMarker(marker, html = true, seq = nextSeq++, silent = true),
+            )
+            return ""
+        }
         // A code-family tag never emits a second backtick in a row: nested inside an
         // open code entity it merges into it (nested code renders exactly as single
         // code), and directly behind a closed entity's backtick the delimiter would

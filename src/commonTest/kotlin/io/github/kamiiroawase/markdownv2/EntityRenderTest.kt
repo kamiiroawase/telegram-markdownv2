@@ -444,4 +444,26 @@ class EntityRenderTest {
         assertEquals(EntityText("hello", emptyList()), TelegramEntities.render("` `\n\nhello"))
         assertEquals(EntityText("https://t.me", emptyList()), TelegramEntities.render("[` `](https://t.me)"))
     }
+
+    @Test
+    fun leadingWhitespaceKeepsEntityOffsetsAligned() {
+        // A paragraph that opens with a nothing-rendering inline (an empty link) leaves
+        // the following space as leading text. Pre-fix output() trimmed that space away
+        // without shifting the entity offsets with it, so the entity covered the wrong
+        // characters (ITALIC(1,1) over "em" instead of ITALIC(0,2)-shaped coverage).
+        // Only the trailing side trims now, matching the string twins' as-is buffers
+        val emphasis = TelegramEntities.render("[]() *em*")
+        assertEquals(
+            EntityText(" em", listOf(MessageEntity(MessageEntityType.ITALIC, 1, 2))),
+            emphasis,
+        )
+        assertEntitiesValid(emphasis, "leadingWhitespaceItalic")
+
+        val code = TelegramEntities.render("[]() `code`")
+        assertEquals(
+            EntityText(" code", listOf(MessageEntity(MessageEntityType.CODE, 1, 4))),
+            code,
+        )
+        assertEntitiesValid(code, "leadingWhitespaceCode")
+    }
 }

@@ -120,8 +120,9 @@ private fun shrinkHtml(
 
         node is FootnoteDefinition -> {
             // See the MarkdownV2 twin: the label prefix glues onto the shrunken child
-            // chain
-            val prefix = "[^${node.label}]: "
+            // chain; the label is arbitrary source text, so the prefix escapes like the
+            // visitor's own emission does
+            val prefix = escapeHtmlText("[^${node.label}]: ")
             if (prefix.length >= budget) {
                 ""
             } else {

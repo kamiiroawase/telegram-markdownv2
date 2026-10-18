@@ -143,6 +143,81 @@ class ExtensionsTest {
         assertEntitiesValid(result, "footnoteTruncation")
     }
 
+    // ---------- footnote labels with markup-shaped characters ----------
+
+    // The footnotes grammar admits any non-whitespace, non-']' characters in a label, so
+    // '<'/'&' are legal there — and raw in HTML output they draw a 400 from the Bot API.
+    // Pre-fix the HTML render and truncation interpolated the label unescaped
+    @Test
+    fun footnoteLabelWithMarkupEscapesHtml() {
+        assertEquals(
+            "Text[^a&lt;b]\n\n[^a&lt;b]: The note",
+            TelegramHtml.render("Text[^a<b]\n\n[^a<b]: The note"),
+        )
+    }
+
+    @Test
+    fun footnoteLabelWithMarkupEscapesHtmlUnderTruncation() {
+        val result = TelegramHtml.render("Text[^a<b]\n\n[^a<b]: " + "x".repeat(100), 30)
+        assertTrue(result.startsWith("Text[^a&lt;b]\n\n[^a&lt;b]: "), "label lost its escaping: $result")
+        assertTrue(result.endsWith("…"))
+        assertTrue(result.length <= 30)
+    }
+
+    @Test
+    fun footnoteLabelWithMarkupEscapesMdv2() {
+        // The MarkdownV2 pipeline escaped the label all along — pinned so the three
+        // formats cannot drift apart on the same source shape. '^' and '<' carry no
+        // MarkdownV2 meaning, so only the brackets escape
+        assertEquals(
+            "Text\\[^a<b\\]\n\n\\[^a<b\\]: The note",
+            MarkdownV2.render("Text[^a<b]\n\n[^a<b]: The note"),
+        )
+    }
+
+    @Test
+    fun footnoteLabelWithMarkupStaysLiteralInEntities() {
+        assertEquals(
+            EntityText("Text[^a<b]\n\n[^a<b]: The note", emptyList()),
+            TelegramEntities.render("Text[^a<b]\n\n[^a<b]: The note"),
+        )
+    }
+
+    // ---------- unclosed HTML tags in a blank paragraph ----------
+
+    // A paragraph whose only content renders no text (an empty image plus an input-HTML
+    // opener) skips as blank in the entities format — the opener emits no text there,
+    // unlike the string formats where the tag's source stays visible. The range the
+    // opener pushed survives the skip and completes over the following text, which is
+    // exactly how the string twins format an unclosed tag (complete at output time):
+    // all three formats link/bold the same trailing text. Pinned so the cross-format
+    // agreement cannot silently drift
+    @Test
+    fun unclosedAnchorInBlankParagraphCompletesAcrossFormats() {
+        val content = "![]()<a href=\"https://e.com\">\n\nhello"
+        val entities = TelegramEntities.render(content)
+        assertEquals(
+            listOf(MessageEntity(MessageEntityType.TEXT_LINK, 0, 5, url = "https://e.com")),
+            entities.entities,
+        )
+        assertEquals("hello", entities.text)
+        val html = TelegramHtml.render(content)
+        assertEquals("<a href=\"https://e.com\">\n\nhello</a>", html)
+        assertTelegramHtmlParseable(html, "unclosedAnchorBlankParagraph")
+        val mdv2 = MarkdownV2.render(content)
+        assertEquals("[\n\nhello](https://e.com)", mdv2)
+        assertTelegramParseable(mdv2, "unclosedAnchorBlankParagraphMdv2")
+    }
+
+    @Test
+    fun unclosedBoldInBlankParagraphCompletesAcrossFormats() {
+        val content = "![]()<b>\n\nhello"
+        val entities = TelegramEntities.render(content)
+        assertEquals(listOf(MessageEntity(MessageEntityType.BOLD, 0, 5)), entities.entities)
+        assertEquals("<b>\n\nhello</b>", TelegramHtml.render(content))
+        assertEquals("*\n\nhello*", MarkdownV2.render(content))
+    }
+
     // ---------- upstream-behavior parity of the iterative stand-ins ----------
 
     @Test

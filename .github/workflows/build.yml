@@ -99,8 +99,8 @@ jobs:
           echo "Published artifacts verified: $VERSION"
 
       # API reference from the KDoc, so the carefully-written docs are browsable without a
-      # local Dokka run; uploaded as a workflow artifact (a Pages deployment can follow
-      # once there is a docs workflow worth wiring)
+      # local Dokka run; uploaded as a workflow artifact. The Pages deployment itself
+      # lives in docs.yml, which rebuilds the same Dokka output on every main push
       - name: Generate API documentation
         run: ./gradlew dokkaGeneratePublicationHtml
 

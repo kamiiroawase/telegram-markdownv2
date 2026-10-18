@@ -99,13 +99,15 @@ internal class EntityVisitor(
      * Returns the rendered text with entities, completing any unclosed ranges
      * latest-opened first. A range completed here may have covered the trailing block
      * separator (the MarkdownV2/HTML twins trim before appending closers; ranges have
-     * no closer text), so entities clamp to the trimmed length.
+     * no closer text), so entities clamp to the trimmed length. Only the trailing side
+     * trims: a leading trim would shift the text under offsets computed before it, and
+     * the twins return their buffers as-is.
      */
     fun output(): EntityText {
         while (openRanges.isNotEmpty()) {
             closeRange(openRanges.removeLast())
         }
-        val text = sb.toString().trim()
+        val text = sb.toString().trimEnd()
         return EntityText(text, entities.toList().clampedTo(text.length))
     }
 
@@ -178,7 +180,12 @@ internal class EntityVisitor(
     // Rolls the text back to [start], dropping every entity registered inside the rewound
     // region (offsets at or past the rewind point; text positions only grow, so anything
     // closed before the region opened sits entirely before it) — kept, those entities
-    // would format whatever text the rewind re-seats at their offsets
+    // would format whatever text the rewind re-seats at their offsets. Open ranges
+    // deliberately survive the rewind: one pushed by an input-HTML opener emitted no
+    // text, and completing later over whatever text re-seats at its start is exactly how
+    // the string twins treat an unclosed tag (their openers stay visible and complete at
+    // output time), so all three formats format the same trailing text — see
+    // unclosedAnchorInBlankParagraphCompletesAcrossFormats
     private fun rewindTo(start: Int) {
         entities.removeAll { it.offset >= start }
         sb.setLength(start)

@@ -1157,6 +1157,37 @@ class RenderTest {
         assertTrue(result.contains("x"))
     }
 
+    // ---------- HTML emphasis tags inside an open code entity ----------
+
+    // A code-family tag inside <code> merges (its tags drop); pre-fix the emphasis
+    // family still emitted its marker, so <code>a<b>b</b>c</code> rendered `a*b*c` —
+    // the markers surfaced as visible characters (inside code only ` and \ carry
+    // meaning). The emphasis family goes silent inside code now: no opener, no closer,
+    // content code-escaped in place — the same visible text the entities twin produces
+    @Test
+    fun htmlEmphasisInsideHtmlCodeDropsMarkers() {
+        assertEquals("`abc`", MarkdownV2.render("<code>a<b>b</b>c</code>"))
+        assertEquals("`abc`", MarkdownV2.render("<samp>a<strong>b</strong>c</samp>"))
+        assertEquals("`abc`", MarkdownV2.render("<tt>a<del>b</del>c</tt>"))
+        assertEquals("`abc`", MarkdownV2.render("<kbd>a<em>b</em>c</kbd>"))
+        assertEquals("`abc`", MarkdownV2.render("<code>a<u>b</u>c</code>"))
+        assertEquals("`abc`", MarkdownV2.render("<code>a<s>b</s>c</code>"))
+    }
+
+    @Test
+    fun nestedHtmlEmphasisInsideHtmlCodeDropsAllMarkers() {
+        assertEquals("`abic`", MarkdownV2.render("<code>a<b><i>bi</i></b>c</code>"))
+    }
+
+    @Test
+    fun unclosedHtmlEmphasisInsideHtmlCodeCompletesSilently() {
+        // The </code> closer cannot match past the still-open <b> and goes literal —
+        // the crossed-entity completion every unclosed tag already gets — while the
+        // silent <b> entry completes at output time emitting nothing and the code
+        // entity itself completes with its closing backtick
+        assertEquals("`ac</code\\>d`", MarkdownV2.render("<code>a<b>c</code>d"))
+    }
+
     @Test
     fun astOrderedListWithoutStartNumberDefaultsToOne() {
         val paragraph = Paragraph()

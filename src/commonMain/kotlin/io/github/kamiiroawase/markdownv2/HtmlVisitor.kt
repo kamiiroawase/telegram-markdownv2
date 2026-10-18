@@ -296,7 +296,7 @@ internal class HtmlVisitor(
 
     override fun visit(emphasis: Emphasis) {
         if (!enterInline()) {
-            appendPlainText(sb, emphasis)
+            appendEscapedHtmlPlainText(sb, emphasis)
             return
         }
         val seq = nextSeq++
@@ -312,7 +312,7 @@ internal class HtmlVisitor(
 
     override fun visit(strongEmphasis: StrongEmphasis) {
         if (!enterInline()) {
-            appendPlainText(sb, strongEmphasis)
+            appendEscapedHtmlPlainText(sb, strongEmphasis)
             return
         }
         val seq = nextSeq++
@@ -329,7 +329,7 @@ internal class HtmlVisitor(
         when (customNode) {
             is Strikethrough -> {
                 if (!enterInline()) {
-                    appendPlainText(sb, customNode)
+                    appendEscapedHtmlPlainText(sb, customNode)
                     return
                 }
                 val seq = nextSeq++
@@ -351,8 +351,10 @@ internal class HtmlVisitor(
             is FootnoteReference -> {
                 // No footnote entity either: the reference stays visible as its source
                 // spelling — pre-promotion it vanished entirely under the unknown-node
-                // traversal, losing the marker from the text
-                sb.append("[^${customNode.label}]")
+                // traversal, losing the marker from the text. The label is arbitrary
+                // non-whitespace source text, so it escapes like any other (the
+                // MarkdownV2 twin's escapeText at the same spot)
+                sb.append(escapeHtmlText("[^${customNode.label}]"))
             }
 
             else -> {
@@ -408,8 +410,9 @@ internal class HtmlVisitor(
             is FootnoteDefinition -> {
                 // The definition keeps its place in the document (Telegram message text
                 // is linear): label spelled back out, content rendered as the blocks it
-                // wraps — the same visible shape the unextended parse shows
-                sb.append("[^${customBlock.label}]: ")
+                // wraps — the same visible shape the unextended parse shows. The label
+                // escapes like the reference's does
+                sb.append(escapeHtmlText("[^${customBlock.label}]: "))
                 visitChildren(customBlock)
             }
 
@@ -714,14 +717,27 @@ internal class HtmlVisitor(
         if (sb.length > start) sb.append('\n')
     }
 
+    // appendPlainText flattens with no output-format escaping (the entities protocol
+    // needs none); the depth-cap fallbacks below land that text in HTML output, so it
+    // escapes on the way in
+    private fun appendEscapedHtmlPlainText(
+        sb: StringBuilder,
+        node: Node,
+    ) {
+        val plain = StringBuilder()
+        appendPlainText(plain, node)
+        sb.append(escapeHtmlText(plain.toString()))
+    }
+
     // Renders a nested block (quote body, list item) in a child visitor; at the depth cap
-    // the subtree flattens to plain text (see MAX_RENDER_DEPTH). Trailing newlines are
-    // trimmed here — callers prepend their own prefixes and separators
+    // the subtree flattens to plain text, escaped like every other text this visitor
+    // emits (see MAX_RENDER_DEPTH). Trailing newlines are trimmed here — callers prepend
+    // their own prefixes and separators
     private fun renderChild(node: Node): String =
         if (depth + 1 >= MAX_RENDER_DEPTH) {
             val plain = StringBuilder()
             appendPlainText(plain, node)
-            plain.toString().trimEnd('\n')
+            escapeHtmlText(plain.toString().trimEnd('\n'))
         } else {
             val visitor = HtmlVisitor(depth + 1, options)
             visitor.visitChildren(node)
@@ -730,13 +746,13 @@ internal class HtmlVisitor(
 
     // The quote-child variant: the node renders through its own full block shape —
     // visit(node), not visitChildren(node) — so a nested blockQuote child arrives with
-    // its own <blockquote> wrapper for the caller to nest. Depth capping and
+    // its own <blockquote> wrapper for the caller to nest. Depth capping, escaping and
     // trailing-newline trimming match renderChild
     private fun renderQuoteChild(node: Node): String =
         if (depth + 1 >= MAX_RENDER_DEPTH) {
             val plain = StringBuilder()
             appendPlainText(plain, node)
-            plain.toString().trimEnd('\n')
+            escapeHtmlText(plain.toString().trimEnd('\n'))
         } else {
             val visitor = HtmlVisitor(depth + 1, options)
             node.accept(visitor)
