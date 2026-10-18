@@ -4,7 +4,7 @@
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.kamiiroawase/telegram-markdownv2.svg)](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
-Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转换为 Telegram MarkdownV2、HTML 或 entities 协议**，并对超长内容做保持结构完整的截断或无损分片（Telegram 消息上限 4096 字符，分片按序发送即可完整送达——文本不丢字符，接缝处实体按段闭合）。为 LLM 机器人输出而生——模型回复是任意长度、任意结构的 Markdown，还经常带 Telegram 渲染不了的构造。
+Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转换为 Telegram MarkdownV2、HTML 或 entities 协议**，并对超长内容做保持结构完整的截断或无损分片（Telegram 消息上限 4096 字符，分片按序发送即可完整送达——文本不丢字符，接缝处格式化按段收口，每段独立可发送）。为 LLM 机器人输出而生——模型回复是任意长度、任意结构的 Markdown，还经常带 Telegram 渲染不了的构造。
 
 [English version](README.en.md)
 
@@ -38,7 +38,7 @@ val fallback = MarkdownV2.toPlainText(rejectedPart)                    // 被拒
 // parse_mode = HTML —— 三个入口共享解析器、RenderOptions 与截断/分片语义
 val html = TelegramHtml.render("**hello** <tg-spoiler>world</tg-spoiler>")   // tg-spoiler、tg-emoji 原样透传
 val htmlParts = TelegramHtml.renderChunked(reply)                            // 同样无损分片，每段独立合法 HTML
-val htmlLiteral = TelegramHtml.escape(userInput)                             // 转义 & < >（属性值另转义 "）
+val htmlLiteral = TelegramHtml.escape(userInput)                             // 文本转义 & < >；属性值由渲染器另转义 "
 
 // 不带 parse_mode —— entities 协议：纯文本 + 格式化区间，从根上消灭 400
 val message = TelegramEntities.render(reply)          // EntityText(text = 纯显示文本, entities = 区间列表)
@@ -73,7 +73,7 @@ val messageParts = TelegramEntities.renderChunked(reply)   // 同样无损分片
 - 病态深嵌套的主要耗时在上游解析器：数千层嵌套列表（约 4MB 输入）端到端秒级，九成在 commonmark-kotlin 解析；接受不可信输入的服务应自行限制输入规模
 - 超长内容先完整渲染再收缩（两遍策略）；截断收缩按重试收敛，最坏 O(n²)——4096 默认上限下无感
 - MarkdownV2 不是普通 Markdown：`__` 是下划线不是粗体，不要把渲染结果再当普通 Markdown 二次加工
-- 官方 task-list / autolink 扩展的后处理器递归遍历块树，深嵌套输入会栈溢出（mingwX64 实测 1500 层引用）——默认集合挂的是库内行为对齐的迭代版替代品（`IterativeTaskListItemsExtension`/`IterativeAutolinkExtension`，节点类型与官方一致）；footnotes 官方版无此问题，直接采用
+- 官方 task-list / autolink 扩展的后处理器递归遍历块树，深嵌套输入会栈溢出（mingwX64 实测 1500 层引用）——默认集合挂的是库内行为对齐的迭代版替代品（internal 实现，产出与官方一致的节点类型）；footnotes 官方版无此问题，直接采用
 - HTML 端的块级输入 HTML（`<div>` 等）仍降级为 `<pre>` 转义文本，不透传；可折叠引用（`<blockquote expandable>`）同样不支持
 
 ## 开发

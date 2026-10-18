@@ -4,7 +4,7 @@
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.kamiiroawase/telegram-markdownv2.svg)](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
-Kotlin Multiplatform library that converts **CommonMark (incl. GFM tables & strikethrough) into Telegram MarkdownV2, HTML or the entities protocol**, with structure-preserving truncation or lossless chunking for over-length content (Telegram caps messages at 4096 characters; chunks sent in order deliver all the content — no character is dropped, entities straddling a seam close per piece). Built for LLM bot output — model replies are arbitrary Markdown of unpredictable structure, frequently containing constructs Telegram cannot render.
+Kotlin Multiplatform library that converts **CommonMark (incl. GFM tables & strikethrough) into Telegram MarkdownV2, HTML or the entities protocol**, with structure-preserving truncation or lossless chunking for over-length content (Telegram caps messages at 4096 characters; chunks sent in order deliver all the content — no character is dropped, formatting straddling a seam closes per piece, every piece independently sendable). Built for LLM bot output — model replies are arbitrary Markdown of unpredictable structure, frequently containing constructs Telegram cannot render.
 
 [中文版](README.md)
 
@@ -40,7 +40,7 @@ val fallback = MarkdownV2.toPlainText(rejectedPart)                    // de-for
 // truncation/chunking semantics
 val html = TelegramHtml.render("**hello** <tg-spoiler>world</tg-spoiler>")   // tg-spoiler and tg-emoji pass through
 val htmlParts = TelegramHtml.renderChunked(reply)                            // same lossless chunking, each piece valid HTML
-val htmlLiteral = TelegramHtml.escape(userInput)                             // escapes & < > (attributes also escape ")
+val htmlLiteral = TelegramHtml.escape(userInput)                             // text escaping for & < >; the renderer also escapes " in attributes
 
 // no parse_mode — the entities protocol: plain text plus formatting ranges; the
 // whole class of parse failures cannot arise
@@ -76,7 +76,7 @@ val messageParts = TelegramEntities.renderChunked(reply)   // same lossless chun
 - Pathologically deep nesting spends its time in the upstream parser: a multi-thousand-level nested list (~4MB input) takes seconds end to end, ~90% of it inside commonmark-kotlin parsing; services accepting untrusted input should cap input size themselves
 - Over-length content renders fully first, then shrinks (two passes); the shrink retry loop is worst-case O(n²) — negligible at the default 4096 limit
 - MarkdownV2 is not plain Markdown: `__` is underline, not bold; don't post-process rendered output as ordinary Markdown
-- The upstream task-list and autolink extensions post-process with recursive tree walks that stack-overflow on deeply nested input (measured on mingwX64 at a 1500-level quote chain) — the default set installs this library's behavior-matched iterative stand-ins (`IterativeTaskListItemsExtension`/`IterativeAutolinkExtension`, emitting the same node types); the official footnotes extension has no such recursion and is used as-is
+- The upstream task-list and autolink extensions post-process with recursive tree walks that stack-overflow on deeply nested input (measured on mingwX64 at a 1500-level quote chain) — the default set installs this library's behavior-matched iterative stand-ins (internal implementations emitting the same node types); the official footnotes extension has no such recursion and is used as-is
 - The HTML side still degrades block-level input HTML (`<div>` and friends) to escaped text inside a `<pre>` instead of passing it through; expandable blockquotes (`<blockquote expandable>`) are likewise unsupported
 
 ## Development
