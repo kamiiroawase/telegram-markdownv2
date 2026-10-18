@@ -139,6 +139,9 @@ kotlin {
             api(libs.commonmark)
             implementation(libs.commonmark.ext.gfm.strikethrough)
             implementation(libs.commonmark.ext.gfm.tables)
+            implementation(libs.commonmark.ext.task.list.items)
+            implementation(libs.commonmark.ext.autolink)
+            implementation(libs.commonmark.ext.footnotes)
         }
 
         commonTest.dependencies {

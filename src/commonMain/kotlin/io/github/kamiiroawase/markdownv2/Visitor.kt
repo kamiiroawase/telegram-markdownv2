@@ -1,7 +1,10 @@
 package io.github.kamiiroawase.markdownv2
 
+import org.commonmark.ext.footnotes.FootnoteDefinition
+import org.commonmark.ext.footnotes.FootnoteReference
 import org.commonmark.ext.gfm.strikethrough.Strikethrough
 import org.commonmark.ext.gfm.tables.TableBlock
+import org.commonmark.ext.task.list.items.TaskListItemMarker
 import org.commonmark.node.AbstractVisitor
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
@@ -707,6 +710,19 @@ internal class Visitor(
                 exitInline()
             }
 
+            is TaskListItemMarker -> {
+                // No checkbox entity exists in any Telegram format: the marker spells
+                // back out as literal text, the same shape the unextended parse shows
+                sb.append(escapeText(if (customNode.isChecked) "[x] " else "[ ] "))
+            }
+
+            is FootnoteReference -> {
+                // No footnote entity either: the reference stays visible as its source
+                // spelling — pre-promotion it vanished entirely under the unknown-node
+                // traversal, losing the marker from the text
+                sb.append(escapeText("[^${customNode.label}]"))
+            }
+
             else -> {
                 super.visit(customNode)
             }
@@ -802,10 +818,22 @@ internal class Visitor(
     }
 
     override fun visit(customBlock: CustomBlock) {
-        if (customBlock is TableBlock) {
-            visitTable(customBlock)
-        } else {
-            super.visit(customBlock)
+        when (customBlock) {
+            is TableBlock -> {
+                visitTable(customBlock)
+            }
+
+            is FootnoteDefinition -> {
+                // The definition keeps its place in the document (Telegram message text
+                // is linear): label spelled back out, content rendered as the blocks it
+                // wraps — the same visible shape the unextended parse shows
+                sb.append(escapeText("[^${customBlock.label}]: "))
+                visitChildren(customBlock)
+            }
+
+            else -> {
+                super.visit(customBlock)
+            }
         }
     }
 

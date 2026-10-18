@@ -1,6 +1,7 @@
 package io.github.kamiiroawase.markdownv2
 
 import org.commonmark.Extension
+import org.commonmark.ext.footnotes.FootnotesExtension
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.TablesExtension
 import org.commonmark.node.Document
@@ -33,11 +34,19 @@ public object MarkdownV2 {
     public const val MAX_MESSAGE_LENGTH: Int = 4096
 
     /**
-     * GFM extensions used by [defaultParser] (tables, strikethrough), reusable as a base
-     * when building a custom parser: `Parser.builder().extensions(defaultExtensions + myExtension)`.
+     * GFM extensions used by [defaultParser] (tables, strikethrough), plus the
+     * task-list, autolink and footnotes extensions LLM output carries often — reusable
+     * as a base when building a custom parser:
+     * `Parser.builder().extensions(defaultExtensions + myExtension)`.
      */
     public val defaultExtensions: List<Extension> =
-        listOf(TablesExtension.create(), StrikethroughExtension.create())
+        listOf(
+            TablesExtension.create(),
+            StrikethroughExtension.create(),
+            IterativeTaskListItemsExtension,
+            IterativeAutolinkExtension,
+            FootnotesExtension.create(),
+        )
 
     /**
      * Default parser: CommonMark plus [defaultExtensions].

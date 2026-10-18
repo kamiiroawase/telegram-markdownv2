@@ -1,5 +1,6 @@
 package io.github.kamiiroawase.markdownv2
 
+import org.commonmark.ext.footnotes.FootnoteDefinition
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
 import org.commonmark.node.HardLineBreak
@@ -116,6 +117,18 @@ private fun shrink(
                 renderBlocks(node.firstChild, budget, depth, retriable, options, inListItem = true)
             } else {
                 shrinkQuote(node, budget, depth, retriable, options)
+            }
+        }
+
+        node is FootnoteDefinition -> {
+            // The definition shrinks as its label prefix plus its child block chain —
+            // the label glues onto the first surviving block, the same shape the full
+            // render emits
+            val prefix = escapeText("[^${node.label}]: ")
+            if (prefix.length >= budget) {
+                ""
+            } else {
+                prefix + renderBlocks(node.firstChild, budget - prefix.length, depth, retriable, options)
             }
         }
 

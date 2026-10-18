@@ -1,5 +1,8 @@
 package io.github.kamiiroawase.markdownv2
 
+import org.commonmark.ext.footnotes.FootnoteDefinition
+import org.commonmark.ext.footnotes.FootnoteReference
+import org.commonmark.ext.task.list.items.TaskListItemMarker
 import org.commonmark.node.Code
 import org.commonmark.node.FencedCodeBlock
 import org.commonmark.node.HardLineBreak
@@ -64,6 +67,21 @@ internal fun appendPlainText(
                 if (!literal.startsWith("<!") && !literal.startsWith("<?")) {
                     sb.append(current.literal)
                 }
+            }
+
+            is TaskListItemMarker -> {
+                // The checkbox marker is visible text in every output format — the
+                // fallback paths must not drop it from an item's plain view
+                sb.append(if (current.isChecked) "[x] " else "[ ] ")
+            }
+
+            is FootnoteReference -> {
+                sb.append("[^${current.label}]")
+            }
+
+            is FootnoteDefinition -> {
+                sb.append("[^${current.label}]: ")
+                pushChildrenReversed(current as Node, stack)
             }
 
             is FencedCodeBlock -> {

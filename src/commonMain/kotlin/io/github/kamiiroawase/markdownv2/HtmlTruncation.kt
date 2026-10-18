@@ -1,5 +1,6 @@
 package io.github.kamiiroawase.markdownv2
 
+import org.commonmark.ext.footnotes.FootnoteDefinition
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
 import org.commonmark.node.HardLineBreak
@@ -108,6 +109,17 @@ private fun shrinkHtml(
 
         node is BlockQuote -> {
             shrinkHtmlQuote(node, budget, depth, retriable, options)
+        }
+
+        node is FootnoteDefinition -> {
+            // See the MarkdownV2 twin: the label prefix glues onto the shrunken child
+            // chain
+            val prefix = "[^${node.label}]: "
+            if (prefix.length >= budget) {
+                ""
+            } else {
+                prefix + renderHtmlBlocks(node.firstChild, budget - prefix.length, depth, retriable, options)
+            }
         }
 
         node is Heading -> {

@@ -1,5 +1,6 @@
 package io.github.kamiiroawase.markdownv2
 
+import org.commonmark.ext.footnotes.FootnoteDefinition
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
 import org.commonmark.node.FencedCodeBlock
@@ -95,6 +96,20 @@ private fun shrinkEntity(
 
         node is BlockQuote -> {
             shrinkEntityQuote(node, budget, depth, retriable, options)
+        }
+
+        node is FootnoteDefinition -> {
+            // See the MarkdownV2 twin: the label prefix glues onto the shrunken child
+            // chain, entities riding along with the blocks
+            val prefix = "[^${node.label}]: "
+            if (prefix.length >= budget) {
+                EntityText.EMPTY
+            } else {
+                val parts = EntityBuilder()
+                parts.appendVerbatim(prefix)
+                parts.append("", renderEntityBlocks(node.firstChild, budget - prefix.length, depth, retriable, options))
+                parts.build()
+            }
         }
 
         node is Heading -> {

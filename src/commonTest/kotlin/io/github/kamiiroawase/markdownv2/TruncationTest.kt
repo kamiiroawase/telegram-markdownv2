@@ -363,14 +363,35 @@ class TruncationTest {
     }
 
     @Test
-    fun unknownCustomBlockShrinksToEmptyViaFootnotes() {
-        val parser =
-            Parser
-                .builder()
-                .extensions(MarkdownV2.defaultExtensions + FootnotesExtension.create())
-                .build()
+    fun footnoteDefinitionTooSmallForLabelDrops() {
+        // At this limit the escaped label prefix alone fills the remaining budget, so
+        // the definition drops whole (the heading-too-small-for-hashes trade)
+        assertEquals("Text\\[^1\\]…", MarkdownV2.render("Text[^1]\n\n[^1]: " + "x".repeat(100), 20))
+    }
+
+    @Test
+    fun footnoteDefinitionTruncatesWithLabelGlued() {
         val content = "Text[^1]\n\n[^1]: " + "x".repeat(100)
-        assertEquals("Text…", MarkdownV2.render(content, 20, parser))
+        assertEquals(
+            "Text\\[^1\\]\n\n\\[^1\\]: xxxxxxxxx…",
+            MarkdownV2.render(content, 30),
+        )
+    }
+
+    @Test
+    fun unknownCustomBlockShrinksToEmpty() {
+        class UnknownBlock : org.commonmark.node.CustomBlock()
+
+        val document =
+            org.commonmark.node.Document().apply {
+                appendChild(
+                    org.commonmark.node
+                        .Paragraph()
+                        .apply { appendChild(org.commonmark.node.Text("Text")) },
+                )
+                appendChild(UnknownBlock().apply { appendChild(org.commonmark.node.Text("x".repeat(100))) })
+            }
+        assertEquals("Text…", MarkdownV2.render(document, 20))
     }
 
     @Test

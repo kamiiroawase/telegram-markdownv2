@@ -1,0 +1,153 @@
+package io.github.kamiiroawase.markdownv2
+
+import org.commonmark.ext.task.list.items.TaskListItemMarker
+import org.commonmark.node.BulletList
+import org.commonmark.node.Link
+import org.commonmark.node.ListItem
+import org.commonmark.node.Node
+import org.commonmark.node.OrderedList
+import org.commonmark.node.Paragraph
+import org.commonmark.node.Text
+import org.commonmark.parser.Parser
+import org.commonmark.parser.PostProcessor
+import org.nibor.autolink.LinkExtractor
+import org.nibor.autolink.LinkSpan
+import org.nibor.autolink.LinkType
+
+/**
+ * Iterative stand-ins for the official task-list and autolink extensions, installed by
+ * [MarkdownV2.defaultExtensions]. The upstream extensions do their post-processing with
+ * recursive node visitors, which stack-overflows on deeply nested input — measured on
+ * mingwX64 at a 1500-level quote chain, while this library's own contract is that
+ * pathological input flattens or degrades, never crashes. These versions walk the same
+ * tree with an explicit stack and produce the same nodes the renderers already handle
+ * ([TaskListItemMarker], core [Link]), matching the upstream behavior point by point:
+ * a task marker binds only at the head of a list item's first paragraph and needs
+ * whitespace after the bracket pair (upper-case X counts as checked); autolink covers
+ * URL, www and email spans (mailto: prefixed) everywhere except inside a link label,
+ * where the outer link must stay single-level.
+ */
+internal object IterativeTaskListItemsExtension : Parser.ParserExtension {
+    override fun extend(parserBuilder: Parser.Builder) {
+        parserBuilder.postProcessor(IterativeTaskListPostProcessor)
+    }
+}
+
+internal object IterativeAutolinkExtension : Parser.ParserExtension {
+    override fun extend(parserBuilder: Parser.Builder) {
+        parserBuilder.postProcessor(IterativeAutolinkPostProcessor)
+    }
+}
+
+private object IterativeTaskListPostProcessor : PostProcessor {
+    override fun process(node: Node): Node {
+        val stack = ArrayDeque<Node>()
+        stack.addLast(node)
+        while (stack.isNotEmpty()) {
+            val current = stack.removeLast()
+            if (current is BulletList || current is OrderedList) {
+                var item = current.firstChild
+                while (item != null) {
+                    if (item is ListItem) {
+                        markTaskMarker(item)
+                    }
+                    item = item.next
+                }
+            }
+            pushChildrenForWalk(current, stack)
+        }
+        return node
+    }
+
+    // GitHub semantics: the marker binds only at the head of the item — the first block
+    // is a paragraph whose first inline is text starting with "[ ]"/"[x]"/"[X]" followed
+    // by a space or tab. The prefix strips into a TaskListItemMarker inserted ahead of
+    // the paragraph (the same AST shape the upstream extension emits)
+    private fun markTaskMarker(item: ListItem) {
+        val paragraph = item.firstChild as? Paragraph ?: return
+        val text = paragraph.firstChild as? Text ?: return
+        val literal = text.literal
+        if (literal.length < 4) return
+        val checked =
+            when (literal.take(3)) {
+                "[ ]" -> false
+                "[x]", "[X]" -> true
+                else -> return
+            }
+        val after = literal[3]
+        if (after != ' ' && after != '\t') return
+        text.literal = literal.substring(4)
+        paragraph.insertBefore(TaskListItemMarker(checked))
+    }
+}
+
+private object IterativeAutolinkPostProcessor : PostProcessor {
+    private val extractor =
+        LinkExtractor
+            .builder()
+            .linkTypes(setOf(LinkType.URL, LinkType.WWW, LinkType.EMAIL))
+            .build()
+
+    override fun process(node: Node): Node {
+        val stack = ArrayDeque<Node>()
+        stack.addLast(node)
+        while (stack.isNotEmpty()) {
+            val current = stack.removeLast()
+            if (current is Link) {
+                // Inside a link label no second level may open — the outer link stays
+                // single-level (the upstream visitor skips the same subtree)
+                continue
+            }
+            if (current is Text) {
+                autolinkText(current)
+            }
+            pushChildrenForWalk(current, stack)
+        }
+        return node
+    }
+
+    // extractSpans covers the whole literal with alternating plain and link spans, so
+    // the text node splices into the piece sequence and unlinks — no prefix splitting
+    // to track by hand
+    private fun autolinkText(text: Text) {
+        val literal = text.literal
+        val spans = extractor.extractSpans(literal).toList()
+        if (spans.none { it is LinkSpan }) return
+
+        var anchor: Node = text
+        for (span in spans) {
+            val content = literal.substring(span.beginIndex, span.endIndex)
+            val piece: Node =
+                when (span) {
+                    is LinkSpan -> {
+                        val destination =
+                            if (span.type == LinkType.EMAIL) "mailto:$content" else content
+                        Link(destination, null).apply { appendChild(Text(content)) }
+                    }
+
+                    else -> {
+                        if (content.isEmpty()) continue
+                        Text(content)
+                    }
+                }
+            anchor.insertAfter(piece)
+            anchor = piece
+        }
+        text.unlink()
+    }
+}
+
+// Collects the children before walking them: the autolink pass splices nodes into the
+// sibling chain while iterating, and a pre-collected reference list stays stable
+private fun pushChildrenForWalk(
+    node: Node,
+    stack: ArrayDeque<Node>,
+) {
+    val children = mutableListOf<Node>()
+    var child = node.firstChild
+    while (child != null) {
+        children += child
+        child = child.next
+    }
+    children.asReversed().forEach(stack::addLast)
+}

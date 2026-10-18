@@ -362,6 +362,11 @@ internal fun sweepContents(): List<String> =
         // budgets alongside the plain shapes
         add("<i>aaaa</i><i>bbbb</i> cccc <u>dddd</u><u>eeee</u>")
         add("<u>aaaa<i>bbbb</i></u> cccc <i></i> dddd")
+        // The promoted input extensions: task lists, footnotes, autolinks — every sweep
+        // suite crosses their budget arithmetic alongside the plain shapes
+        add("- [ ] aaaa bbbb\n- [x] cccc dddd")
+        add("note[^1]\n\n[^1]: aaaa bbbb cccc dddd eeee ffff")
+        add("see https://e.com/aaaa?bbb=cccc dddd [explicit](https://e.com/eeee)")
     }
 
 /**

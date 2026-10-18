@@ -49,7 +49,7 @@ val messageParts = TelegramEntities.renderChunked(reply)   // 同样无损分片
 - 官方 18 个特殊字符加反斜杠共 19 个全量转义；行内代码 / 代码块 / 链接 URL 按各自规则转义
 - 不支持的构造自动降级：表格转等宽对齐的代码块（单元格截断上限与字符宽度度量可经 `RenderOptions` 定制）、HTML 块映射为实体或字面文本、列表项内的引用块降级为原内容（Bot API 只接受行首的未转义 `>`，跟在列表标记或续行缩进后的 `>` 会导致整条消息被 400 拒收）、会与相邻 `_`/`__` 标记粘连的下划线族强调降级（解析器会把紧贴的 `_`/`__` 重新配对成无法闭合的实体）
 - 截断与分片保结构：代码围栏闭合、未闭合实体补全、引用与列表前缀逐行保留，绝不劈开转义序列和代理对；结构化内容完全放不下时回退为转义纯文本
-- 需要更多 Markdown 扩展（footnotes、autolink 等）时在 `MarkdownV2.defaultExtensions` 之上传入自建 `Parser`；未知扩展节点按纯内容遍历，不崩溃
+- 输入侧默认启用任务列表（`- [ ]`/`- [x]`，标记按字面回写）、autolink（裸 URL/邮箱自动成链接）与脚注（引用与定义标签保持可见）；需要更多扩展（heading-anchor、ins 等）时在 `MarkdownV2.defaultExtensions` 之上传入自建 `Parser`，未知扩展节点按纯内容遍历，不崩溃
 
 ### HTML 端的差异
 
@@ -73,6 +73,7 @@ val messageParts = TelegramEntities.renderChunked(reply)   // 同样无损分片
 - 病态深嵌套的主要耗时在上游解析器：数千层嵌套列表（约 4MB 输入）端到端秒级，九成在 commonmark-kotlin 解析；接受不可信输入的服务应自行限制输入规模
 - 超长内容先完整渲染再收缩（两遍策略）；截断收缩按重试收敛，最坏 O(n²)——4096 默认上限下无感
 - MarkdownV2 不是普通 Markdown：`__` 是下划线不是粗体，不要把渲染结果再当普通 Markdown 二次加工
+- 官方 task-list / autolink 扩展的后处理器递归遍历块树，深嵌套输入会栈溢出（mingwX64 实测 1500 层引用）——默认集合挂的是库内行为对齐的迭代版替代品（`IterativeTaskListItemsExtension`/`IterativeAutolinkExtension`，节点类型与官方一致）；footnotes 官方版无此问题，直接采用
 - HTML 端的块级输入 HTML（`<div>` 等）仍降级为 `<pre>` 转义文本，不透传；可折叠引用（`<blockquote expandable>`）同样不支持
 
 ## 开发
@@ -85,7 +86,7 @@ cd telegram-markdownv2
 ./gradlew benchmark    # 性能基准：常规消息 ~0.1ms 量级，百万字符 ~10ms；发版时 CI 复跑输出附在 GitHub Release
 ```
 
-513 个行为级测试（输入/输出断言），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
+537 个行为级测试（输入/输出断言），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
 
 ## 许可
 

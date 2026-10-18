@@ -29,7 +29,10 @@ class ChunkingTest {
                 .builder()
                 .extensions(MarkdownV2.defaultExtensions + FootnotesExtension.create())
                 .build()
-        assertEquals(listOf("Text\n\nThe note"), MarkdownV2.renderChunked("Text[^1]\n\n[^1]: The note", parser = parser))
+        assertEquals(
+            listOf("Text\\[^1\\]\n\n\\[^1\\]: The note"),
+            MarkdownV2.renderChunked("Text[^1]\n\n[^1]: The note", parser = parser),
+        )
 
         val table = "| a very long cell |\n| --- |\n| b |"
         val capped = MarkdownV2.renderChunked(table, options = RenderOptions(maxCellWidth = 5))

@@ -602,7 +602,10 @@ class RenderTest {
     }
 
     @Test
-    fun customParserExtensionsAreTraversedAsPlainContent() {
+    fun footnotesRenderAsVisibleText() {
+        // The promoted footnotes extension keeps the reference and the definition label
+        // visible — exactly the shape the unextended parse shows as literal text, where
+        // the old unknown-node traversal dropped the reference entirely
         val parser =
             Parser
                 .builder()
@@ -610,7 +613,29 @@ class RenderTest {
                 .build()
         val content = "Text[^1]\n\n[^1]: The note"
         val result = MarkdownV2.render(content, parser = parser)
-        assertEquals("Text\n\nThe note", result)
+        assertEquals("Text\\[^1\\]\n\n\\[^1\\]: The note", result)
+    }
+
+    @Test
+    fun unknownCustomNodesTraverseAsPlainContent() {
+        // A third-party extension's nodes still traverse as plain content (footnotes was
+        // this test's vehicle before its promotion)
+        class UnknownInline : org.commonmark.node.CustomNode()
+
+        class UnknownBlock : org.commonmark.node.CustomBlock()
+
+        val document =
+            org.commonmark.node.Document().apply {
+                appendChild(
+                    org.commonmark.node.Paragraph().apply {
+                        appendChild(org.commonmark.node.Text("a"))
+                        appendChild(UnknownInline().apply { appendChild(org.commonmark.node.Text("*b*")) })
+                        appendChild(org.commonmark.node.Text("c"))
+                    },
+                )
+                appendChild(UnknownBlock().apply { appendChild(org.commonmark.node.Text("tail")) })
+            }
+        assertEquals("a\\*b\\*c\n\ntail", MarkdownV2.render(document))
     }
 
     @Test
