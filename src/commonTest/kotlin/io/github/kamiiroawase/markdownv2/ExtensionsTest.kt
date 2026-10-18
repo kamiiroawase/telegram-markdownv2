@@ -309,4 +309,14 @@ class ExtensionsTest {
         assertTrue(result.endsWith("…"))
         assertTelegramParseable(result, "taskListTruncation")
     }
+
+    @Test
+    fun taskMarkerConsumesTheWholeWhitespaceRun() {
+        // Upstream's \s+ is greedy: every whitespace character after the bracket pair
+        // belongs to the marker and the content starts at the first non-whitespace
+        // character, exactly as this pins (substring(4) used to leave the extra spaces
+        // in the item's text, drifting from the upstream parity the KDoc promises)
+        assertEquals("• \\[x\\] hello", MarkdownV2.render("- [x]   hello"))
+        assertEquals("• \\[ \\] hello", MarkdownV2.render("- [\t]   hello"))
+    }
 }

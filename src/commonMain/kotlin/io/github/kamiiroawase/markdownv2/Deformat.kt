@@ -66,7 +66,7 @@ internal fun deformat(rendered: String): String {
             char == '_' || char == '*' || char == '~' || char == '|' -> {
                 var run = 1
                 while (index + run < rendered.length && rendered[index + run] == char) run++
-                matchMarkerRun(openMarkers, char, run, sb.length)
+                matchMarkerRun(openMarkers, char, run, sb.length, sb)
                 index += run
             }
 
@@ -125,19 +125,21 @@ private fun reopenUnmatched(
  * each unit first closes the entity on top when its marker matches ('_' closes '_',
  * '__' takes two; '*' and '~' are single-char), the remainder opens new entities —
  * '__' as underline, a lone '_' as italic (Telegram's rule that `__` is always
- * underline), '||' as spoiler (a lone '|' is no marker at all; it re-inserts literally
- * if nothing ever pairs it). Resolving the run as a whole is what handles adjacency:
- * `_a__b_` (the render of two italics side by side) reads the first '_' of the run as
- * the closer of the open italic and the second as the next opener, where the old
- * char-greedy read took '__' for one underline marker, matched nothing, and re-inserted
- * all three markers literally. [position] is the output position the run starts at (it
- * emits nothing itself), shared by every marker the run opens.
+ * underline), '||' as spoiler. A lone '|' is no marker at all: it never opens, never
+ * closes, and emits literally into [sb] (two of them used to pair up and cancel,
+ * dropping both pipes from the plain text). Resolving the run as a whole is what
+ * handles adjacency: `_a__b_` (the render of two italics side by side) reads the first
+ * '_' of the run as the closer of the open italic and the second as the next opener,
+ * where the old char-greedy read took '__' for one underline marker, matched nothing,
+ * and re-inserted all three markers literally. [position] is the output position the
+ * run starts at (markers the run opens share it; literals emit directly).
  */
 private fun matchMarkerRun(
     openMarkers: ArrayDeque<OpenMarker>,
     marker: Char,
     count: Int,
     position: Int,
+    sb: StringBuilder,
 ) {
     var remaining = count
     while (remaining > 0) {
@@ -147,7 +149,7 @@ private fun matchMarkerRun(
                 top == null -> 0
                 top.marker == "__" && marker == '_' && remaining >= 2 -> 2
                 top.marker == "||" && marker == '|' && remaining >= 2 -> 2
-                top.marker == marker.toString() -> 1
+                top.marker == marker.toString() && marker != '|' -> 1
                 else -> 0
             }
         if (closeCost > 0) {
@@ -159,6 +161,9 @@ private fun matchMarkerRun(
         } else if (marker == '|' && remaining >= 2) {
             openMarkers.addLast(OpenMarker("||", position))
             remaining -= 2
+        } else if (marker == '|') {
+            sb.append(marker)
+            remaining--
         } else {
             openMarkers.addLast(OpenMarker(marker.toString(), position))
             remaining--
@@ -537,7 +542,7 @@ private fun appendLabelText(
             char == '_' || char == '*' || char == '~' || char == '|' -> {
                 var run = 1
                 while (index + run < rendered.length && rendered[index + run] == char) run++
-                matchMarkerRun(openMarkers, char, run, sb.length)
+                matchMarkerRun(openMarkers, char, run, sb.length, sb)
                 index += run
             }
 

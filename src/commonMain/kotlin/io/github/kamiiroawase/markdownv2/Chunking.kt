@@ -249,30 +249,42 @@ private fun chunkRenderedCode(
 
     val pieces = mutableListOf<String>()
     val current = StringBuilder(open)
-    // Known lossless-chunking exception: the piece guards on real content
-    // (current.length > open.length), so pending blank lines placed at the top of the
-    // block drop when the split fires before any real line joins them — the whitespace
-    // Telegram would never display inside the re-opened fence. The HTML twin's
-    // chunkHtmlFence makes the same drop
+    // Known lossless-chunking exception: the piece guards on real content, so pending
+    // blank lines placed at the top of the block drop when the split fires before any
+    // real line joins them, and blank lines pending at a mid-content seam drop with the
+    // trailing-newline trim (the piece keeps no visible blank line there — the HTML and
+    // entities twins' pieces show none either, so the formats agree on the display). A
+    // piece whose content is whitespace only would be a message the server trims and
+    // rejects (400 "message text is empty") — it never ships
     for (line in middle) {
         if (current.length + 1 + line.length + 1 + close.length <= maxLength) {
             current.append('\n').append(line)
         } else {
-            if (current.length > open.length) {
-                pieces += current.toString() + "\n" + close
+            if (current.length > open.length && !isBlankBeyond(current, open.length)) {
+                pieces += current.toString().trimEnd('\n') + "\n" + close
                 current.setLength(0)
                 current.append(open)
+            } else {
+                // Only pending blank lines ever sit here (the fit check placed real
+                // content, and trailing newlines never reach this loop — the render
+                // trims them): drop them and start the next piece unplaced
+                current.setLength(open.length)
             }
             if (line.length <= lineBudget) {
                 current.append('\n').append(line)
             } else {
                 splitEscapedUnits(line, lineBudget).forEach { segment ->
-                    pieces += "$open\n$segment\n$close"
+                    // A segment of a whitespace-only line is blank visible text — the
+                    // same unsendable piece shape the seam drop above refuses, so the
+                    // line drops whole (the HTML twin's guard makes the same trade)
+                    if (!segment.isBlank()) pieces += "$open\n$segment\n$close"
                 }
             }
         }
     }
-    if (current.length > open.length) pieces += current.toString() + "\n" + close
+    if (current.length > open.length && !isBlankBeyond(current, open.length)) {
+        pieces += current.toString().trimEnd('\n') + "\n" + close
+    }
     if (pieces.isEmpty()) return
     pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)
     acc.appendRendered(pieces.last())
@@ -316,10 +328,12 @@ private fun chunkList(
 /**
  * Quote children are packed whole, each line "> "-prefixed; "> " alone on its own line
  * separates two quote paragraphs within a chunk. A child larger than the limit alone
- * flattens to escaped text prefixed line by line. A quote no child of which yields
- * content (empty, or every child blank-rendering) emits the single bare ">" the full
- * render emits (visit(blockQuote)'s empty-pieces fallback) — the marker is the quote's
- * whole render, and dropping it loses it from the chunk list.
+ * chunks on its own at the inner limit and its pieces re-prefix line by line — the same
+ * structured split the HTML and entities twins make (inline formatting, list markers and
+ * numbering all survive; the old whole-child flatten lost every one of them). A quote no
+ * child of which yields content (empty, or every child blank-rendering) emits the single
+ * bare ">" the full render emits (visit(blockQuote)'s empty-pieces fallback) — the marker
+ * is the quote's whole render, and dropping it loses it from the chunk list.
  */
 private fun chunkQuote(
     quote: Node,
@@ -339,7 +353,8 @@ private fun chunkQuote(
         // in visit(blockQuote) alike)
         val rendered = renderBlock(node, depth + 1, options)
         if (rendered.isNotBlank()) {
-            val prefixed = prefixQuoteLevel(node is BlockQuote, rendered)
+            val nested = node is BlockQuote
+            val prefixed = prefixQuoteLevel(nested, rendered)
             val separator = if (acc.current.isEmpty()) "" else "\n>\n"
             if (acc.current.length + separator.length + prefixed.length <= maxLength) {
                 acc.appendRendered(separator + prefixed)
@@ -350,12 +365,18 @@ private fun chunkQuote(
                     acc.appendRendered(prefixed)
                     content = true
                 } else {
-                    // Untrimmed, same trade as the list path above; flattenTextOf for
-                    // the same renders-but-extracts-to-nothing shapes (a lone break)
-                    val text = flattenTextOf(node, depth + 1, options)
-                    if (text.isNotBlank()) {
-                        chunkQuotedText(text, maxLength, acc)
+                    // The structured split keeps the child's formatting; the flatten
+                    // fallback covers the tiny limits no prefix headroom exists for
+                    if (appendStructuredQuoteChild(node, rendered, nested, maxLength, depth, options, acc)) {
                         content = true
+                    } else {
+                        // Untrimmed, same trade as the list path above; flattenTextOf for
+                        // the same renders-but-extracts-to-nothing shapes (a lone break)
+                        val text = flattenTextOf(node, depth + 1, options)
+                        if (text.isNotBlank()) {
+                            chunkQuotedText(text, maxLength, acc)
+                            content = true
+                        }
                     }
                 }
             }
@@ -369,6 +390,185 @@ private fun chunkQuote(
         acc.appendRendered(">")
     }
 }
+
+/**
+ * The oversized quote child's structured seam — the MarkdownV2 twin of the HTML quote's
+ * temp-chunk-then-wrap: the child chunks on its own at [maxLength] minus the "> " each
+ * line will take, then every piece re-prefixes. A piece that still overflows after its
+ * prefixes decomposes to its lines: each line fits a chunk alone (inner pieces cap at
+ * the inner limit, so every line does), except the lines of a fence pair, which
+ * regroup with their markers re-emitted per chunk — splitting between them would strand
+ * an unterminated fence. Nested-quote children keep piece granularity only: their lines
+ * already carry the inner level's markers, and a deeper level's fence markers hide
+ * behind them, so pairing markers from text alone cannot be exact — an overflowing
+ * nested piece flattens instead (the tier the old path always took).
+ */
+private fun appendStructuredQuoteChild(
+    node: Node,
+    rendered: String,
+    nested: Boolean,
+    maxLength: Int,
+    depth: Int,
+    options: RenderOptions,
+    acc: ChunkAccumulator,
+): Boolean {
+    val innerLimit = maxLength - 2
+    if (innerLimit < 2) return false
+    if (node.isFenceWrappedBlock()) {
+        // A fence child goes straight to the prefixed-fence packer: the generic inner
+        // chunker's own open/close overhead would shatter the content (its line budget
+        // knows nothing of the quote prefixes still to come), and the packer's budget
+        // is the one that actually counts. Its own tiny-limit tier then flattens the
+        // content as quoted text — keeping every line the old whole-child flatten kept
+        val lines = rendered.lines()
+        return packPrefixedFence(lines.first(), lines.subList(1, lines.size - 1), maxLength, acc)
+    }
+    val temp = ChunkAccumulator()
+    chunkBlockInto(node, rendered, innerLimit, depth + 1, options, temp)
+    val pieces = temp.finish()
+    if (pieces.isEmpty()) return false
+
+    var produced = false
+    for (piece in pieces) {
+        if (nested) {
+            val glued = prefixQuoteLevel(nested = true, block = piece)
+            if (glued.length <= maxLength) {
+                appendQuoteChunk(glued, maxLength, acc)
+                produced = true
+            } else {
+                val text = deformat(piece)
+                if (text.isNotBlank()) {
+                    chunkQuotedText(text, maxLength, acc)
+                    produced = true
+                }
+            }
+            continue
+        }
+        val prefixed = prefixQuoteLevel(nested = false, block = piece)
+        if (prefixed.length <= maxLength) {
+            appendQuoteChunk(prefixed, maxLength, acc)
+            produced = true
+            continue
+        }
+        var index = 0
+        val lines = piece.lines()
+        while (index < lines.size) {
+            val line = lines[index]
+            if (isFenceMarkerLine(line)) {
+                // Markers pair sequentially: a fence's opener matches the next marker
+                // line as its closer. The renderers always emit both, fences never
+                // nest, and no rendered line outside a fence can mimic a marker — both
+                // code escapers escape content backticks, and the language run's filter
+                // admits no '>' — so the pairing is exact
+                var end = index + 1
+                while (end < lines.size && !isFenceMarkerLine(lines[end])) end++
+                if (end < lines.size) {
+                    produced = packPrefixedFence(line, lines.subList(index + 1, end), maxLength, acc) || produced
+                    index = end + 1
+                    continue
+                }
+                // An unpaired marker cannot come from the renderers; place it as text
+            }
+            appendQuoteChunk(prefixQuoteLevel(nested = false, block = line), maxLength, acc)
+            produced = true
+            index++
+        }
+    }
+    return produced
+}
+
+// Packs one already-prefixed quote unit (a single line, a whole piece, or a re-emitted
+// fence group — always ≤ maxLength by construction) into [acc], flushing the in-progress
+// chunk first when the unit does not fit alongside it
+private fun appendQuoteChunk(
+    chunk: String,
+    maxLength: Int,
+    acc: ChunkAccumulator,
+) {
+    val separator = if (acc.current.isEmpty()) "" else "\n"
+    if (acc.current.length + separator.length + chunk.length <= maxLength) {
+        acc.appendRendered(separator + chunk)
+    } else {
+        acc.flush()
+        acc.appendRendered(chunk)
+    }
+}
+
+// Re-prefixes one fence's already-escaped content lines into "> "-marked groups, every
+// group carrying its own marker pair (each group is a standalone fence inside the quote,
+// the shape the full render's quoted fences take). Whitespace-only groups drop — a piece
+// whose visible text is blank is unsendable (see ChunkAccumulator.flush). Returns
+// whether anything was placed
+private fun packPrefixedFence(
+    openLine: String,
+    contentLines: List<String>,
+    maxLength: Int,
+    acc: ChunkAccumulator,
+): Boolean {
+    val open = "> $openLine"
+    val close = "> ```"
+    // 2 = the newlines joining the marker lines to the content
+    val budget = maxLength - open.length - close.length - 2
+    if (budget < 2) {
+        // Not even one escape unit fits between the markers: the fence formatting
+        // yields — the content flattens as quoted text (chunkQuotedText's own
+        // tiny-limit trade), unescaped first (the lines arrive already escaped)
+        val text = unescapeMarkdownV2(contentLines.joinToString("\n"))
+        if (text.isNotBlank()) chunkQuotedText(text, maxLength, acc)
+        return text.isNotBlank()
+    }
+    var produced = false
+    var current = StringBuilder()
+    for (line in contentLines) {
+        val segments =
+            if (line.length > budget) splitEscapedUnits(line, budget) else listOf(line)
+        for (segment in segments) {
+            val joiner = if (current.isEmpty()) "" else "\n"
+            if (current.length + joiner.length + segment.length <= budget) {
+                current.append(joiner).append(segment)
+            } else {
+                if (current.isNotBlank()) {
+                    appendQuoteChunk("$open\n$current\n$close", maxLength, acc)
+                    produced = true
+                }
+                current.setLength(0)
+                current.append(segment)
+            }
+        }
+    }
+    if (current.isNotBlank()) {
+        appendQuoteChunk("$open\n$current\n$close", maxLength, acc)
+        produced = true
+    }
+    return produced
+}
+
+// A fence marker line as the renderers emit it: bare "```" or "```" plus the filtered
+// language run (letters/digits/-/+/#, ≤ 32 — the Visitor's fence filter). Both code
+// escapers escape content backticks, so no escaped line can start with an unescaped one
+private fun isFenceMarkerLine(line: String): Boolean =
+    line.startsWith("```") &&
+        (
+            line.length == 3 ||
+                (line.length <= 35 && line.substring(3).all { it.isLetterOrDigit() || it == '-' || it == '+' || it == '#' })
+        )
+
+// Resolves the escape sequences of already-escaped rendered text (\ + any char — inside
+// code entities every backslash starts a pair, and escapeText/escapeCode never emit a
+// lone one); the packPrefixedFence flatten fallback needs plain text to re-escape
+private fun unescapeMarkdownV2(text: String): String =
+    buildString {
+        var index = 0
+        while (index < text.length) {
+            if (index + 1 < text.length && text[index] == '\\') {
+                append(text[index + 1])
+                index += 2
+            } else {
+                append(text[index])
+                index++
+            }
+        }
+    }
 
 // Escaped text chunked line-wise with "> " prefixes; a line longer than the budget splits at
 // escape-unit boundaries. With a maxLength too small for "> " + one escape unit the prefix

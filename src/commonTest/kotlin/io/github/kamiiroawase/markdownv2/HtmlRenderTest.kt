@@ -766,4 +766,67 @@ class HtmlRenderTest {
             TelegramHtml.render("""<tg-emoji emoji-id="5"><a href="u">x</a></tg-emoji>"""),
         )
     }
+
+// ---------- the sixth audit round: empty entities, sentinel closers, emoji symmetry ----------
+
+    @Test
+    fun emptyFenceRendersNothing() {
+        // An empty body would render the empty <pre></pre> pair — Telegram rejects
+        // empty entities, and the entities twin drops the range (its length > 0 gate),
+        // so the block renders to nothing, in quotes and list items alike
+        assertEquals("", TelegramHtml.render("```\n```"))
+        assertEquals("", TelegramHtml.render("> ```\n> ```"))
+        assertEquals("", TelegramHtml.render("- ```\n  ```"))
+    }
+
+    @Test
+    fun whitespaceOnlyEntityRewindsAtOutputTime() {
+        // The output-time trimEnd strips the trailing separator whitespace an unclosed
+        // tag's blank content sits behind, which the position-exact emptiness check
+        // could not see — the pair completed into a literal empty entity
+        // (<b></b>). Whitespace-only content reads as empty there and the opener
+        // rewinds; mid-render the whitespace still counts (it sits between words)
+        assertEquals("a", TelegramHtml.render("a <b>\n\n<!-- c -->"))
+        assertEquals("x[^1]\n\n[^1]: note &amp;", TelegramHtml.render("x[^1]\n\n[^1]: note & <b>"))
+        assertEquals("a<b> </b>c", TelegramHtml.render("a<b> </b>c"))
+    }
+
+    @Test
+    fun legitimateCloserPopsZeroOutputSentinels() {
+        // A merged tag or a href-less sentinel anchor emitted nothing, so a legitimate
+        // closer reaches the emitting entry beneath them: a </code> behind an unclosed
+        // in-code <a> or <b> used to escape literally, surfacing as visible text and
+        // stranding the block's remainder inside the code entity
+        assertEquals("<code>x</code>", TelegramHtml.render("<code><a href=\"v\">x</code>"))
+        assertEquals("<code>x</code> tail", TelegramHtml.render("<code><b>x</code> tail"))
+    }
+
+    @Test
+    fun nestedTgEmojiTagDegradesToItsFallbackText() {
+        // A custom emoji counts as link-open (see linkEntityOpen), so an inner tag
+        // drops and its fallback renders as plain text — the same degradation the
+        // image path makes of an inner emoji (the tags used to nest)
+        assertEquals(
+            "<tg-emoji emoji-id=\"1\">abc</tg-emoji>",
+            TelegramHtml.render("<tg-emoji emoji-id=\"1\">a<tg-emoji emoji-id=\"2\">b</tg-emoji>c</tg-emoji>"),
+        )
+    }
+
+    @Test
+    fun blankEmojiFallbackDegradesToTheBareUrl() {
+        // Telegram requires the fallback: one that renders to no visible text degrades
+        // to the bare escaped URL — the same trade the anchor paths make of a blank
+        // label (the pair used to render as an entity over whitespace)
+        assertEquals("tg://emoji?id=5368324170671202286", TelegramHtml.render("![ ](tg://emoji?id=5368324170671202286)"))
+    }
+
+    @Test
+    fun fenceInfoFirstWordIsTheLanguage() {
+        // CommonMark §4.5: the info string's first word is the language, the rest is
+        // metadata — the words used to glue into the bogus language-rustignore
+        assertEquals(
+            "<pre><code class=\"language-rust\">code</code></pre>",
+            TelegramHtml.render("```rust ignore\ncode\n```"),
+        )
+    }
 }

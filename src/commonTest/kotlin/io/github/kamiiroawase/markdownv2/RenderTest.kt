@@ -122,8 +122,12 @@ class RenderTest {
 
     @Test
     fun fencedCodeLanguageIsSanitized() {
+        // CommonMark §4.5: the info string's FIRST word is the language, the rest is
+        // metadata — " v1.2<script>" drops whole, and the charset filter keeps the
+        // fence from being forged or injected (pre-fix the words glued into the
+        // bogus "c++v12script")
         assertEquals(
-            "```c++v12script\ncode\n```",
+            "```c++\ncode\n```",
             MarkdownV2.render("```c++ v1.2<script>\ncode\n```"),
         )
     }
@@ -1668,5 +1672,68 @@ class RenderTest {
         val output = MarkdownV2.render("x <a href=\"https://e.com/u\">y\n\n```\ncode\n```")
         assertEquals("x [y](https://e.com/u)\n\n```\ncode\n```", output)
         assertTelegramParseable(output, "unclosedAnchorBeforeFence")
+    }
+
+// ---------- the sixth audit round: output-time closers and code-context URLs ----------
+
+    @Test
+    fun unclosedEntityBeforeQuoteEndClosesOnItsOwnLine() {
+        // A closer glued straight onto a quote line parses as an entity the quote
+        // itself opens, never as the outer entity's closer ("Can't find end of the
+        // entity" from the server): the newline lead lifts every closer past the
+        // quote's end, where the blockquote has already closed
+        val bold = MarkdownV2.render("<b>x\n\n> quote text")
+        assertEquals("*x\n\n> quote text\n*", bold)
+        assertTelegramParseable(bold, "unclosedBoldBeforeQuote")
+
+        val anchor = MarkdownV2.render("<a href=\"u\">x\n\n> quote end")
+        assertEquals("[x\n\n> quote end\n](u)", anchor)
+        assertTelegramParseable(anchor, "unclosedAnchorBeforeQuote")
+
+        val italic = MarkdownV2.render("<i>x\n\n> quote\n> second line")
+        assertEquals("_x\n\n> quote\n> second line\n_", italic)
+        assertTelegramParseable(italic, "unclosedItalicBeforeQuote")
+
+        val inQuotedFence = MarkdownV2.render("<b>x\n\n> ```\n> c\n> ```")
+        assertEquals("*x\n\n> ```\n> c\n> ```\n*", inQuotedFence)
+        assertTelegramParseable(inQuotedFence, "unclosedBoldBeforeQuotedFence")
+
+        // An empty quote's bare marker is a quote line too
+        val emptyQuote = MarkdownV2.render("<b>x\n\n>")
+        assertEquals("*x\n\n>\n*", emptyQuote)
+        assertTelegramParseable(emptyQuote, "unclosedBoldBeforeEmptyQuote")
+    }
+
+    @Test
+    fun unclosedEntityBeforeFenceEndClosesOnItsOwnLine() {
+        // The closing-fence line takes the same newline lead: "```*" is legal
+        // MarkdownV2, but the de-format's fence scan drops the rest of the closing
+        // line, stranding the marker there — on its own line the marker survives every
+        // consumer (the round-trip below is the plain text Telegram displays)
+        val output = MarkdownV2.render("<b>x\n\n```\ncode\n```")
+        assertEquals("*x\n\n```\ncode\n```\n*", output)
+        assertTelegramParseable(output, "unclosedBoldBeforeFence")
+        // The lead newline itself survives the de-format as one trailing newline —
+        // invisible once the server trims the message text
+        assertEquals("x\n\ncode\n", MarkdownV2.toPlainText(output))
+    }
+
+    @Test
+    fun strayClosingAnchorNeverClosesEmojiAnchor() {
+        // The two anchor kinds pair only with their own closers: a mistyped </a> on an
+        // open <tg-emoji> stays visible (escaped) instead of silently completing the
+        // custom emoji with the wrong tag
+        val output = MarkdownV2.render("<tg-emoji emoji-id=\"5368324170671202286\">x</a>")
+        assertEquals("![x</a\\>](tg://emoji?id=5368324170671202286)", output)
+        assertTelegramParseable(output, "strayAnchorCloserOnEmoji")
+    }
+
+    @Test
+    fun urlTextEscapesForTheCodeContextItLandsIn() {
+        // Inside an open HTML code entity only \` and \ are escapes: a URL degraded
+        // with the text-context set (\_) would show its backslashes — the URL escapes
+        // by code rules there, the same context switch text itself makes
+        assertEquals("`http://a_b.com`", MarkdownV2.render("<code>[](http://a_b.com)</code>"))
+        assertEquals("`a_b`", MarkdownV2.render("<code><a href=\"a_b\"> </a></code>"))
     }
 }

@@ -376,22 +376,40 @@ private fun shrinkQuoteTail(
     return ""
 }
 
-// Fallback for a nested (non-retriable) quote child that does not fit: the child's escaped
-// plain text behind a "> " prefix — the same trade plainListItem makes for a nested list
-// item. Returning empty here (the old behavior) dropped the whole quote, and with it the
-// list item the quote lived in — a list item holding one over-long quote degraded the
-// entire document to plain text even when a "- > …" prefix fit comfortably
+// Fallback for a nested (non-retriable) quote child that does not fit: the child's
+// escaped plain text behind "> "-prefixed lines — the same trade plainListItem makes for
+// a nested list item. Returning empty here (the old behavior) dropped the whole quote,
+// and with it the list item the quote lived in — a list item holding one over-long
+// quote degraded the entire document to plain text even when a "- > …" prefix fit
+// comfortably. Two shapes still return empty rather than ship junk: a child whose plain
+// text extracts to nothing (an empty code block) has no quote to keep — a bare "> "
+// shell nested into bare marker runs under further wrapping (" >>…"), where the HTML
+// and entities twins fall back to their clean plain-text tiers (see
+// shrinkRenderedCode's guard) — and every line takes its own prefix, so a continuation
+// line never escapes the quote it belongs to (under a nested quote's glued marker the
+// unprefixed line would turn INTO one, adding quote semantics the original never had)
 private fun plainQuotedTail(
     node: Node,
     remaining: Int,
 ): String {
-    // 2 = the "> " prefix; without room for it plus one character there is no quote to keep
+    // 2 = the "> " prefix every line takes; without room for it plus one character
+    // there is no quote to keep
     val budget = remaining - 2
     if (budget <= 0) return ""
     val plain = StringBuilder()
     appendPlainText(plain, node)
-    val sb = StringBuilder("> ")
-    appendEscapedTruncated(sb, plain.toString().trim(), budget)
+    val trimmed = plain.toString().trim()
+    if (trimmed.isEmpty()) return ""
+    val sb = StringBuilder()
+    for (line in trimmed.lines()) {
+        // The newline joining lines costs 1, the line's own prefix 2, and at least one
+        // content character must fit after them
+        val joiner = if (sb.isEmpty()) 0 else 1
+        if (sb.length + joiner + 2 >= budget) break
+        if (joiner == 1) sb.append('\n')
+        sb.append("> ")
+        appendEscapedTruncated(sb, line, budget - sb.length)
+    }
     return sb.toString()
 }
 

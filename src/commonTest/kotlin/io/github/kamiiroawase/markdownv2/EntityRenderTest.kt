@@ -2,6 +2,7 @@ package io.github.kamiiroawase.markdownv2
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -639,5 +640,46 @@ class EntityRenderTest {
             rendered.entities,
         )
         assertEntitiesValid(rendered, "stale end after rewind")
+    }
+
+// ---------- the sixth audit round: blank-label rewinds and tag-context guards ----------
+
+    @Test
+    fun blankLabelAnchorPastRewindDegradesWithoutNulPadding() {
+        // An anchor opened inside a paragraph that itself rewound as blank survives with
+        // a start past the live length; its blank-label degradation used to rewind
+        // "back" to that stale offset, and StringBuilder.setLength pads the gap with
+        // U+0000 — control characters Telegram rejects the whole message for. The
+        // rewind never extends now: the URL lands at the live end
+        val rendered = TelegramEntities.render("` ` <a href=\"u\">")
+        assertEquals(EntityText("u", emptyList()), rendered)
+        assertEntitiesValid(rendered, "blankLabelPastRewind")
+
+        val across = TelegramEntities.render("` `      <a href=\"u\">\n\nx")
+        assertEquals("x\n\nu", across.text)
+        assertFalse('\u0000' in across.text)
+        assertEntitiesValid(across, "blankLabelPastRewindAcross")
+    }
+
+    @Test
+    fun selfClosingTgEmojiOpensNothing() {
+        // <tg-emoji/> opens no range: it stays visible text and nothing formats as the
+        // emoji — the anchor twin's own self-closing literalization, which this render
+        // path used to skip (the tag pushed a CUSTOM_EMOJI range covering whatever
+        // followed)
+        val rendered = TelegramEntities.render("a <tg-emoji emoji-id=\"123\"/> b **bold**")
+        assertEquals(listOf(MessageEntity(MessageEntityType.BOLD, 31, 4)), rendered.entities)
+        assertEquals("a <tg-emoji emoji-id=\"123\"/> b bold", rendered.text)
+        assertEntitiesValid(rendered, "selfClosingTgEmoji")
+    }
+
+    @Test
+    fun invalidEmojiIdInsideCodeStaysLiteralText() {
+        // The id check runs before the code-depth merge, so an id-less or invalid tag
+        // literalizes even inside an open code range — matching the out-of-code shape
+        // and the unknown-tag treatment code makes (the merge used to swallow it)
+        val rendered = TelegramEntities.render("<code><tg-emoji emoji-id=\"0\">x</tg-emoji></code>")
+        assertEquals("<tg-emoji emoji-id=\"0\">x</tg-emoji>", rendered.text)
+        assertEntitiesValid(rendered, "invalidEmojiIdInCode")
     }
 }

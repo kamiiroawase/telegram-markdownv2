@@ -305,4 +305,12 @@ class PlainTextTest {
         assertEquals("a||b", MarkdownV2.toPlainText("a||b"))
         assertEquals("x", MarkdownV2.toPlainText("~~x"))
     }
+
+    @Test
+    fun lonePipesNeverPairUp() {
+        // A lone '|' is no marker at all — only '||' is the spoiler marker — so two of
+        // them never close each other (they used to cancel as an empty spoiler,
+        // dropping both pipes from the plain text)
+        assertEquals("a|b|c", MarkdownV2.toPlainText("a|b|c"))
+    }
 }

@@ -86,7 +86,13 @@ private object IterativeTaskListPostProcessor : PostProcessor {
             }
         val after = literal[3]
         if (after != ' ' && after != '\t') return
-        text.literal = literal.substring(4)
+        // Upstream's \s+ is greedy: every whitespace run after the bracket pair belongs
+        // to the marker and group(2) starts at the first non-whitespace character, so
+        // "- [x]␣␣␣hello" keeps no extra leading spaces (substring(4) used to leave
+        // them in the literal, drifting from the pinned upstream parity)
+        var contentStart = 4
+        while (contentStart < literal.length && isAsciiWhitespace(literal[contentStart])) contentStart++
+        text.literal = literal.substring(contentStart)
         paragraph.insertBefore(TaskListItemMarker(checked))
     }
 }

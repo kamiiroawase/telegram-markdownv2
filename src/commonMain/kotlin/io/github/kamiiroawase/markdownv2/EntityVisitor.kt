@@ -211,6 +211,13 @@ internal class EntityVisitor(
     // all three formats format the same trailing text — see
     // unclosedAnchorInBlankParagraphCompletesAcrossFormats
     private fun rewindTo(start: Int) {
+        // A rewind never extends: setLength past the live length would pad the gap with
+        // NUL characters. The shape arises when a range opened inside a blank paragraph
+        // survives the paragraph's own rewind — its start then sits beyond whatever text
+        // re-seated after it. Nothing to drop in that shape either (no entity can sit at
+        // or past the live length), so returning as-is lets any later append land at the
+        // live end — the blank-label URL degradation in closeRange relies on exactly that
+        if (start >= sb.length) return
         entities.removeAll { it.offset >= start }
         for (index in entities.indices) {
             val entity = entities[index]
@@ -673,6 +680,22 @@ internal class EntityVisitor(
             sb.append(tag)
             return
         }
+        // A self-closing <tg-emoji/> opens nothing: like the self-closing emphasis forms
+        // in renderHtmlInlineTag it stays visible text — the HTML twin checks the same
+        // pair (no id or self-closing) before ever opening
+        if (parts.selfClosing) {
+            sb.append(tag)
+            return
+        }
+        // The id check runs before the code-depth merge: an id-less or invalid tag is
+        // visible text whichever context it sits in — inside an open code range the merge
+        // would otherwise swallow it silently, diverging from both the out-of-code shape
+        // and the unknown-tag literalization code makes
+        val id =
+            tgEmojiIdOf(parts.attrs) ?: run {
+                sb.append(tag)
+                return
+            }
         if (codeDepth > 0) {
             // A custom emoji entity can't nest inside code: the tags drop, the emoji char
             // renders as plain code text (merged keeps the closer silent)
@@ -682,7 +705,7 @@ internal class EntityVisitor(
                     sb.length,
                     "",
                     null,
-                    null,
+                    id,
                     nextSeq++,
                     html = true,
                     merged = true,
@@ -690,11 +713,6 @@ internal class EntityVisitor(
             )
             return
         }
-        val id =
-            tgEmojiIdOf(parts.attrs) ?: run {
-                sb.append(tag)
-                return
-            }
         openRanges.addLast(
             OpenRange(MessageEntityType.CUSTOM_EMOJI, sb.length, "", null, id, nextSeq++, html = true),
         )

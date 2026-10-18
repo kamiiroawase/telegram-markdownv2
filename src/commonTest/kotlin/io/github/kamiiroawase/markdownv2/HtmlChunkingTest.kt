@@ -325,6 +325,27 @@ class HtmlChunkingTest {
             }
         }
     }
+
+    @Test
+    fun fenceSeamNeverShipsABlankPiece() {
+        // Pending blank lines at the top of an oversized fence, and a whitespace-only
+        // code line too long for one piece, used to ship as <pre>-wrapped pieces whose
+        // visible text is blank — the server trims message text and rejects blank text
+        // with a 400, so "every piece independently sendable" was broken. Both shapes
+        // drop now (the one lossless-chunking exception), exactly as the verbatim and
+        // flatten seams drop theirs
+        val topBlanks = TelegramHtml.renderChunked("```\n\n\n\n" + "x".repeat(300) + "\n```", 100)
+        assertTrue(topBlanks.size > 1)
+        topBlanks.forEach { chunk ->
+            assertTrue(chunk.length <= 100, "over-long chunk: $chunk")
+            assertTrue(decodeEntitiesForTest(chunk).trim().isNotEmpty(), "blank chunk: $chunk")
+            assertTelegramHtmlParseable(chunk, "fenceTopBlankSeam")
+        }
+
+        val blankLine = TelegramHtml.renderChunked("```\n" + " ".repeat(300) + "\nreal\n```", 100)
+        assertEquals(listOf("<pre>real</pre>"), blankLine)
+        blankLine.forEach { assertTelegramHtmlParseable(it, "fenceBlankLineSeam") }
+    }
 }
 
 // The plain-text view of rendered HTML, for the losslessness assertions: strips the

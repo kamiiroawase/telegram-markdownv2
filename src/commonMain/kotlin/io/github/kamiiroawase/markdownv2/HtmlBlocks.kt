@@ -54,16 +54,19 @@ internal fun htmlFenceOf(node: Node): Pair<String, String> {
     return "<pre>" to "</pre>"
 }
 
-// The info string is untrusted: keep only ASCII letters/digits/-/+/# so it can neither
-// leave the double-quoted attribute (quotes, '<', '>' and '&' are absent by construction)
-// nor inject markup. ASCII only, deliberately narrower than the MarkdownV2 twin's filter:
-// the class attribute's grammar is the ASCII word set, and a non-ASCII language degrades
-// to a bare <pre> rather than an attribute the parse mode may reject (the fence line
-// itself carries no such grammar, so MarkdownV2 keeps Unicode languages there)
+// The info string is untrusted: the first word is the language (CommonMark §4.5) and the
+// rest is metadata, so only that word survives. Keep from it the ASCII
+// letters/digits/-/+/# so it can neither leave the double-quoted attribute (quotes, '<',
+// '>' and '&' are absent by construction) nor inject markup. ASCII only, deliberately
+// narrower than the MarkdownV2 twin's filter: the class attribute's grammar is the ASCII
+// word set, and a non-ASCII language degrades to a bare <pre> rather than an attribute
+// the parse mode may reject (the fence line itself carries no such grammar, so MarkdownV2
+// keeps Unicode languages there)
 internal fun htmlLanguageOf(fencedCodeBlock: FencedCodeBlock): String =
     fencedCodeBlock.info
         .orEmpty()
         .trim()
+        .takeWhile { !it.isWhitespace() }
         .filter { it.isAsciiLetterOrDigit() || it == '-' || it == '+' || it == '#' }
         .take(32)
 

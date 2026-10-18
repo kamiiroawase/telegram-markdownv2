@@ -300,11 +300,13 @@ class ChunkingTest {
 
     @Test
     fun renderChunkedOversizedQuoteChildKeepsFlattenedTrailingWhitespace() {
-        // Same guarantee down the quote-child flattening path: "> aaaa " keeps its
-        // trailing space when it flushes mid-quote (pre-fix trimmed to "> aaaa"); the
-        // text's trailing newline degrades to the bare ">" continuation line
+        // Same guarantee down the quote-child paths: "> aaaa " keeps its trailing space
+        // wherever it lands. The structured seam routes a fence child through the
+        // prefixed-fence packer, whose quote-level budget here cannot hold even one
+        // content character between the marker lines — so the packer's tiny-limit tier
+        // flattens the content as quoted text, line per line, trailing spaces included
         val chunks = MarkdownV2.renderChunked("> ```\n> aaaa \n> bbbb \n> ```", 12)
-        assertEquals(listOf("> aaaa ", "> bbbb \n>"), chunks)
+        assertEquals(listOf("> aaaa ", "> bbbb "), chunks)
         chunks.forEach { chunk -> assertTrue(chunk.length <= 12, "over-long chunk: $chunk") }
     }
 
@@ -687,6 +689,51 @@ class ChunkingTest {
                     assertTrue(piece.length <= limit, "over-long chunk at $limit: $piece")
                 }
             }
+        }
+    }
+
+    @Test
+    fun oversizedQuoteChildChunksStructured() {
+        // The MarkdownV2 twin of the HTML/entities quote seams: an oversized child
+        // chunks on its own and its pieces re-prefix line by line, so inline
+        // formatting, list markers and ordered numbering all survive (the old
+        // whole-child flatten lost every one of them). The HTML twin keeps its bold
+        // in the same position — the first piece
+        val words = "word ".repeat(50)
+        val pieces = MarkdownV2.renderChunked("> **bold** " + words, 60)
+        assertTrue(pieces.size > 1)
+        assertEquals("> *bold*", pieces.first())
+        pieces.forEach { piece ->
+            assertTrue(piece.length <= 60, "over-long piece: $piece")
+            assertTelegramParseable(piece, "structuredQuoteBold")
+        }
+        assertEquals(
+            "<blockquote><b>bold</b></blockquote>",
+            TelegramHtml.renderChunked("> **bold** " + words, 60).first(),
+        )
+
+        // Oversized list items flatten on both string sides (the marker and numbering
+        // survive, the inline formatting yields) — the pin is the numbering, and the
+        // continuation item joining the tail piece across the seam
+        val numbered = MarkdownV2.renderChunked("> 1. **bold** " + words + "\n> 2. two", 60)
+        assertTrue(numbered.first().startsWith("> 1\\. bold"), "numbering lost: ${numbered.first()}")
+        assertTrue(numbered.last().contains("2\\. two"), "tail item lost: ${numbered.last()}")
+        numbered.forEach { piece ->
+            assertTrue(piece.length <= 60, "over-long piece: $piece")
+            assertTelegramParseable(piece, "structuredQuoteList")
+        }
+    }
+
+    @Test
+    fun fenceSeamDropsThePendingBlankLine() {
+        // A blank content line pending at the seam drops: the HTML and entities twins'
+        // pieces show no blank line there (the server trims it), so the formats agree
+        // on the display (pre-fix this piece kept a visible blank line: "```\na\n\n```")
+        val pieces = MarkdownV2.renderChunked("```\na\n\n" + "b".repeat(40) + "\n```", 30)
+        assertEquals("```\na\n```", pieces.first())
+        pieces.forEach { piece ->
+            assertTrue(piece.length <= 30, "over-long piece: $piece")
+            assertTelegramParseable(piece, "fenceSeamBlankLine")
         }
     }
 }

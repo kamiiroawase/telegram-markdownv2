@@ -527,11 +527,11 @@ internal class Visitor(
                             // rewinding the bracket discards only whitespace
                             // (regionIsBlank covers the whitespace-only label too)
                             sb.setLength(entity.openBracket)
-                            sb.append(escapeText(entity.url))
+                            sb.append(escapeTextInContext(entity.url))
                         }
 
                         else -> {
-                            closers.append("](${escapeUrl(entity.url)})")
+                            closers.append("](${escapeUrlInContext(entity.url)})")
                         }
                     }
                 }
@@ -542,7 +542,21 @@ internal class Visitor(
         // literal content and must survive; only trailing newlines are cleared — they
         // are block separators (or a dangling <br>), never code the entity displays
         val body = if (htmlCodeDepth > 0) sb.toString().trimEnd('\n') else sb.toString().trimEnd()
-        return body + closers
+        // A closer glued straight onto a quote line would parse as an entity the quote
+        // itself opens, never as the outer entity's closer (see endsOnQuoteLine): the
+        // newline lead lifts the closers past the quote's end, where tdlib has already
+        // closed the blockquote and the marker reaches its own entity. The closing-fence
+        // line takes the same lead: the glued shape is legal MarkdownV2, but the
+        // de-format's fence scan drops the rest of the closing line, stranding the
+        // marker there and re-opening it literally in the plain text (see
+        // endsOnFenceClose)
+        val quoteLead =
+            when {
+                endsOnQuoteLine(body) -> "\n"
+                endsOnFenceClose(body) -> "\n"
+                else -> ""
+            }
+        return body + quoteLead + closers
     }
 
     // The output()-time twin of atUnderscoreGlue: closers accumulate in their own builder
@@ -666,14 +680,16 @@ internal class Visitor(
         // and in visit(htmlBlock); Text/Code/HtmlInline literals are declared non-null
         // upstream and are used directly
         //
-        // The info string is untrusted: keep only letters/digits/-/+/# so it can neither
-        // forge the fence (backticks, newlines) nor inject entities — '#' completes the
-        // c#/f# tags and, like the rest of the set, renders literally inside the pre
-        // entity; 32 chars is plenty
+        // The info string is untrusted: the first word is the language (CommonMark §4.5)
+        // and the rest is metadata — keep only letters/digits/-/+/# from that word so it
+        // can neither forge the fence (backticks, newlines) nor inject entities — '#'
+        // completes the c#/f# tags and, like the rest of the set, renders literally
+        // inside the pre entity; 32 chars is plenty
         val language =
             fencedCodeBlock.info
                 .orEmpty()
                 .trim()
+                .takeWhile { !it.isWhitespace() }
                 .filter { it.isLetterOrDigit() || it == '-' || it == '+' || it == '#' }
                 .take(32)
         completeOpenCodeAndAnchorEntities()
@@ -853,11 +869,11 @@ internal class Visitor(
                             // See output(): a blank label guarantees this anchor is the
                             // latest open entry, so the rewind discards only whitespace
                             sb.setLength(entity.openBracket)
-                            sb.append(escapeText(entity.url))
+                            sb.append(escapeTextInContext(entity.url))
                         }
 
                         else -> {
-                            sb.append("](").append(escapeUrl(entity.url)).append(')')
+                            sb.append("](").append(escapeUrlInContext(entity.url)).append(')')
                         }
                     }
                 }
@@ -902,11 +918,14 @@ internal class Visitor(
 
     // Completes everything opened at or after [boundarySeq], lifting the trailing block
     // separator first and re-emitting it after the closers — appended after it they would
-    // glue onto the following fence (see completeOpenCodeEntities)
+    // glue onto the following fence (see completeOpenCodeEntities). When the separator
+    // lifted off a quote line, the closers take the same newline lead output() gives
+    // them: glued onto the quote they would parse inside it (see endsOnQuoteLine)
     private fun completeThroughSeparator(boundarySeq: Int) {
         var separatorLength = 0
         while (separatorLength < sb.length && sb[sb.length - 1 - separatorLength] == '\n') separatorLength++
         sb.setLength(sb.length - separatorLength)
+        if (separatorLength > 0 && endsOnQuoteLine(sb)) sb.append('\n')
         completeOpenedAfter(boundarySeq)
         repeat(separatorLength) { sb.append('\n') }
     }
@@ -985,7 +1004,7 @@ internal class Visitor(
         // open on the stack
         if (regionIsBlank(labelStart)) {
             sb.setLength(openBracket)
-            sb.append(escapeText(destination))
+            sb.append(escapeTextInContext(destination))
             return
         }
         // Whatever HTML opened inside the label closes before the link does: left open it
@@ -994,7 +1013,7 @@ internal class Visitor(
         // literalized sentinels (the entry guard saw to that), so they close silently
         // here instead of lingering to degrade later links
         completeOpenedAfter(entrySeq)
-        sb.append("](").append(escapeUrl(destination)).append(')')
+        sb.append("](").append(escapeUrlInContext(destination)).append(')')
     }
 
     // Telegram MarkdownV2 has no images in message text: degrade to a plain link on the
@@ -1022,7 +1041,7 @@ internal class Visitor(
                 // degrades to the bare escaped URL, the same trade visit(link) makes
                 if (regionIsBlank(labelStart)) {
                     sb.setLength(openBracket)
-                    sb.append(escapeText(destination))
+                    sb.append(escapeTextInContext(destination))
                     return
                 }
                 // See visit(link): HTML opened inside the fallback closes before the
@@ -1051,12 +1070,12 @@ internal class Visitor(
         // See visit(link): a label with no visible text degrades to the bare escaped URL
         if (regionIsBlank(labelStart)) {
             sb.setLength(openBracket)
-            sb.append(escapeText(destination))
+            sb.append(escapeTextInContext(destination))
             return
         }
         // See visit(link): HTML opened inside the alt text closes before the link does
         completeOpenedAfter(entrySeq)
-        sb.append("](").append(escapeUrl(destination)).append(')')
+        sb.append("](").append(escapeUrlInContext(destination)).append(')')
     }
 
     // Telegram message text renders both break kinds as plain newlines
@@ -1240,9 +1259,12 @@ internal class Visitor(
         if (closing) {
             // See renderHtmlInline: </a> matches only the innermost open entity — an
             // anchor closed while something opened inside it is still open goes literal
-            // rather than emitting a crossed ](url)
+            // rather than emitting a crossed ](url). An emoji entry never matches
+            // either: the two anchor kinds pair only with their own closers (see
+            // OpenAnchor.emoji), so a mistyped </a> stays visible instead of silently
+            // completing the custom emoji
             val top = openEntities.lastOrNull()
-            if (top !is OpenAnchor) return escapeText(tag)
+            if (top !is OpenAnchor || top.emoji) return escapeText(tag)
             openEntities.removeLast()
             if (top.nested) return escapeText(tag)
             // "" is the href-less open tag: pop the stack, emit no link
@@ -1253,9 +1275,9 @@ internal class Visitor(
             // label left nothing open
             if (regionIsBlank(top.labelStart)) {
                 sb.setLength(top.openBracket)
-                return escapeText(top.url)
+                return escapeTextInContext(top.url)
             }
-            return "](${escapeUrl(top.url)})"
+            return "](${escapeUrlInContext(top.url)})"
         }
         // Telegram links cannot nest: while any link entity is open (Markdown link, image
         // link or an outer anchor), an inner anchor and its closing tag are escaped literally
@@ -1298,11 +1320,11 @@ internal class Visitor(
                         // text degrades to the bare escaped URL, the same trade
                         // visit(link) makes
                         sb.setLength(top.openBracket)
-                        escapeText(top.url)
+                        escapeTextInContext(top.url)
                     }
 
                     else -> {
-                        "](${escapeUrl(top.url)})"
+                        "](${escapeUrlInContext(top.url)})"
                     }
                 }
             }
@@ -1338,6 +1360,46 @@ internal class Visitor(
         }
         return true
     }
+
+    // Whether [output]'s last line is a quote line — one that starts with the unescaped
+    // '>' only the quote grammar emits (a literal '>' in text escapes as \'>', so that
+    // line starts with the backslash). A closer glued straight onto such a line would
+    // parse as an entity the quote itself opens, never as the outer entity's closer —
+    // tdlib closes the blockquote at the first newline not followed by '>', so a
+    // newline lead placed before the closers lifts them past the quote's end, where
+    // they reach their own entities (the glued shape instead draws "Can't find end of
+    // the entity" / "Character ']' is reserved"). Inside an open HTML code entity a
+    // '>' at a line start is literal code content and a newline there would corrupt
+    // the entity's text, so depth above zero answers false
+    private fun endsOnQuoteLine(output: CharSequence): Boolean {
+        if (htmlCodeDepth > 0) return false
+        val lineStart = output.lastIndexOf('\n') + 1
+        return lineStart < output.length && output[lineStart] == '>'
+    }
+
+    // Whether [output]'s last line is a code fence's closing line — "```", optionally
+    // behind the indent a list-item context gives it. Content backticks always escape
+    // in both code escapers, and an open fence can never be the last line (every fence
+    // render emits its close), so the shape is unambiguous. A closer glued onto it is
+    // legal MarkdownV2 but hostile to the de-format, whose fence scan drops the rest of
+    // the closing line — the newline lead output() inserts keeps the closer on a line
+    // of its own, where the de-format's own marker and label scans resolve it
+    private fun endsOnFenceClose(output: CharSequence): Boolean {
+        if (htmlCodeDepth > 0) return false
+        val lineStart = output.lastIndexOf('\n') + 1
+        var index = lineStart
+        while (index < output.length && output[index] == ' ') index++
+        return output.length - index == 3 && output[index] == '`' && output[index + 1] == '`' && output[index + 2] == '`'
+    }
+
+    // URL texts and link tails pick their escaper by code context: inside an open HTML
+    // code entity only \` and \\ are escapes, so the text-context escapes a URL would
+    // normally take (\_, \), \[ …) render their backslashes visibly — the same context
+    // switch visit(text) makes. Degradation URLs and ](url) tails both route through
+    // these, at every completion point
+    private fun escapeUrlInContext(url: String): String = if (htmlCodeDepth > 0) escapeCode(url) else escapeUrl(url)
+
+    private fun escapeTextInContext(text: String): String = if (htmlCodeDepth > 0) escapeCode(text) else escapeText(text)
 
     // Whether the output ends with a backtick that is not the tail of an escape
     // sequence. Content backticks always escape (\`), so at code-depth zero an

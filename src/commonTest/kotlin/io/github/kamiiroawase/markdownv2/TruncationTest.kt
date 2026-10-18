@@ -734,4 +734,27 @@ class TruncationTest {
         assertEquals("• \\[ \\] bbbbbbbbbbb…", result)
         assertTelegramParseable(result, "taskItemTruncated")
     }
+
+    @Test
+    fun emptyNestedQuoteTruncatesToThePlainFallback() {
+        // A child whose plain text extracts to nothing has no quote to keep: the
+        // degraded tail used to return the bare "> " shell (nesting into ">>…" under
+        // the outer level's glued marker), where the HTML and entities twins take
+        // their clean plain-text tiers. Every budget in the affected range falls back
+        // the same way now
+        for (maxLength in 4..15) {
+            assertEquals("…", MarkdownV2.render("> > ```\n> > ```", maxLength), "at $maxLength")
+        }
+    }
+
+    @Test
+    fun nestedQuoteCodeDegradesWithEveryLineQuoted() {
+        // The degraded tail's plain text carries the code block's newlines, so every
+        // line takes its own "> ": a continuation line without one used to escape the
+        // quote — and under the outer level's glued marker it turned INTO a quote
+        // line, adding quote semantics the original never had
+        val result = MarkdownV2.render("> > ```\n> > c1\n> > c2\n> > ```", 10)
+        assertEquals(">> c1…", result)
+        assertTelegramParseable(result, "nestedQuoteCodeDegrade")
+    }
 }

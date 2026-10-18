@@ -179,10 +179,11 @@ private fun chunkHtmlFence(
     val current = StringBuilder(open)
     // See shrinkHtmlFence: a blank first line appends nothing yet still counts as placed,
     // or the newline joining the next line would be lost. Placing no line is different
-    // from placing a blank one only until the split fires: there the pending blank lines
-    // drop (the piece guards on real content), the one lossless-chunking exception —
-    // whitespace Telegram would never display inside the re-opened fence; the MarkdownV2
-    // twin's guard makes the same drop
+    // from placing a blank one only until the split fires: there a marker that placed
+    // nothing but blank lines drops them instead of shipping — a piece whose visible
+    // text is blank is a message the server trims and rejects (400 "message text is
+    // empty") — the one lossless-chunking exception, the same drop the verbatim and
+    // flatten seams make; the MarkdownV2 twin's guard makes the same trade
     var hasLine = false
     for (line in lines) {
         val joiner = if (hasLine) "\n" else ""
@@ -190,10 +191,16 @@ private fun chunkHtmlFence(
             current.append(joiner).append(line)
             hasLine = true
         } else {
-            if (current.length > open.length) {
+            if (current.length > open.length && !isBlankBeyond(current, open.length)) {
                 pieces += current.toString() + close
                 current.setLength(0)
                 current.append(open)
+                hasLine = false
+            } else {
+                // Only pending blank lines ever sit here (the fit check placed real
+                // content, and trailing newlines never reach this loop — the render
+                // trims them): drop them and start the next piece unplaced
+                current.setLength(open.length)
                 hasLine = false
             }
             if (line.length <= lineBudget) {
@@ -201,14 +208,17 @@ private fun chunkHtmlFence(
                 hasLine = true
             } else {
                 splitHtmlEscapedUnits(line, lineBudget).forEach { segment ->
-                    pieces += "$open$segment$close"
+                    // A segment of a whitespace-only line is blank visible text — the
+                    // same unsendable piece shape the seam drop above refuses, so the
+                    // line drops whole
+                    if (!segment.isBlank()) pieces += "$open$segment$close"
                 }
             }
         }
     }
     // Same content guard as the split above: a marker never placed a real line, so the
-    // tail cannot be an empty tag pair either
-    if (current.length > open.length) pieces += current.toString() + close
+    // tail cannot be an empty — or blank — tag pair either
+    if (current.length > open.length && !isBlankBeyond(current, open.length)) pieces += current.toString() + close
     if (pieces.isEmpty()) return
     pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)
     acc.appendRendered(pieces.last())
@@ -384,6 +394,19 @@ private fun chunkHtmlParagraph(
         acc.current.setLength(0)
         acc.appendVerbatim(pieces.last())
     }
+}
+
+// Whether [builder] holds nothing but whitespace past [from] — the fence seams' test
+// for "placed real content", which a length comparison alone cannot make (pending
+// blank lines place length too). Shared with the MarkdownV2 fence seam
+internal fun isBlankBeyond(
+    builder: StringBuilder,
+    from: Int,
+): Boolean {
+    for (index in from until builder.length) {
+        if (!builder[index].isWhitespace()) return false
+    }
+    return true
 }
 
 // Soft/hard breaks delimit line groups; consecutive breaks cannot occur in CommonMark

@@ -48,7 +48,9 @@ private sealed interface OpenTag {
 // position and length — an entity whose content renders to no visible text drops both its
 // tags (Telegram rejects empty entities), rewinding the opener instead of emitting a
 // closer. merged: a code-family tag nested inside an already-open inline <code> emitted
-// nothing (nested code renders exactly as single code); its closer emits nothing either
+// nothing (nested code renders exactly as single code); its closer emits nothing either.
+// url: tg-emoji only — the custom emoji address its blank fallback degrades to (the bare
+// URL text, the anchor twin's own empty-label trade; null on every other tag)
 private class OpenInlineTag(
     val tag: String,
     val html: Boolean,
@@ -56,6 +58,7 @@ private class OpenInlineTag(
     val openStart: Int = -1,
     val openLength: Int = 0,
     val merged: Boolean = false,
+    val url: String? = null,
 ) : OpenTag
 
 // An open anchor — a Markdown link, a Markdown image or an HTML <a>: the href ("" when
@@ -130,7 +133,7 @@ internal class HtmlVisitor(
         val closers = StringBuilder()
         while (openTags.isNotEmpty()) {
             when (val entity = openTags.removeLast()) {
-                is OpenInlineTag -> closeInlineTag(entity, closers)
+                is OpenInlineTag -> closeInlineTag(entity, closers, outputTime = true)
                 is OpenAnchorTag -> closeAnchor(entity, closers, matched = false)
             }
         }
@@ -142,10 +145,18 @@ internal class HtmlVisitor(
     // completeOpenedAfter) — or rewinds an entity whose content stayed empty, dropping
     // opener and closer both. A rewind may leave an outer entity empty in turn; the
     // caller's latest-first iteration reaches it next with the live position, so chains
-    // of empty entities (`<b><i></i></b>`) unwind completely
+    // of empty entities (`<b><i></i></b>`) unwind completely.
+    //
+    // [outputTime] widens the empty test to whitespace-only content: mid-render the
+    // whitespace is real output (it sits between words — `<b> </b>` keeps its space),
+    // while at output time the trailing trimEnd strips it anyway and would expose a
+    // literal empty pair (`a <b>` + separator renders `a <b></b>`), so only there does
+    // blank read as empty. A tg-emoji entry's blank fallback never rewrites to nothing:
+    // its url keeps the emoji's address as visible text (see OpenInlineTag.url)
     private fun closeInlineTag(
         entity: OpenInlineTag,
         sink: StringBuilder,
+        outputTime: Boolean = false,
     ) {
         if (entity.merged) {
             // A merged entry emitted no opener — its closer emits nothing either. It owns
@@ -153,12 +164,22 @@ internal class HtmlVisitor(
             if (entity.tag == "code") codeDepth--
             return
         }
-        if (entity.openStart >= 0 && sb.length == entity.openStart + entity.openLength) {
+        val contentStart = entity.openStart + entity.openLength
+        val empty = sb.length == contentStart || (outputTime && regionIsBlank(contentStart))
+        if (entity.openStart >= 0 && empty) {
             // Nothing visible was emitted inside the entity — Telegram rejects empty
             // entities, so the opener rewinds and the closer never emits. The depth unit
             // goes back too: the entity no longer exists
             if (entity.tag == "code") codeDepth--
             sb.setLength(entity.openStart)
+            return
+        }
+        if (entity.url != null && regionIsBlank(contentStart)) {
+            // Telegram requires the custom emoji fallback: one that renders to no visible
+            // text degrades to the bare escaped URL — the same trade the anchor paths
+            // make of a blank label, and the MarkdownV2 twin makes here
+            sb.setLength(entity.openStart)
+            sink.append(escapeHtmlText(entity.url))
             return
         }
         if (entity.tag == "code") codeDepth--
@@ -304,16 +325,25 @@ internal class HtmlVisitor(
     }
 
     override fun visit(fencedCodeBlock: FencedCodeBlock) {
-        val (open, close) = htmlFenceOf(fencedCodeBlock)
+        val content = fencedCodeBlock.literal.orEmpty().trimEnd('\n')
         completeOpenInlineCodeAndAnchorTags()
+        // An empty body would render the empty tag pair — Telegram rejects empty
+        // entities, and the entities twin drops the range (its length > 0 gate), so the
+        // block renders to nothing: the same skip an empty table makes. The
+        // completion above still runs — an unclosed tag must not reach across the
+        // block even when the block itself drops out
+        if (content.isEmpty()) return
+        val (open, close) = htmlFenceOf(fencedCodeBlock)
         sb.append(open)
-        sb.append(escapeHtmlText(fencedCodeBlock.literal.orEmpty().trimEnd('\n')))
+        sb.append(escapeHtmlText(content))
         sb.append(close)
         sb.append("\n\n")
     }
 
     override fun visit(indentedCodeBlock: IndentedCodeBlock) {
         completeOpenInlineCodeAndAnchorTags()
+        // See visit(fencedCodeBlock): an empty body renders nothing
+        if (indentedCodeBlock.literal.trimEnd('\n').isEmpty()) return
         sb.append("<pre>")
         sb.append(escapeHtmlText(indentedCodeBlock.literal.trimEnd('\n')))
         sb.append("</pre>\n\n")
@@ -578,7 +608,14 @@ internal class HtmlVisitor(
                 val opener = "<tg-emoji emoji-id=\"$emojiId\">"
                 sb.append(opener)
                 openTags.addLast(
-                    OpenInlineTag("tg-emoji", html = true, seq = entrySeq, openStart = openStart, openLength = opener.length),
+                    OpenInlineTag(
+                        "tg-emoji",
+                        html = true,
+                        seq = entrySeq,
+                        openStart = openStart,
+                        openLength = opener.length,
+                        url = destination,
+                    ),
                 )
                 visitChildren(image)
                 // Whatever HTML opened inside the fallback closes before the emoji does:
@@ -586,10 +623,9 @@ internal class HtmlVisitor(
                 // or pop under the cast below, which used to crash the whole render on an
                 // unclosed anchor. linkEntityOpen's tg-emoji arm degraded those anchors
                 // to literals already, and completeOpenedAfter leaves our entry innermost
-                // by construction
+                // by construction. A fallback that renders no visible text degrades to
+                // the bare escaped URL inside closeInlineTag (see OpenInlineTag.url)
                 completeOpenedAfter(entrySeq)
-                // A fallback that rendered no visible text is an empty entity — the
-                // rewind drops the pair (see closeInlineTag)
                 closeInlineTag(openTags.removeLast() as OpenInlineTag, sb)
                 return
             }
@@ -698,6 +734,27 @@ internal class HtmlVisitor(
             if (top is OpenInlineTag && top.html && top.tag == mapped) {
                 openTags.removeLast()
                 closeInlineTag(top, sb)
+                return
+            }
+            // Zero-output entries never block a closer on their own: a merged tag or a
+            // href-less sentinel anchor emitted nothing, so a legitimate closer must be
+            // allowed to reach the emitting entry beneath them — a </code> behind an
+            // unclosed in-code <a> or <b> used to escape literally, surfacing as visible
+            // text and stranding the block's remainder inside the code entity. The
+            // entries pop only when a real match sits beneath; otherwise everything
+            // stays open exactly as before
+            var probe = openTags.size - 1
+            while (probe >= 0 && emitsNothing(openTags[probe])) probe--
+            val beneath = if (probe >= 0) openTags[probe] else null
+            if (beneath is OpenInlineTag && beneath.html && beneath.tag == mapped) {
+                while (openTags.last() !== beneath) {
+                    when (val popped = openTags.removeLast()) {
+                        is OpenInlineTag -> closeInlineTag(popped, sb)
+                        is OpenAnchorTag -> closeAnchor(popped, sb, matched = false)
+                    }
+                }
+                openTags.removeLast()
+                closeInlineTag(beneath, sb)
             } else {
                 sb.append(escapeHtmlText(tag))
             }
@@ -747,22 +804,51 @@ internal class HtmlVisitor(
             sb.append(escapeHtmlText(tag))
             return
         }
+        // The id check runs before every context branch: an id-less or invalid tag is
+        // visible text whichever context it sits in — inside an open code entity the
+        // merge would otherwise swallow it silently, diverging from the out-of-code
+        // shape and the unknown-tag literalization code makes (the entities twin checks
+        // the same order)
+        val id = tgEmojiIdOf(parts.attrs)
+        if (id == null || parts.selfClosing) {
+            sb.append(escapeHtmlText(tag))
+            return
+        }
+        // Links cannot nest and a custom emoji counts as link-open (see linkEntityOpen):
+        // an inner tag drops — a merged entry keeps its closer silent — and the fallback
+        // renders as plain text, the same degradation the image path makes of an inner
+        // emoji and the MarkdownV2 twin makes of the tag
+        if (linkEntityOpen()) {
+            openTags.addLast(OpenInlineTag("tg-emoji", html = true, seq = seq(), merged = true))
+            return
+        }
         if (codeDepth > 0) {
             // A custom emoji entity can't nest inside code either: the tags drop, the
             // emoji char renders as plain code text (merged keeps the closer silent)
             openTags.addLast(OpenInlineTag("tg-emoji", html = true, seq = seq(), merged = true))
             return
         }
-        val id = tgEmojiIdOf(parts.attrs)
-        if (id == null || parts.selfClosing) {
-            sb.append(escapeHtmlText(tag))
-            return
-        }
         val opener = "<tg-emoji emoji-id=\"$id\">"
         val openStart = sb.length
         sb.append(opener)
-        openTags.addLast(OpenInlineTag("tg-emoji", html = true, seq = seq(), openStart = openStart, openLength = opener.length))
+        openTags.addLast(
+            OpenInlineTag(
+                "tg-emoji",
+                html = true,
+                seq = seq(),
+                openStart = openStart,
+                openLength = opener.length,
+                url = TG_EMOJI_URL_PREFIX + id,
+            ),
+        )
     }
+
+    // Entries that emitted no output of their own: merged tags (that is their whole
+    // point) and href-less sentinel anchors (the href-less and the in-code shapes — a
+    // nested sentinel emitted its literal tag text, so it does not qualify)
+    private fun emitsNothing(entry: OpenTag): Boolean =
+        (entry is OpenInlineTag && entry.merged) ||
+            (entry is OpenAnchorTag && !entry.nested && entry.url.isEmpty())
 
     private fun seq(): Int = nextSeq++
 
