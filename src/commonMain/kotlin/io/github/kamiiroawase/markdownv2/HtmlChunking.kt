@@ -173,7 +173,9 @@ private fun chunkHtmlFence(
     val pieces = mutableListOf<String>()
     val current = StringBuilder(open)
     // See shrinkHtmlFence: a blank first line appends nothing yet still counts as placed,
-    // or the newline joining the next line would be lost
+    // or the newline joining the next line would be lost. Placing no line is different
+    // from placing a blank one only until the split fires: there the pending blank lines
+    // drop (the piece guards on real content), matching the MarkdownV2 twin's guard
     var hasLine = false
     for (line in lines) {
         val joiner = if (hasLine) "\n" else ""
@@ -181,7 +183,7 @@ private fun chunkHtmlFence(
             current.append(joiner).append(line)
             hasLine = true
         } else {
-            if (hasLine) {
+            if (current.length > open.length) {
                 pieces += current.toString() + close
                 current.setLength(0)
                 current.append(open)
@@ -197,7 +199,9 @@ private fun chunkHtmlFence(
             }
         }
     }
-    if (hasLine) pieces += current.toString() + close
+    // Same content guard as the split above: a marker never placed a real line, so the
+    // tail cannot be an empty tag pair either
+    if (current.length > open.length) pieces += current.toString() + close
     if (pieces.isEmpty()) return
     pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)
     acc.appendRendered(pieces.last())

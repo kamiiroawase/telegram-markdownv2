@@ -491,4 +491,26 @@ class HtmlRenderTest {
         val output = TelegramHtml.render(paragraph)
         assertEquals("first", output)
     }
+
+    @Test
+    fun sentinelShapedHrefRendersAsRealLink() {
+        // The nested-anchor literalization is a type-level mark, not a URL string: a
+        // href that literally spells the old sentinel is an ordinary link. Pre-fix the
+        // closing </a> mistook it for the mark and left an unclosed <a> behind — output
+        // Telegram rejects ("Unclosed tag")
+        val output = TelegramHtml.render("<a href=\"nested-literal\">text</a>")
+        assertEquals("<a href=\"nested-literal\">text</a>", output)
+        assertTelegramHtmlParseable(output, "sentinelShapedHref")
+    }
+
+    @Test
+    fun deformatDecodesAnchorHrefsExactlyOnce() {
+        // CommonMark keeps a link destination literally (no entity decoding), so this
+        // href really contains "&amp;": the render escapes it once more and the
+        // de-format must decode exactly that one layer back — pre-fix the whole-string
+        // decode ran over the already-decoded URL a second time and displayed "&"
+        val rendered = TelegramHtml.render("[t](http://x?a=&amp;b=2)")
+        assertEquals("<a href=\"http://x?a=&amp;amp;b=2\">t</a>", rendered)
+        assertEquals("t (http://x?a=&amp;b=2)", deformatHtml(rendered))
+    }
 }

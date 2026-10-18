@@ -4,6 +4,7 @@ import org.commonmark.ext.footnotes.FootnotesExtension
 import org.commonmark.ext.gfm.tables.TableBlock
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
+import org.commonmark.node.Code
 import org.commonmark.node.HtmlBlock
 import org.commonmark.node.HtmlInline
 import org.commonmark.node.ListItem
@@ -552,6 +553,40 @@ class ChunkingTest {
                     assertTelegramParseable(chunk, "chunk sweep len=$length of ${content.replace("\n", "\\n")}")
                 }
             }
+        }
+    }
+
+    @Test
+    fun flushedNodeRendersFreshAtChunkStart() {
+        // Hand-built adjacent code spans (the parser merges source-level ones): the
+        // second span's seam degradation — its opening backtick would glue onto the
+        // previous chunk's closing one — must not survive the flush that starts a new
+        // chunk, where nothing precedes it to glue onto. Pre-fix the suppressed render
+        // (escaped text, no delimiters) was baked in before the fit decision
+        val paragraph = Paragraph()
+        paragraph.appendChild(Text("a "))
+        paragraph.appendChild(Code("b"))
+        paragraph.appendChild(Code("!!!!"))
+        paragraph.appendChild(Text(" d"))
+        val chunks = MarkdownV2.renderChunked(paragraph, 12)
+        assertEquals(listOf("a `b`", "`!!!!` d"), chunks)
+        chunks.forEach { assertTelegramParseable(it, "flushedNodeFresh") }
+    }
+
+    @Test
+    fun trailingWhitespaceShapesChunkToTheFullRender() {
+        // The full render trims trailing whitespace at output time and the chunk
+        // pipeline's flushes trim the same way, so a single chunk at a huge limit is
+        // byte-for-byte the full render — trailing spaces inside a code entity (where a
+        // whole-string trim cannot reach) and code-fence tail spaces included
+        for (content in listOf(
+            "hello\n\n` x  `",
+            "text\n\n    indented code  ",
+            "```\ncode line with trailing spaces   \n```",
+            "para one  \npara two after hard break",
+            "> quoted with trailing   \n\nfinal para",
+        )) {
+            assertEquals(listOf(MarkdownV2.render(content)), MarkdownV2.renderChunked(content, 100000))
         }
     }
 }

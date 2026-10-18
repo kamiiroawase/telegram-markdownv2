@@ -500,7 +500,19 @@ private fun chunkInlineGroup(
                 acc.current.setLength(0)
             }
             if (rendered.length <= maxLength && acc.current.isEmpty()) {
-                acc.appendRendered(rendered)
+                // The seam state no longer applies here: current is empty, so the node
+                // starts a fresh chunk where nothing can glue onto it — re-render
+                // without the degradation the seam had forced (a suppressed code
+                // delimiter, a silent underscore opener) whenever one was applied. The
+                // seam-degraded render stays as the fallback for the case its shorter
+                // output is the only one that fits
+                val fresh =
+                    if (seamGlue || seamUnderscore) {
+                        renderInlineGroup(listOf(node), options)
+                    } else {
+                        rendered
+                    }
+                acc.appendRendered(if (fresh.length <= maxLength) fresh else rendered)
             } else {
                 // isNotBlank keeps the nothing-content skip; a mid-group node's edge
                 // spaces (" c" after an emphasis, say) are content and stay untrimmed

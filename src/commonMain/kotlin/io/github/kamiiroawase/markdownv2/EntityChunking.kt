@@ -210,7 +210,10 @@ private fun chunkEntityFence(
     val pieces = mutableListOf<EntityText>()
     val current = StringBuilder()
     // See shrinkEntityFence: a blank first line appends nothing yet still counts as
-    // placed, or the newline joining the next line would be lost
+    // placed, or the newline joining the next line would be lost. The split guard keys
+    // on real content (the MarkdownV2/HTML twins do the same), so pending blank lines
+    // never become a piece of their own — rendered.text cannot start blank anyway
+    // (EntityVisitor.output() trims), the guard just pins the invariant
     var hasLine = false
     for (line in rendered.text.split('\n')) {
         val joiner = if (hasLine) "\n" else ""
@@ -218,7 +221,7 @@ private fun chunkEntityFence(
             current.append(joiner).append(line)
             hasLine = true
         } else {
-            if (hasLine) {
+            if (current.isNotEmpty()) {
                 pieces += preEntityOf(current.toString(), node)
                 current.setLength(0)
                 hasLine = false
@@ -233,7 +236,7 @@ private fun chunkEntityFence(
             }
         }
     }
-    if (hasLine) pieces += preEntityOf(current.toString(), node)
+    if (current.isNotEmpty()) pieces += preEntityOf(current.toString(), node)
     if (pieces.isEmpty()) return
     pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)
     acc.appendRendered("", pieces.last())

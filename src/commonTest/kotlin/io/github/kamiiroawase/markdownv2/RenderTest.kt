@@ -778,7 +778,7 @@ class RenderTest {
 
     @Test
     fun unclosedAnchorInsideLinkLabelDoesNotSuppressLaterLinks() {
-        // The nested-literal sentinel left by the unclosed inner anchor used to degrade
+        // The nested-literal mark left by the unclosed inner anchor used to degrade
         // every following link in the document to plain text
         assertEquals("[x <a\\>y](u) and [z](t)", MarkdownV2.render("[x <a>y](u) and [z](t)"))
     }
@@ -1436,5 +1436,16 @@ class RenderTest {
         assertFailsWith<IllegalArgumentException> {
             MarkdownV2.render("| a | b |\n| --- | --- |\n| c | d |", options = options)
         }
+    }
+
+    @Test
+    fun sentinelShapedHrefRendersAsRealLink() {
+        // The nested-anchor literalization is a type-level mark, not a URL string: a
+        // href that literally spells the old sentinel is an ordinary link. Pre-fix the
+        // closing </a> mistook it for the mark and stranded an unclosed "[" — output
+        // the Bot API rejects outright ("Can't find the end of the link entity")
+        val output = MarkdownV2.render("<a href=\"nested-literal\">text</a>")
+        assertEquals("[text](nested-literal)", output)
+        assertTelegramParseable(output, "sentinelShapedHref")
     }
 }

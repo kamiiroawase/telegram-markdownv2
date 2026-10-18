@@ -159,7 +159,7 @@ cd telegram-markdownv2
 
 API 参考（Dokka）随 main 分支推送自动部署到 [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/)。
 
-547 个行为级测试（输入/输出断言）外加一个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量——正是它抓住了下述两个行首 `>` 缺陷），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
+562 个行为级测试（输入/输出断言）外加一个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量——正是它抓住了下述两个行首 `>` 缺陷），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
 
 ## 许可
 

@@ -424,4 +424,24 @@ class EntityRenderTest {
             assertTrue(entityText.isNotBlank() || content.isBlank(), "lost all text: $content")
         }
     }
+
+    @Test
+    fun sentinelShapedHrefRendersAsRealLink() {
+        // See the MarkdownV2 twin: pre-fix a href literally spelling the old sentinel
+        // string made the closing </a> drop the link entity and leak as visible text
+        assertEquals(
+            EntityText("text", listOf(MessageEntity(MessageEntityType.TEXT_LINK, 0, 4, "nested-literal"))),
+            TelegramEntities.render("<a href=\"nested-literal\">text</a>"),
+        )
+    }
+
+    @Test
+    fun blankRegionRewindsDropTheirStaleEntities() {
+        // A whitespace-only code span registers a CODE range over its spaces; when the
+        // paragraph (or link label) it lives in rewinds as blank, that range must drop
+        // with the rewound text — pre-fix it survived with its old offset and formatted
+        // the first character of whatever the rewind re-seated there ("hello", the URL)
+        assertEquals(EntityText("hello", emptyList()), TelegramEntities.render("` `\n\nhello"))
+        assertEquals(EntityText("https://t.me", emptyList()), TelegramEntities.render("[` `](https://t.me)"))
+    }
 }

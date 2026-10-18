@@ -1,6 +1,7 @@
 package io.github.kamiiroawase.markdownv2
 
 import org.commonmark.ext.footnotes.FootnoteDefinition
+import org.commonmark.ext.task.list.items.TaskListItemMarker
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
 import org.commonmark.node.FencedCodeBlock
@@ -35,21 +36,35 @@ internal fun renderEntityBlocks(
 
     val parts = EntityBuilder()
     var node = first
+    // Set by a TaskListItemMarker block: its checkbox text is the start of the item's
+    // first line, not a block of its own — the next block glues directly onto it (the
+    // full render emits the marker inline, see EntityVisitor.visit(TaskListItemMarker)).
+    // The glue separator is a space, not "": this visitor's output() trims the marker
+    // render's own trailing space away, where the string formats keep it — the space
+    // restores the one the full render's marker emission carries
+    var glueNext = false
     while (node != null) {
         // The budget check precedes the render: once parts fill the budget no block can
         // be placed, and rendering the next one (arbitrarily large) just to discard it is
         // wasted work. Blank skips never touch parts
-        val separator = if (parts.isEmpty()) "" else "\n\n"
+        val separator =
+            when {
+                parts.isEmpty() -> ""
+                glueNext -> " "
+                else -> "\n\n"
+            }
         val remaining = budget - parts.length - separator.length
         if (remaining <= 0) break
 
         val block = renderEntityBlock(node, depth, options)
         if (block.text.isBlank()) {
+            glueNext = node is TaskListItemMarker
             node = node.next
             continue
         }
         if (block.text.length <= remaining) {
             parts.append(separator, block)
+            glueNext = node is TaskListItemMarker
             node = node.next
         } else {
             val shrunk = shrinkEntity(node, remaining, depth, retriable, options)

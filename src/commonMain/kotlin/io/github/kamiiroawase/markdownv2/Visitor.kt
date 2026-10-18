@@ -35,10 +35,6 @@ import org.commonmark.node.ThematicBreak
 // exhausting the call stack. Shared with HtmlVisitor.kt, whose structure caps alike
 internal const val MAX_RENDER_DEPTH = 100
 
-// Stack sentinel: a nested anchor literalized while an outer link is open; its closing tag
-// is treated literally as well. Shared with HtmlVisitor.kt, whose anchors literalize alike
-internal const val NESTED_LITERAL_ANCHOR = "nested-literal"
-
 // One entry per open inline entity, whichever kind pushed it — Markdown emphasis (this
 // visitor's own visits), HTML emphasis tags, HTML anchors — because their closers must
 // interleave by opening order at every completion point (a container boundary or output
@@ -86,14 +82,17 @@ private class OpenEmphasisMarker(
 // legally glue onto a following marker, every other trailing marker may not
 private enum class UnderscoreEmission { I_OPEN, U_OPEN, I_CLOSE, U_CLOSE }
 
-// An open HTML anchor: its URL ("" when href-less, the NESTED_LITERAL_ANCHOR sentinel
-// while an outer link is open) plus the output positions that let an empty label degrade
-// to the bare escaped URL (the same trade visit(link) makes)
+// An open HTML anchor: its URL ("" when href-less) plus the output positions that let an
+// empty label degrade to the bare escaped URL (the same trade visit(link) makes).
+// nested: the anchor literalized because an outer link was open — a type-level mark, not a
+// URL value: a real href sharing the old sentinel string would have closed as the sentinel
+// and stranded its unclosed "[" (HtmlVisitor.kt and EntityVisitor.kt carry the same mark)
 private class OpenAnchor(
     val url: String,
     val openBracket: Int,
     val labelStart: Int,
     override val seq: Int,
+    val nested: Boolean = false,
 ) : OpenEntity
 
 // A parsed inline-HTML tag: the lowercased name, the raw attribute string, whether the
@@ -465,7 +464,7 @@ internal class Visitor(
 
                 is OpenAnchor -> {
                     when {
-                        entity.url.isEmpty() || entity.url == NESTED_LITERAL_ANCHOR -> {}
+                        entity.nested || entity.url.isEmpty() -> {}
 
                         regionIsBlank(entity.labelStart) -> {
                             // A blank label means nothing was emitted after its [ —
@@ -778,7 +777,7 @@ internal class Visitor(
 
                 is OpenAnchor -> {
                     when {
-                        entity.url.isEmpty() || entity.url == NESTED_LITERAL_ANCHOR -> {}
+                        entity.nested || entity.url.isEmpty() -> {}
 
                         regionIsBlank(entity.labelStart) -> {
                             // See output(): a blank label guarantees this anchor is the
@@ -1084,7 +1083,7 @@ internal class Visitor(
             val top = openEntities.lastOrNull()
             if (top !is OpenAnchor) return escapeText(tag)
             openEntities.removeLast()
-            if (top.url == NESTED_LITERAL_ANCHOR) return escapeText(tag)
+            if (top.nested) return escapeText(tag)
             // "" is the href-less open tag: pop the stack, emit no link
             if (top.url.isEmpty()) return ""
             // Telegram rejects link entities with empty text: a label that rendered no
@@ -1100,7 +1099,7 @@ internal class Visitor(
         // Telegram links cannot nest: while any link entity is open (Markdown link, image
         // link or an outer anchor), an inner anchor and its closing tag are escaped literally
         if (linkEntityOpen()) {
-            openEntities.addLast(OpenAnchor(NESTED_LITERAL_ANCHOR, sb.length, sb.length, nextSeq++))
+            openEntities.addLast(OpenAnchor("", sb.length, sb.length, nextSeq++, nested = true))
             return escapeText(tag)
         }
         // href="" is treated like a missing href: the empty URL degrades to plain text

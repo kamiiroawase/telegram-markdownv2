@@ -38,8 +38,7 @@ import org.commonmark.node.ThematicBreak
 private class OpenRange(
     val type: MessageEntityType,
     val start: Int,
-    // TEXT_LINK only: the URL, "" for a href-less anchor (no entity on close), or the
-    // NESTED_LITERAL_ANCHOR sentinel while an outer link is open (tag text goes literal)
+    // TEXT_LINK only: the URL, "" for a href-less anchor (no entity on close)
     val url: String,
     // PRE only
     val language: String?,
@@ -51,6 +50,10 @@ private class OpenRange(
     val html: Boolean,
     // A code-family tag nested inside an open code range: no entity, no depth of its own
     val merged: Boolean = false,
+    // TEXT_LINK only: the anchor literalized because an outer link was open (tag text goes
+    // literal) — a type-level mark, not a URL value, so a real href can never collide with
+    // it (Visitor.kt and HtmlVisitor.kt carry the same mark)
+    val nested: Boolean = false,
 )
 
 /**
@@ -108,7 +111,7 @@ internal class EntityVisitor(
 
     // Turns the range into its entity, measured against the live length. A zero-length
     // range drops: Telegram ignores-or-rejects empty entities, and an empty range
-    // formats nothing. A href-less anchor (the empty url) and a nested sentinel close
+    // formats nothing. A href-less anchor (the empty url) and a nested mark close
     // silently; a real anchor whose label stayed blank rewinds and degrades to the bare
     // URL text. Every code-typed range owns a codeDepth unit (merged ones included, see
     // renderHtmlInlineTag); closing gives it back
@@ -117,15 +120,19 @@ internal class EntityVisitor(
         when {
             range.merged -> {}
 
-            range.type == MessageEntityType.TEXT_LINK && range.url.isEmpty() -> {}
+            range.nested -> {}
 
-            range.type == MessageEntityType.TEXT_LINK && range.url == NESTED_LITERAL_ANCHOR -> {}
+            range.type == MessageEntityType.TEXT_LINK && range.url.isEmpty() -> {}
 
             range.type == MessageEntityType.TEXT_LINK && regionIsBlank(range.start) -> {
                 // A blank label means nothing was emitted after the range opened —
                 // anything opened inside would have emitted text — so this range is the
-                // latest open entry and rewinding discards only whitespace
-                sb.setLength(range.start)
+                // latest open entry and rewinding discards only whitespace. Ranges closed
+                // inside the blank label left entities behind (a whitespace-only code span
+                // registers CODE over its spaces); their offsets sit in the rewound
+                // region, so they drop with it — kept, they would format whichever text
+                // the rewind re-seats at those offsets (the URL, or the next paragraph)
+                rewindTo(range.start)
                 sb.append(range.url)
             }
 
@@ -158,12 +165,23 @@ internal class EntityVisitor(
         val start = sb.length
         visitChildren(paragraph)
         // A paragraph that rendered no visible text is no-content: the region rewinds
-        // and no separator follows — the same blank-render skip every pipeline makes
+        // and no separator follows — the same blank-render skip every pipeline makes.
+        // The rewind also drops entities registered inside the region (a whitespace-only
+        // code span's CODE, say) — see rewindTo
         if (regionIsBlank(start)) {
-            sb.setLength(start)
+            rewindTo(start)
         } else {
             sb.append("\n\n")
         }
+    }
+
+    // Rolls the text back to [start], dropping every entity registered inside the rewound
+    // region (offsets at or past the rewind point; text positions only grow, so anything
+    // closed before the region opened sits entirely before it) — kept, those entities
+    // would format whatever text the rewind re-seats at their offsets
+    private fun rewindTo(start: Int) {
+        entities.removeAll { it.offset >= start }
+        sb.setLength(start)
     }
 
     // No heading entity exists in any output mode: the level spells out as literal
@@ -561,7 +579,7 @@ internal class EntityVisitor(
             }
             openRanges.removeLast()
             when {
-                top.url == NESTED_LITERAL_ANCHOR -> {
+                top.nested -> {
                     sb.append(tag)
                 }
 
@@ -581,11 +599,12 @@ internal class EntityVisitor(
                 OpenRange(
                     MessageEntityType.TEXT_LINK,
                     sb.length,
-                    NESTED_LITERAL_ANCHOR,
+                    "",
                     null,
                     null,
                     nextSeq++,
                     html = true,
+                    nested = true,
                 ),
             )
             sb.append(tag)

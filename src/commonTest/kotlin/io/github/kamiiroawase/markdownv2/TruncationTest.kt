@@ -712,4 +712,26 @@ class TruncationTest {
             }
         }
     }
+
+    @Test
+    fun fenceThatFitsNoLineDegradesToPlainTextNotAnEmptyShell() {
+        // The budget holds the fences but not one content line: "```\n```" is no
+        // truncated prefix of this block — "" lets the caller fall back to escaped
+        // plain text (the HTML twin drops its empty tag pair the same way)
+        val result = MarkdownV2.render("```\n\n" + "a".repeat(26) + "\n```", 8)
+        assertEquals("\naaaaaa…", result)
+        assertTelegramParseable(result, "emptyFenceShell")
+    }
+
+    @Test
+    fun truncatedTaskItemKeepsCheckboxInlineLikeTheFullRender() {
+        // The checkbox marker opens the item's first line, so the truncated body glues
+        // straight onto it — the full render's shape. Pre-fix the block-wise walk
+        // treated the marker as its own block and put a blank line plus continuation
+        // indent between it and the text
+        val item = "- [ ] " + "b".repeat(40)
+        val result = MarkdownV2.render(item, 20)
+        assertEquals("• \\[ \\] bbbbbbbbbbb…", result)
+        assertTelegramParseable(result, "taskItemTruncated")
+    }
 }

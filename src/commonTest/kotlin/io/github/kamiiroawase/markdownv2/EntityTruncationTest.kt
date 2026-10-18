@@ -168,4 +168,15 @@ class EntityTruncationTest {
             }
         }
     }
+
+    @Test
+    fun truncatedTaskItemKeepsCheckboxInlineLikeTheFullRender() {
+        // See the MarkdownV2 twin: the marker glues onto the body with the one space the
+        // full render's marker emission carries (this visitor's output() trims the
+        // marker's own trailing space, so the glue supplies it)
+        val item = "- [ ] " + "b".repeat(40)
+        val result = TelegramEntities.render(item, 20)
+        assertEquals(EntityText("• [ ] bbbbbbbbbbbbb…", emptyList()), result)
+        assertEntitiesValid(result, "taskItemTruncated")
+    }
 }

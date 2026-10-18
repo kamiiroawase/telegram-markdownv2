@@ -59,14 +59,16 @@ private class OpenInlineTag(
 ) : OpenTag
 
 // An open anchor — a Markdown link, a Markdown image or an HTML <a>: the href ("" when
-// href-less, the NESTED_LITERAL_ANCHOR sentinel while an outer link is open) plus the
-// output positions that let an empty label degrade to the bare escaped URL (the same
-// trade visit(link) makes)
+// href-less) plus the output positions that let an empty label degrade to the bare
+// escaped URL (the same trade visit(link) makes). nested: the anchor literalized because
+// an outer link was open — a type-level mark, not a URL value, so a real href can never
+// collide with it (Visitor.kt and EntityVisitor.kt carry the same mark)
 private class OpenAnchorTag(
     val url: String,
     val openStart: Int,
     val labelStart: Int,
     override val seq: Int,
+    val nested: Boolean = false,
 ) : OpenTag
 
 /**
@@ -170,7 +172,7 @@ internal class HtmlVisitor(
         matched: Boolean,
     ) {
         when {
-            entity.url == NESTED_LITERAL_ANCHOR -> {
+            entity.nested -> {
                 if (matched) sink.append(escapeHtmlText("</a>"))
             }
 
@@ -648,7 +650,7 @@ internal class HtmlVisitor(
         // Telegram links cannot nest: while any link entity is open (Markdown link, image
         // link or an outer anchor), an inner anchor and its closing tag are escaped literally
         if (linkEntityOpen()) {
-            openTags.addLast(OpenAnchorTag(NESTED_LITERAL_ANCHOR, sb.length, sb.length, nextSeq++))
+            openTags.addLast(OpenAnchorTag("", sb.length, sb.length, nextSeq++, nested = true))
             sb.append(escapeHtmlText(tag))
             return
         }

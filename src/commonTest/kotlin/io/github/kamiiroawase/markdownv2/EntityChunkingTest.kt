@@ -185,4 +185,20 @@ class EntityChunkingTest {
             }
         }
     }
+
+    @Test
+    fun trailingWhitespaceShapesChunkToTheFullRender() {
+        // See the MarkdownV2 twin: a single chunk at a huge limit equals the full render
+        // for every trailing-whitespace shape (this pipeline trims at the visitor
+        // itself, so code-span tail spaces are gone from both sides alike)
+        for (content in listOf(
+            "hello\n\n` x  `",
+            "text\n\n    indented code  ",
+            "```\ncode line with trailing spaces   \n```",
+            "para one  \npara two after hard break",
+            "> quoted with trailing   \n\nfinal para",
+        )) {
+            assertEquals(listOf(TelegramEntities.render(content)), TelegramEntities.renderChunked(content, 100000))
+        }
+    }
 }

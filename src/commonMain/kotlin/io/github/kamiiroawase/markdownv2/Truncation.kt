@@ -1,6 +1,7 @@
 package io.github.kamiiroawase.markdownv2
 
 import org.commonmark.ext.footnotes.FootnoteDefinition
+import org.commonmark.ext.task.list.items.TaskListItemMarker
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
 import org.commonmark.node.HardLineBreak
@@ -32,12 +33,16 @@ internal fun renderBlocks(
 
     val parts = StringBuilder()
     var node = first
+    // Set by a TaskListItemMarker block: its checkbox text is the start of the item's
+    // first line, not a block of its own — the next block glues directly onto it (the
+    // full render emits the marker inline, see Visitor.visit(TaskListItemMarker))
+    var glueNext = false
     while (node != null) {
         // The budget check precedes the render: once parts fill the budget no block
         // can be placed, and rendering the next one (arbitrarily large) just to
         // discard it is wasted work. Blank skips never touch parts, so re-running the
         // same arithmetic next iteration is equivalent
-        val separator = if (parts.isEmpty()) "" else "\n\n"
+        val separator = if (parts.isEmpty() || glueNext) "" else "\n\n"
         val remaining = budget - parts.length - separator.length
         if (remaining <= 0) break
 
@@ -46,11 +51,13 @@ internal fun renderBlocks(
         // nothing-render (see Visitor.visit(paragraph)/renderList), and this walk must
         // not reintroduce one on its behalf — chunkBlocks makes the same skip
         if (block.isBlank()) {
+            glueNext = node is TaskListItemMarker
             node = node.next
             continue
         }
         if (block.length <= remaining) {
             parts.append(separator).append(block)
+            glueNext = node is TaskListItemMarker
             node = node.next
         } else {
             val shrunk = shrink(node, remaining, depth, retriable, options, inListItem)
@@ -179,6 +186,10 @@ private fun shrinkRenderedCode(
         if (sb.length + 1 + line.length + 1 + close.length > budget) break
         sb.append('\n').append(line)
     }
+    // No line placed — not even a blank one, which always fits under the guard above —
+    // is no truncated prefix at all: "" lets the caller fall back to plain text (the
+    // HTML and entities twins make the same drop)
+    if (sb.length == open.length) return ""
     return sb.append('\n').append(close).toString()
 }
 

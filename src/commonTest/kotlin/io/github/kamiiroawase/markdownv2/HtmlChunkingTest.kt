@@ -2,6 +2,7 @@ package io.github.kamiiroawase.markdownv2
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -226,6 +227,40 @@ class HtmlChunkingTest {
                 }
                 assertTrue(chunks.isNotEmpty(), "len=$length dropped all content")
             }
+        }
+    }
+
+    @Test
+    fun blankFirstFenceLineNeverChunksAnEmptyTagPair() {
+        // A blank first line counts as placed (else the joining newline would be lost)
+        // but carries no content: when a later over-long line forces the split, the
+        // pending blank must not flush as a standalone "<pre></pre>" message — pre-fix
+        // the piece guard keyed on "a line was placed" instead of "content was placed",
+        // at the split and at the tail alike (a textless message is one the Bot API
+        // rejects)
+        val content = "```\n\n" + "a".repeat(31) + "\n```"
+        val chunks = TelegramHtml.renderChunked(content, 20)
+        assertTrue(chunks.size > 1)
+        chunks.forEach { chunk ->
+            assertTrue(chunk.length <= 20)
+            assertFalse(chunk == "<pre></pre>", "textless chunk: $chunk")
+            assertTelegramHtmlParseable(chunk, "blankFirstFenceLine")
+        }
+    }
+
+    @Test
+    fun trailingWhitespaceShapesChunkToTheFullRender() {
+        // See the MarkdownV2 twin: a single chunk at a huge limit equals the full render
+        // for every trailing-whitespace shape (spaces inside code entities are content
+        // the whole-string trim cannot reach)
+        for (content in listOf(
+            "hello\n\n` x  `",
+            "text\n\n    indented code  ",
+            "```\ncode line with trailing spaces   \n```",
+            "para one  \npara two after hard break",
+            "> quoted with trailing   \n\nfinal para",
+        )) {
+            assertEquals(listOf(TelegramHtml.render(content)), TelegramHtml.renderChunked(content, 100000))
         }
     }
 }

@@ -61,7 +61,13 @@ private fun appendTagText(
                 sb.append(" (").append(url).append(')')
             }
         } else {
-            openUrls.addLast(extractHref(parts.attrs).orEmpty())
+            // The raw, still-encoded attribute value: this library's output escaped the
+            // href with escapeHtmlAttribute, and the decodeHtmlEntities pass at the end
+            // of deformatHtml reverses exactly that — one decode in total. extractHref
+            // would decode here already, and the final pass would decode the URL a
+            // second time, mangling a href that literally contains an entity-shaped
+            // run ("&amp;" in the Markdown source's link destination stays "&amp;")
+            openUrls.addLast(extractAttribute(parts.attrs, "href")?.takeIf { it.isNotEmpty() }.orEmpty())
         }
     }
     // Every other tag carries no visible text of its own

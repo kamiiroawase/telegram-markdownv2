@@ -236,4 +236,22 @@ class HtmlTruncationTest {
             }
         }
     }
+
+    @Test
+    fun fenceThatFitsNoLineDegradesToPlainTextNotAnEmptyTagPair() {
+        // See the MarkdownV2 twin: pre-fix this returned the "<pre></pre>" shell — a
+        // code block with no content — instead of falling back to plain text
+        val result = TelegramHtml.render("```\n\n" + "a".repeat(26) + "\n```", 13)
+        assertEquals("\naaaaaaaaaaa…", result)
+        assertTelegramHtmlParseable(result, "emptyFenceShell")
+    }
+
+    @Test
+    fun truncatedTaskItemKeepsCheckboxInlineLikeTheFullRender() {
+        // See the MarkdownV2 twin: the marker glues onto the body with no blank line
+        val item = "- [ ] " + "b".repeat(40)
+        val result = TelegramHtml.render(item, 20)
+        assertEquals("• [ ] bbbbbbbbbbbbb…", result)
+        assertTelegramHtmlParseable(result, "taskItemTruncated")
+    }
 }
