@@ -58,6 +58,7 @@ val pages = MarkdownV2.renderChunked(
 ```
 
 - All 19 escapable characters (Telegram's 18 official special characters plus the backslash) escaped; inline code / code blocks / link URLs follow their own escaping rules
+- `<tg-spoiler>` maps to the native `||…||` spoiler markers, `<tg-emoji emoji-id="…">` and the Bot API's own custom emoji spelling `![fallback](tg://emoji?id=…)` (the image syntax) both map to `![fallback](tg://emoji?id=…)` — all three output formats support custom emoji and spoilers
 - Unsupported constructs degrade gracefully: tables become aligned code blocks (cell cap and display-width measure configurable via `RenderOptions`), HTML maps to entities or literal text, a blockquote inside a list item degrades to its content (the Bot API accepts an unescaped `>` only at a line start — one behind a list marker or continuation indent gets the whole message rejected with 400), and underscore-family emphasis that would glue onto a neighboring `_`/`__` marker degrades (the parser re-pairs touching markers into entities it cannot close)
 - Truncation and chunking preserve structure: code fences close, unclosed entities complete, quote and list prefixes survive line by line, escape sequences and surrogate pairs never split; when nothing structural fits, the fallback is escaped plain text
 - The input side enables task lists (`- [ ]`/`- [x]`, markers spelled back out as text), autolink (bare URLs/emails become links) and footnotes (references and definition labels stay visible) by default; pass a custom `Parser` built on top of `MarkdownV2.defaultExtensions` for more extensions (heading-anchor, ins, …) — unknown extension nodes traverse as plain content without crashing
@@ -66,7 +67,7 @@ val pages = MarkdownV2.renderChunked(
 
 - Escaping is uniform everywhere: `&`, `<`, `>` in text, `"` additionally in attribute values — none of MarkdownV2's context-narrowed rules
 - A quote is a `<blockquote>` wrapper tag rather than a line-start `>` prefix, so **a quote inside a list item keeps its formatting** (the MarkdownV2 side must degrade it); an all-blank quote renders nothing (the MarkdownV2 side keeps a bare `>` marker)
-- `<tg-spoiler>` and `<tg-emoji emoji-id="…">` from inline input HTML pass through as-is — constructs MarkdownV2 cannot express; a fenced code block with a language maps to `<pre><code class="language-x">` (which Telegram syntax-highlights)
+- `<tg-spoiler>` and `<tg-emoji emoji-id="…">` from inline input HTML pass through as-is, and the custom emoji image spelling `![fallback](tg://emoji?id=…)` maps to `<tg-emoji>`; a fenced code block with a language maps to `<pre><code class="language-x">` (which Telegram syntax-highlights — the language is limited to ASCII; anything outside the attribute's grammar degrades to a language-less `<pre>`)
 - Chunking needs room for one escape unit — 5 characters, an `&amp;` (`TelegramHtml.MIN_CHUNK_LENGTH`); below that the full render returns as a single chunk
 
 ### How the entities side differs
@@ -176,7 +177,7 @@ cd telegram-markdownv2
 
 The API reference (Dokka) deploys to [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/) on every main push.
 
-596 tests — 595 behavior-level (input/output assertions) plus one seeded random-document property test (150 seeds, a generator over random combinations of emphasis/code/links/quotes/lists/task lists/tables/footnotes/autolinks/raw HTML/emoji asserting every invariant for all three formats — it is what caught the two line-initial '>' defects below), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
+645 tests — 644 behavior-level (input/output assertions) plus one seeded random-document property test (150 seeds, a generator over random combinations of emphasis/code/links/quotes/lists/task lists/tables/footnotes/autolinks/raw HTML/emoji asserting every invariant for all three formats — it is what caught the two line-initial '>' defects below), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, close-order listing, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
 
 ## License
 

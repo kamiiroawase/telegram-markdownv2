@@ -75,9 +75,14 @@ private class OpenAnchorTag(
  * Renders the full AST to Telegram HTML. Unclosed tags — emphasis and anchors alike —
  * complete at the nearest container boundary (an emphasis, strikethrough or link/image
  * label that closes over them) or at output time, always latest-opened first so the
- * output stays properly nested; block quotes wrap in <blockquote> tags (no line-prefix
- * grammar to satisfy, so — unlike the MarkdownV2 visitor — a quote inside a list item
- * keeps its formatting); tables degrade to aligned text via [renderTableLines].
+ * output stays properly nested; code tags cannot span blocks ("Pre and Code can't
+ * contain nested entities") and complete at every block start, while anchors
+ * additionally complete before <pre>-emitting blocks (a pre entity may not sit inside
+ * a link entity); block quotes wrap in <blockquote> tags (no line-prefix grammar to
+ * satisfy, so — unlike the MarkdownV2 visitor — a quote inside a list item keeps its
+ * formatting; nested quotes flatten into one wrapper — Bot API formatting rules say
+ * blockquote entities can't nest); tables degrade to aligned text via
+ * [renderTableLines].
  *
  * The output is valid Telegram HTML everywhere: text escapes `<`, `>` and `&` uniformly
  * (the escape set does not narrow inside code entities), attribute values additionally
@@ -201,6 +206,10 @@ internal class HtmlVisitor(
     }
 
     override fun visit(paragraph: Paragraph) {
+        // An inline <code> opened in an earlier block cannot span this one: Telegram
+        // rejects code entities containing other entities, and any tag this paragraph
+        // emits would sit inside it (see completeOpenInlineCodeTags)
+        completeOpenInlineCodeTags()
         val start = sb.length
         visitChildren(paragraph)
         // A paragraph that rendered no visible text is no-content: one whose every child
@@ -219,6 +228,7 @@ internal class HtmlVisitor(
     // hashes (no escaping needed — '#' carries no meaning in HTML text), the same trade
     // the MarkdownV2 render makes
     override fun visit(heading: Heading) {
+        completeOpenInlineCodeTags()
         sb.append(plainHeadingPrefixOf(heading))
         visitChildren(heading)
         sb.append("\n\n")
@@ -226,23 +236,56 @@ internal class HtmlVisitor(
 
     // A quote wraps its children in <blockquote> tags — no line-prefix grammar to
     // satisfy, so quotes keep their formatting inside list items too (the inListItem
-    // degradation of the MarkdownV2 visitor has no HTML counterpart). An all-blank quote
-    // renders nothing: an empty tag pair is no quote at all (the MarkdownV2 render keeps
-    // a bare ">" marker there — the marker is the quote's whole output)
+    // degradation of the MarkdownV2 visitor has no HTML counterpart). Bot API formatting
+    // rules say blockquote entities can't nest: a quote child that is a quote itself
+    // flattens into this level's wrapper (the entities twin's identical ranges degrade
+    // to the same single quote at send time, and the MarkdownV2 twin never opens a
+    // second level for glued markers). An all-blank quote renders nothing: an empty tag
+    // pair is no quote at all (the MarkdownV2 render keeps a bare ">" marker there — the
+    // marker is the quote's whole output)
     override fun visit(blockQuote: BlockQuote) {
         val pieces = mutableListOf<String>()
-        var child = blockQuote.firstChild
-        while (child != null) {
-            val rendered = renderQuoteChild(child)
-            if (rendered.isNotBlank()) {
-                pieces += rendered
-            }
-            child = child.next
-        }
+        appendQuoteChildren(blockQuote, pieces, 0)
         if (pieces.isEmpty()) return
+        // A code entity from an earlier block completes first — the wrapper is a block
+        // tag, and Telegram rejects block tags inside inline code
+        completeOpenInlineCodeTags()
         sb.append("<blockquote>")
         sb.append(pieces.joinToString("\n\n"))
         sb.append("</blockquote>\n\n")
+    }
+
+    // Collects the quote's rendered children, flattening nested quotes into the same
+    // level (see visit(blockQuote)). [quoteDepth] counts the flattened quote levels —
+    // each consumed one depth unit as a wrapper in the old shape, and still must: a
+    // pathological nesting chain flattens to escaped text at the cap exactly like every
+    // other structural path (see MAX_RENDER_DEPTH)
+    private fun appendQuoteChildren(
+        blockQuote: BlockQuote,
+        pieces: MutableList<String>,
+        quoteDepth: Int,
+    ) {
+        var child = blockQuote.firstChild
+        while (child != null) {
+            if (child is BlockQuote) {
+                if (depth + quoteDepth + 1 >= MAX_RENDER_DEPTH) {
+                    val plain = StringBuilder()
+                    appendPlainText(plain, child)
+                    val rendered = escapeHtmlText(plain.toString().trimEnd('\n'))
+                    if (rendered.isNotBlank()) {
+                        pieces += rendered
+                    }
+                } else {
+                    appendQuoteChildren(child, pieces, quoteDepth + 1)
+                }
+            } else {
+                val rendered = renderQuoteChild(child)
+                if (rendered.isNotBlank()) {
+                    pieces += rendered
+                }
+            }
+            child = child.next
+        }
     }
 
     override fun visit(bulletList: BulletList) {
@@ -256,12 +299,13 @@ internal class HtmlVisitor(
     // Telegram HTML has no thematic break entity; em dashes need no escaping in HTML
     // text, unlike MarkdownV2's '-' which would need a backslash per dash
     override fun visit(thematicBreak: ThematicBreak) {
+        completeOpenInlineCodeTags()
         sb.append("———\n\n")
     }
 
     override fun visit(fencedCodeBlock: FencedCodeBlock) {
         val (open, close) = htmlFenceOf(fencedCodeBlock)
-        completeOpenInlineCodeTags()
+        completeOpenInlineCodeAndAnchorTags()
         sb.append(open)
         sb.append(escapeHtmlText(fencedCodeBlock.literal.orEmpty().trimEnd('\n')))
         sb.append(close)
@@ -269,7 +313,7 @@ internal class HtmlVisitor(
     }
 
     override fun visit(indentedCodeBlock: IndentedCodeBlock) {
-        completeOpenInlineCodeTags()
+        completeOpenInlineCodeAndAnchorTags()
         sb.append("<pre>")
         sb.append(escapeHtmlText(indentedCodeBlock.literal.trimEnd('\n')))
         sb.append("</pre>\n\n")
@@ -400,21 +444,47 @@ internal class HtmlVisitor(
 
     /**
      * Completes every open inline code tag (and everything opened inside it) before a
-     * `<pre>` block emits: left open, the block would sit inside an inline code entity
-     * — a nesting Telegram's parser rejects. Other inline tags may span the block
-     * boundary (the MarkdownV2 render ships the same shape for its emphasis entities),
-     * so only the code family force-closes here. The closers land before the trailing
-     * block separator — appended after it they would sit inside the pre — so the
-     * separator is lifted and re-emitted.
+     * block emits its own structure: left open, the block's tags or text would sit inside
+     * an inline code entity — a nesting Telegram's parser rejects ("Pre and Code can't
+     * contain nested entities"). Other inline tags may span the block boundary (the
+     * MarkdownV2 render ships the same shape for its emphasis entities), so only the code
+     * family force-closes here. The closers land before the trailing block separator —
+     * appended after it they would sit inside the block — so the separator is lifted and
+     * re-emitted.
      */
     private fun completeOpenInlineCodeTags() {
         val outermostCode =
             openTags.firstOrNull { it is OpenInlineTag && it.tag == "code" } as? OpenInlineTag
                 ?: return
+        completeThroughSeparator(outermostCode.seq - 1)
+    }
+
+    /**
+     * The <pre>-emitting twin of [completeOpenInlineCodeTags]: completes code tags and
+     * anchors alike (everything opened inside the earliest of them) before a `<pre>`
+     * block emits. A pre entity may not sit inside a link entity — the entities
+     * documentation's "Cannot be nested inside other entities" — and a Markdown link
+     * never spans blocks, so an unclosed HTML anchor must not reach across one either.
+     * Emphasis keeps the documented complete-at-output behavior (the pinned
+     * bold-over-pre containment).
+     */
+    private fun completeOpenInlineCodeAndAnchorTags() {
+        val boundary =
+            openTags
+                .filter { (it is OpenInlineTag && it.tag == "code") || it is OpenAnchorTag }
+                .minOfOrNull { it.seq }
+                ?: return
+        completeThroughSeparator(boundary - 1)
+    }
+
+    // Completes everything opened at or after [boundarySeq], lifting the trailing block
+    // separator first and re-emitting it after the closers — appended after it they would
+    // sit inside the following block (see completeOpenInlineCodeTags)
+    private fun completeThroughSeparator(boundarySeq: Int) {
         var separatorLength = 0
         while (separatorLength < sb.length && sb[sb.length - 1 - separatorLength] == '\n') separatorLength++
         sb.setLength(sb.length - separatorLength)
-        completeOpenedAfter(outermostCode.seq - 1)
+        completeOpenedAfter(boundarySeq)
         repeat(separatorLength) { sb.append('\n') }
     }
 
@@ -428,7 +498,10 @@ internal class HtmlVisitor(
                 // The definition keeps its place in the document (Telegram message text
                 // is linear): label spelled back out, content rendered as the blocks it
                 // wraps — the same visible shape the unextended parse shows. The label
-                // escapes like the reference's does
+                // escapes like the reference's does, and a code tag from an earlier
+                // block completes first — the label and blocks are structure and block
+                // content, neither may sit inside inline code
+                completeOpenInlineCodeTags()
                 sb.append(escapeHtmlText("[^${customBlock.label}]: "))
                 visitChildren(customBlock)
             }
@@ -445,7 +518,7 @@ internal class HtmlVisitor(
             return
         }
 
-        completeOpenInlineCodeTags()
+        completeOpenInlineCodeAndAnchorTags()
         sb.append("<pre>")
         sb.append(escapeHtmlText(lines.joinToString("\n")))
         sb.append("</pre>\n\n")
@@ -490,9 +563,29 @@ internal class HtmlVisitor(
     // text; an alt that renders to nothing degrades to the bare escaped URL (see
     // visit(link)). Nested inside another link (the README badge shape
     // [![alt](img)](target)) only the alt text survives, keeping the outer link
-    // single-level — Telegram links cannot nest
+    // single-level — Telegram links cannot nest. The one carve-out is the Bot API's own
+    // custom emoji spelling — an image whose destination reads tg://emoji?id=… — which
+    // renders as <tg-emoji>, this format's native custom emoji form, mirroring the tag
+    // path (see renderEmojiTag); the guards match it: inside a link or a code entity the
+    // image takes the ordinary degradation
     override fun visit(image: Image) {
         val destination = image.destination.orEmpty()
+        if (destination.isNotEmpty() && !linkEntityOpen() && codeDepth == 0) {
+            val emojiId = tgEmojiUrlIdOf(destination)
+            if (emojiId != null) {
+                val openStart = sb.length
+                val opener = "<tg-emoji emoji-id=\"$emojiId\">"
+                sb.append(opener)
+                openTags.addLast(
+                    OpenInlineTag("tg-emoji", html = true, seq = nextSeq++, openStart = openStart, openLength = opener.length),
+                )
+                visitChildren(image)
+                // A fallback that rendered no visible text is an empty entity — the
+                // rewind drops the pair (see closeInlineTag)
+                closeInlineTag(openTags.removeLast() as OpenInlineTag, sb)
+                return
+            }
+        }
         // See visit(link): empty URL, nesting and open code entities all degrade to the
         // alt text alone
         if (destination.isEmpty() || linkEntityOpen() || codeDepth > 0) {
@@ -537,7 +630,7 @@ internal class HtmlVisitor(
         // tag set draws a 400 from the Bot API, so the block degrades to escaped text in
         // a <pre> — the same trade tables make. (Inline input HTML maps tag by tag; see
         // renderHtmlInlineTag.)
-        completeOpenInlineCodeTags()
+        completeOpenInlineCodeAndAnchorTags()
         sb.append("<pre>").append(escapeHtmlText(literal)).append("</pre>\n\n")
     }
 
@@ -739,8 +832,11 @@ internal class HtmlVisitor(
     // Continuation lines are indented to the marker width via applyPrefix (shared with
     // the truncation and chunking pipelines). A blank-bodied item is no-content and skips,
     // its marker consumed — the same walk forEachHtmlListItem makes, so the full render,
-    // truncation and chunking agree on which items exist and how they number
+    // truncation and chunking agree on which items exist and how they number. A code tag
+    // from an earlier block completes first — the marker is structure, and a block quote
+    // or pre inside an item would sit inside the code entity
     private fun renderList(list: Node) {
+        completeOpenInlineCodeTags()
         val start = sb.length
         val marker = plainListMarkerOf(list)
         var item = list.firstChild
@@ -788,9 +884,11 @@ internal class HtmlVisitor(
         }
 
     // The quote-child variant: the node renders through its own full block shape —
-    // visit(node), not visitChildren(node) — so a nested blockQuote child arrives with
-    // its own <blockquote> wrapper for the caller to nest. Depth capping, escaping and
-    // trailing-newline trimming match renderChild
+    // visit(node), not visitChildren(node). BlockQuote children never arrive here —
+    // visit(blockQuote) flattens nested quotes into its own level (Bot API formatting
+    // rules say blockquote entities can't nest) — so every child this renders is a
+    // non-quote block. Depth capping, escaping and trailing-newline trimming match
+    // renderChild
     private fun renderQuoteChild(node: Node): String =
         if (depth + 1 >= MAX_RENDER_DEPTH) {
             val plain = StringBuilder()

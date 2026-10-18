@@ -7,9 +7,10 @@ package io.github.kamiiroawase.markdownv2
  *
  * One linear pass with explicit states (text, inline code, fenced code, link label,
  * link URL) — no regex, no recursion, the same posture as the rest of the library.
- * Emphasis markers vanish (`*bold*`, `_italic_`, `__underline__`, `~strike~`), runs of
- * adjacent markers included (`_a__b_`, the render of two italics side by side, resolves
- * close-then-open into plain `ab`); fences and quote prefixes drop — a code block inside
+ * Emphasis markers vanish (`*bold*`, `_italic_`, `__underline__`, `~strike~`,
+ * `||spoiler||`), runs of adjacent markers included (`_a__b_`, the render of two
+ * italics side by side, resolves close-then-open into plain `ab`); fences and quote
+ * prefixes drop — a code block inside
  * a quote de-formats to its content with the per-line quote markers stripped, and so does
  * a label or code span soft-broken onto the next line of a quote body (exactly the
  * wrapping quote's depth strips; a content '>' beyond it survives); quote markers strip
@@ -55,7 +56,7 @@ internal fun deformat(rendered: String): String {
                 index = appendLinkText(rendered, index, sb, lineQuoteDepth)
             }
 
-            char == '_' || char == '*' || char == '~' -> {
+            char == '_' || char == '*' || char == '~' || char == '|' -> {
                 var run = 1
                 while (index + run < rendered.length && rendered[index + run] == char) run++
                 matchMarkerRun(openMarkers, char, run, sb.length)
@@ -101,12 +102,13 @@ private fun reopenUnmatched(
  * each unit first closes the entity on top when its marker matches ('_' closes '_',
  * '__' takes two; '*' and '~' are single-char), the remainder opens new entities —
  * '__' as underline, a lone '_' as italic (Telegram's rule that `__` is always
- * underline). Resolving the run as a whole is what handles adjacency: `_a__b_` (the
- * render of two italics side by side) reads the first '_' of the run as the closer of
- * the open italic and the second as the next opener, where the old char-greedy read
- * took '__' for one underline marker, matched nothing, and re-inserted all three
- * markers literally. [position] is the output position the run starts at (it emits
- * nothing itself), shared by every marker the run opens.
+ * underline), '||' as spoiler (a lone '|' is no marker at all; it re-inserts literally
+ * if nothing ever pairs it). Resolving the run as a whole is what handles adjacency:
+ * `_a__b_` (the render of two italics side by side) reads the first '_' of the run as
+ * the closer of the open italic and the second as the next opener, where the old
+ * char-greedy read took '__' for one underline marker, matched nothing, and re-inserted
+ * all three markers literally. [position] is the output position the run starts at (it
+ * emits nothing itself), shared by every marker the run opens.
  */
 private fun matchMarkerRun(
     openMarkers: ArrayDeque<OpenMarker>,
@@ -121,6 +123,7 @@ private fun matchMarkerRun(
             when {
                 top == null -> 0
                 top.marker == "__" && marker == '_' && remaining >= 2 -> 2
+                top.marker == "||" && marker == '|' && remaining >= 2 -> 2
                 top.marker == marker.toString() -> 1
                 else -> 0
             }
@@ -129,6 +132,9 @@ private fun matchMarkerRun(
             remaining -= closeCost
         } else if (marker == '_' && remaining >= 2) {
             openMarkers.addLast(OpenMarker("__", position))
+            remaining -= 2
+        } else if (marker == '|' && remaining >= 2) {
+            openMarkers.addLast(OpenMarker("||", position))
             remaining -= 2
         } else {
             openMarkers.addLast(OpenMarker(marker.toString(), position))
@@ -209,6 +215,15 @@ private fun skipPre(
     while (index < rendered.length && rendered[index] != '\n') index++
     if (index < rendered.length) index++ // the fence line's own newline
     val first = scanLinePrefix(rendered, index, depth)
+    if (rendered.startsWith("```", first.contentFrom)) {
+        // The first line after the open fence was already its close — an empty pre (the
+        // shape only garbage input carries; this library renders an empty fence with a
+        // blank middle line). The closing fence line drops whole, prefix included, the
+        // same trade the loop below makes for any later closing fence
+        var closeEnd = first.contentFrom
+        while (closeEnd < rendered.length && rendered[closeEnd] != '\n') closeEnd++
+        return closeEnd
+    }
     sb.append(first.context)
     index = first.contentFrom
     while (index < rendered.length) {
@@ -435,7 +450,7 @@ private fun appendLabelText(
                 index = appendCodeContent(rendered, index, sb, quoteDepth)
             }
 
-            char == '_' || char == '*' || char == '~' -> {
+            char == '_' || char == '*' || char == '~' || char == '|' -> {
                 var run = 1
                 while (index + run < rendered.length && rendered[index + run] == char) run++
                 matchMarkerRun(openMarkers, char, run, sb.length)

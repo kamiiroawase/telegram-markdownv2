@@ -54,6 +54,7 @@ val pages = MarkdownV2.renderChunked(
 ```
 
 - 官方 18 个特殊字符加反斜杠共 19 个全量转义；行内代码 / 代码块 / 链接 URL 按各自规则转义
+- `<tg-spoiler>` 映射为原生 `||…||` 剧透标记，`<tg-emoji emoji-id="…">` 与 Bot API 自身的自定义 emoji 写法 `![后备](tg://emoji?id=…)`（图片语法）都映射为 `![后备](tg://emoji?id=…)`——三种输出格式均支持自定义 emoji 与剧透
 - 不支持的构造自动降级：表格转等宽对齐的代码块（单元格截断上限与字符宽度度量可经 `RenderOptions` 定制）、HTML 块映射为实体或字面文本、列表项内的引用块降级为原内容（Bot API 只接受行首的未转义 `>`，跟在列表标记或续行缩进后的 `>` 会导致整条消息被 400 拒收）、会与相邻 `_`/`__` 标记粘连的下划线族强调降级（解析器会把紧贴的 `_`/`__` 重新配对成无法闭合的实体）
 - 截断与分片保结构：代码围栏闭合、未闭合实体补全、引用与列表前缀逐行保留，绝不劈开转义序列和代理对；结构化内容完全放不下时回退为转义纯文本
 - 输入侧默认启用任务列表（`- [ ]`/`- [x]`，标记按字面回写）、autolink（裸 URL/邮箱自动成链接）与脚注（引用与定义标签保持可见）；需要更多扩展（heading-anchor、ins 等）时在 `MarkdownV2.defaultExtensions` 之上传入自建 `Parser`，未知扩展节点按纯内容遍历，不崩溃
@@ -62,7 +63,7 @@ val pages = MarkdownV2.renderChunked(
 
 - 转义处处一致：文本中 `&` `<` `>`，属性值中另加 `"`——没有 MarkdownV2 那套按上下文收窄的规则
 - 引用是 `<blockquote>` 包装标签而非行首 `>` 前缀，因此**列表项内的引用保留引用格式**（MarkdownV2 端只能降级）；全空的引用不输出（MarkdownV2 端保留一个裸 `>` 标记）
-- 行内输入 HTML 中的 `<tg-spoiler>` 与带数字 `emoji-id` 的 `<tg-emoji>` 原样透传——MarkdownV2 表达不了的构造；代码围栏带语言时映射为 `<pre><code class="language-x">`（Telegram 据此做语法高亮）
+- 行内输入 HTML 中的 `<tg-spoiler>` 与带数字 `emoji-id` 的 `<tg-emoji>` 原样透传，图片写法 `![后备](tg://emoji?id=…)`（Bot API 自身的自定义 emoji 语法）映射为 `<tg-emoji>`；代码围栏带语言时映射为 `<pre><code class="language-x">`（Telegram 据此做语法高亮，语言名限 ASCII——超出该属性语法的语言降级为无语言 `<pre>`）
 - 分片的下限是 5 字符（一个转义单元 `&amp;` 的长度，对应 `TelegramHtml.MIN_CHUNK_LENGTH`）；低于它返回完整渲染单片
 
 ### entities 端的差异
@@ -165,7 +166,7 @@ cd telegram-markdownv2
 
 API 参考（Dokka）随 main 分支推送自动部署到 [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/)。
 
-596 个测试——595 个行为级（输入/输出断言）外加 1 个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量——正是它抓住了下述两个行首 `>` 缺陷），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
+645 个测试——644 个行为级（输入/输出断言）外加 1 个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量——正是它抓住了下述两个行首 `>` 缺陷），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、按 close order 排列、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
 
 ## 许可
 

@@ -218,4 +218,64 @@ class EntityChunkingTest {
             assertEquals(listOf(TelegramEntities.render(content)), TelegramEntities.renderChunked(content, 100000))
         }
     }
+
+    // ---------- blank chunks never ship / heading bodies never drop / close order ----------
+
+    @Test
+    fun footnoteWhitespaceRunNeverYieldsABlankChunk() {
+        // The verbatim seam used to ship whitespace-only middle pieces — the server
+        // trims message text and rejects blank text with a 400
+        val pieces = TelegramEntities.renderChunked("[^1]: a" + " ".repeat(30) + "b", 6)
+        assertTrue(pieces.size >= 2, "expected a split: $pieces")
+        pieces.forEach { piece ->
+            assertTrue(piece.text.isNotBlank(), "blank chunk shipped: $pieces")
+            assertTrue(piece.text.length <= 6, "over-long chunk: $piece")
+            assertEntitiesValid(piece, "footnoteWhitespaceChunk")
+        }
+    }
+
+    @Test
+    fun inlineSeamWhitespaceNeverYieldsABlankChunk() {
+        // flushRaw at the inline seam used to ship the whitespace tail of a flattened
+        // node as its own chunk
+        val pieces = TelegramEntities.renderChunked("hello *world* and `code` here", 5)
+        pieces.forEach { piece ->
+            assertTrue(piece.text.isNotBlank(), "blank chunk shipped: $pieces")
+            assertTrue(piece.text.length <= 5, "over-long chunk: $piece")
+        }
+    }
+
+    @Test
+    fun headingBodyNeverLostAtSmallLimits() {
+        // The lead is tracked by flag, not length — only the marker may drop, never the
+        // body text
+        for (limit in 2..13) {
+            val pieces = TelegramEntities.renderChunked("# abcdefgh`z`", limit)
+            assertTrue(pieces.isNotEmpty(), "no chunks at $limit")
+            val joined = pieces.joinToString("") { it.text }
+            assertTrue(joined.contains("abcdefgh"), "body lost at $limit: $pieces")
+            assertTrue(joined.contains("z"), "tail lost at $limit: $pieces")
+            pieces.forEach { piece ->
+                assertTrue(piece.text.isNotBlank(), "blank chunk at $limit: $pieces")
+                assertTrue(piece.text.length <= limit, "over-long chunk at $limit: $piece")
+                assertEntitiesValid(piece, "headingBody at $limit")
+            }
+        }
+    }
+
+    @Test
+    fun chunkedQuotePiecesKeepCloseOrder() {
+        // The EntityText contract: nested ranges before the ranges containing them. The
+        // quote re-assembly (blockquoteEntityOf) used to prepend the container — the
+        // same input flipped order between the full render and the chunk pipeline
+        for (content in listOf(
+            "> **bold** and plenty of trailing text to overflow any small chunk limit",
+            "> ```\n> code one\n> code two\n> ```",
+        )) {
+            TelegramEntities.renderChunked(content, 8).forEach { piece ->
+                assertEntitiesValid(piece, "close order chunk of $content")
+            }
+            assertEntitiesValid(TelegramEntities.render(content), "close order render of $content")
+        }
+    }
 }

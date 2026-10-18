@@ -130,12 +130,15 @@ internal class EntityChunkAccumulator {
 
     fun flush() {
         if (current.isEmpty()) return
-        pieces +=
+        val piece =
             if (verbatimTail) {
                 current.build()
             } else {
                 trimTrailing(current.build())
             }
+        // A whitespace-only piece drops — the server trims message text and rejects
+        // blank text with a 400, so it could never be sent (see finish)
+        if (piece.text.isNotBlank()) pieces += piece
         current.sb.setLength(0)
         current.entities.clear()
         verbatimTail = false
@@ -143,11 +146,13 @@ internal class EntityChunkAccumulator {
 
     /**
      * Flushes unconditionally raw: the inline seam glues nodes without separators, so
-     * even a rendered tail's trailing whitespace is text there.
+     * even a rendered tail's trailing whitespace is text there. A whitespace-only flush
+     * drops all the same — a blank chunk can never be sent (see flush).
      */
     fun flushRaw() {
         if (current.isEmpty()) return
-        pieces += current.build()
+        val piece = current.build()
+        if (piece.text.isNotBlank()) pieces += piece
         current.sb.setLength(0)
         current.entities.clear()
         verbatimTail = false
@@ -338,14 +343,15 @@ private fun chunkEntityQuote(
 }
 
 // Wraps a piece's text in one blockquote range over the whole piece, keeping the piece's
-// own (nested) entities
+// own (nested) entities — appended after them, the close order the EntityText contract
+// documents (nested ranges before the ranges containing them)
 private fun blockquoteEntityOf(piece: EntityText): EntityText =
     if (piece.text.isEmpty()) {
         piece
     } else {
         EntityText(
             piece.text,
-            listOf(MessageEntity(MessageEntityType.BLOCKQUOTE, 0, piece.text.length)) + piece.entities,
+            piece.entities + MessageEntity(MessageEntityType.BLOCKQUOTE, 0, piece.text.length),
         )
     }
 
@@ -425,19 +431,30 @@ private fun chunkEntityInlineGroup(
     options: RenderOptions,
     acc: EntityChunkAccumulator,
 ) {
-    val lead = acc.length
-    var first = true
+    // Length of the un-glued lead current starts with (a heading prefix, or 0 when it
+    // starts empty); 0 from the moment any real content packs. Tracked by flag, not by
+    // length — a length comparison cannot tell "the lead" from "content exactly as long
+    // as the lead was", because the lead-drop branch deliberately reuses the lead's room
+    var lead = acc.length
     for (node in nodes) {
         val rendered = renderEntityInlineGroup(listOf(node), options)
         if (acc.length + rendered.text.length <= maxLength) {
             acc.appendRendered("", rendered)
+            // An empty render (a lone comment) leaves current exactly the lead — the
+            // marker's bare-piece protection must survive it
+            if (rendered.text.isNotEmpty()) lead = 0
         } else {
-            if (acc.length > lead) {
-                acc.flushRaw()
-            } else if (first && rendered.text.length <= maxLength) {
+            if (lead > 0 && rendered.text.length <= maxLength) {
+                // current is exactly the un-glued lead and the node fits once the lead
+                // is dropped: drop it rather than flatten the node to plain text
                 acc.current.sb.setLength(0)
                 acc.current.entities.clear()
                 acc.verbatimTail = false
+                lead = 0
+            } else if (lead == 0 && !acc.isEmpty()) {
+                // current holds real content (the lead, if any, glued at its front):
+                // it ships before the node continues on fresh ground
+                acc.flushRaw()
             }
             if (rendered.text.length <= maxLength && acc.isEmpty()) {
                 acc.appendRendered("", rendered)
@@ -445,8 +462,8 @@ private fun chunkEntityInlineGroup(
                 val text = plainText(listOf(node))
                 if (text.isNotBlank()) flattenEntityWithLead(acc.current.build().text, text, maxLength, acc)
             }
+            lead = 0
         }
-        first = false
     }
 }
 

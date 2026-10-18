@@ -525,4 +525,103 @@ class EntityRenderTest {
         )
         assertEntitiesValid(code, "leadingWhitespaceCode")
     }
+
+    // ---------- block boundaries complete open code and link ranges (fourth audit) ----------
+
+    @Test
+    fun codeRangeCompletesBeforeBlockquote() {
+        // Pre-fix the still-open CODE range swallowed the quote's BLOCKQUOTE range — a
+        // nesting the Bot API rejects ("Pre and Code can't contain nested entities")
+        val result = TelegramEntities.render("a <code>b\n> q")
+        assertEquals(
+            EntityText(
+                "a b\n\nq",
+                listOf(
+                    MessageEntity(MessageEntityType.CODE, 2, 3),
+                    MessageEntity(MessageEntityType.BLOCKQUOTE, 5, 1),
+                ),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "codeCompletesBeforeQuote")
+    }
+
+    @Test
+    fun codeRangeCompletesBeforeHeading() {
+        val result = TelegramEntities.render("x <code>y\n\n# H")
+        assertEquals(
+            EntityText(
+                "x y\n\n# H",
+                listOf(MessageEntity(MessageEntityType.CODE, 2, 3)),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "codeCompletesBeforeHeading")
+    }
+
+    @Test
+    fun preRangeCompletesOpenLinkRange() {
+        // Pre-fix the PRE range landed inside the still-open TEXT_LINK range — "Cannot
+        // be nested inside other entities" per the entities documentation
+        val result = TelegramEntities.render("x <a href=\"https://e.com/u\">y\n\n```\ncode\n```")
+        assertEquals(
+            EntityText(
+                "x y\n\ncode",
+                listOf(
+                    MessageEntity(MessageEntityType.TEXT_LINK, 2, 3, url = "https://e.com/u"),
+                    MessageEntity(MessageEntityType.PRE, 5, 4),
+                ),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "preCompletesLink")
+    }
+
+    // ---------- custom emoji via the tg://emoji image syntax ----------
+
+    @Test
+    fun customEmojiImageSyntaxBecomesCustomEmojiRange() {
+        // The Bot API's MarkdownV2 custom emoji spelling renders as this protocol's
+        // native form, mirroring the <tg-emoji> tag path
+        val result = TelegramEntities.render("![👍](tg://emoji?id=5368324170671202286)")
+        assertEquals(
+            EntityText(
+                "👍",
+                listOf(
+                    MessageEntity(
+                        MessageEntityType.CUSTOM_EMOJI,
+                        0,
+                        2,
+                        customEmojiId = "5368324170671202286",
+                    ),
+                ),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "customEmojiImage")
+    }
+
+    @Test
+    fun customEmojiImageSyntaxInsideLinkDegradesToAlt() {
+        // Telegram links cannot nest: inside a link only the alt text survives (the 👍 is
+        // a surrogate pair — two UTF-16 units of the link label)
+        val result = TelegramEntities.render("[x ![👍](tg://emoji?id=5368324170671202286) y](https://e.com/)")
+        assertEquals(
+            EntityText(
+                "x 👍 y",
+                listOf(MessageEntity(MessageEntityType.TEXT_LINK, 0, 6, url = "https://e.com/")),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "customEmojiInLink")
+    }
+
+    @Test
+    fun customEmojiEmptyFallbackDropsTheRange() {
+        // Telegram requires the fallback text; a zero-length custom_emoji range drops
+        assertEquals(
+            EntityText("", emptyList()),
+            TelegramEntities.render("![](tg://emoji?id=5368324170671202286)"),
+        )
+    }
 }

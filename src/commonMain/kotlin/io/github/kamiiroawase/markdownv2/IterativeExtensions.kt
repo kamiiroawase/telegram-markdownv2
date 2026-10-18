@@ -24,8 +24,10 @@ import org.nibor.autolink.LinkType
  * ([TaskListItemMarker], core [Link]), matching the upstream behavior point by point:
  * a task marker binds only at the head of a list item's first paragraph and needs
  * whitespace after the bracket pair (upper-case X counts as checked); autolink covers
- * URL, www and email spans (mailto: prefixed) everywhere except inside a link label,
- * where the outer link must stay single-level.
+ * URL, www and email spans (email mailto:-prefixed, www http://-prefixed — a www
+ * autolink is an http autolink per GFM §6.9, and the destination without the scheme
+ * resolves nowhere) everywhere except inside a link label, where the outer link must
+ * stay single-level.
  */
 internal object IterativeTaskListItemsExtension : Parser.ParserExtension {
     override fun extend(parserBuilder: Parser.Builder) {
@@ -127,7 +129,11 @@ private object IterativeAutolinkPostProcessor : PostProcessor {
                 when (span) {
                     is LinkSpan -> {
                         val destination =
-                            if (span.type == LinkType.EMAIL) "mailto:$content" else content
+                            when (span.type) {
+                                LinkType.EMAIL -> "mailto:$content"
+                                LinkType.WWW -> "http://$content"
+                                else -> content
+                            }
                         Link(destination, null).apply { appendChild(Text(content)) }
                     }
 

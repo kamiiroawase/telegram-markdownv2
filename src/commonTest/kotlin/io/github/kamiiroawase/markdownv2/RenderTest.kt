@@ -1527,4 +1527,146 @@ class RenderTest {
         assertEquals("[text](nested-literal)", output)
         assertTelegramParseable(output, "sentinelShapedHref")
     }
+
+    // ---------- custom emoji (the tg-emoji tag and the tg://emoji image syntax) ----------
+
+    @Test
+    fun customEmojiImageSyntaxRendersAsCustomEmoji() {
+        // The Bot API's own MarkdownV2 spelling — ![fallback](tg://emoji?id=…) — survives
+        // as custom emoji rather than degrading to a text link. Pre-fix visit(image)
+        // degraded it unconditionally
+        val output = MarkdownV2.render("![👍](tg://emoji?id=5368324170671202286)")
+        assertEquals("![👍](tg://emoji?id=5368324170671202286)", output)
+        assertTelegramParseable(output, "customEmojiImageSyntax")
+    }
+
+    @Test
+    fun customEmojiTagRendersAsImageSyntax() {
+        // The tag spelling maps to the same custom emoji syntax the image spelling
+        // already uses — the HTML and entities formats render their own native forms
+        val output = MarkdownV2.render("x <tg-emoji emoji-id=\"5368324170671202286\">👍</tg-emoji> y")
+        assertEquals("x ![👍](tg://emoji?id=5368324170671202286) y", output)
+        assertTelegramParseable(output, "customEmojiTag")
+    }
+
+    @Test
+    fun customEmojiImageSyntaxInsideLinkDegradesToFallback() {
+        // The inner ](url) would re-pair as the outer label's closer, and Telegram links
+        // cannot nest anyway — the fallback text renders alone
+        assertEquals(
+            "[x 👍 y](https://e.com)",
+            MarkdownV2.render("[x ![👍](tg://emoji?id=5368324170671202286) y](https://e.com)"),
+        )
+    }
+
+    @Test
+    fun customEmojiEmptyFallbackDegradesToBareUrl() {
+        // Telegram requires the fallback text; an alt with no visible text degrades to
+        // the bare escaped URL, the same trade visit(link) makes
+        assertEquals(
+            "tg://emoji?id\\=5368324170671202286",
+            MarkdownV2.render("![](tg://emoji?id=5368324170671202286)"),
+        )
+    }
+
+    @Test
+    fun customEmojiInvalidIdTakesOrdinaryPaths() {
+        // A non-numeric id in the destination is an ordinary image; a non-numeric
+        // attribute id is an unknown tag — both degrade the way they always did
+        assertEquals("[x](tg://emoji?id=abc)", MarkdownV2.render("![x](tg://emoji?id=abc)"))
+        assertEquals(
+            "<tg\\-emoji emoji\\-id\\=\"abc\"\\>x</tg\\-emoji\\>",
+            MarkdownV2.render("<tg-emoji emoji-id=\"abc\">x</tg-emoji>"),
+        )
+    }
+
+    @Test
+    fun customEmojiInsideCodeEntityDropsItsTags() {
+        // Custom emoji cannot nest in code ("Pre and Code can't contain nested
+        // entities"): the tags vanish, the fallback renders as plain code text
+        assertEquals(
+            "a `x 👍 y` b",
+            MarkdownV2.render("a <code>x <tg-emoji emoji-id=\"5368324170671202286\">👍</tg-emoji> y</code> b"),
+        )
+    }
+
+    // ---------- spoiler ----------
+
+    @Test
+    fun spoilerTagRendersAsPipes() {
+        // Pre-fix the whole spoiler class was unreachable in MarkdownV2: the tag fell
+        // through to escaped literal text
+        val output = MarkdownV2.render("**sp** <tg-spoiler>sec</tg-spoiler>")
+        assertEquals("*sp* ||sec||", output)
+        assertTelegramParseable(output, "spoilerTag")
+    }
+
+    @Test
+    fun spoilerContentEscapesLikeEntityText() {
+        // Inside a spoiler entity the full escape set applies (only pre and code narrow)
+        assertEquals("||a\\.b||", MarkdownV2.render("<tg-spoiler>a.b</tg-spoiler>"))
+    }
+
+    @Test
+    fun emptySpoilerPairDrops() {
+        // || straight onto || would be an empty entity Telegram rejects; the pair
+        // carries no visible text, so it rewinds like the empty code pair
+        assertEquals("x  y", MarkdownV2.render("x <tg-spoiler></tg-spoiler> y"))
+    }
+
+    @Test
+    fun spoilerOpenerGluedOntoSpoilerCloserDegrades() {
+        // <tg-spoiler>a</tg-spoiler><tg-spoiler>b</tg-spoiler> would emit ||a||||b|| —
+        // the second opener takes the same glue degradation the underscore family takes
+        assertEquals("||a||b", MarkdownV2.render("<tg-spoiler>a</tg-spoiler><tg-spoiler>b</tg-spoiler>"))
+    }
+
+    @Test
+    fun spoilerTagInsideCodeEntityDrops() {
+        assertEquals("a `x s y` b", MarkdownV2.render("a <code>x <tg-spoiler>s</tg-spoiler> y</code> b"))
+    }
+
+    // ---------- unclosed code entities complete at block boundaries ----------
+
+    @Test
+    fun unclosedCodeCompletesBeforeHeading() {
+        // Pre-fix the heading's "\#" prefix landed inside the code entity, where only \`
+        // and \\ are escapes — the backslash rendered. The entity completes at the block
+        // boundary instead, the prefix escaping for text outside it
+        assertEquals("x `y`\n\n\\# H", MarkdownV2.render("x <code>y\n\n# H"))
+    }
+
+    @Test
+    fun unclosedCodeCompletesBeforeOrderedList() {
+        assertEquals("x `y`\n\n1\\. item", MarkdownV2.render("x <code>y\n\n1. item"))
+    }
+
+    @Test
+    fun unclosedCodeCompletesBeforeParagraph() {
+        assertEquals("x `y`\n\nplain", MarkdownV2.render("x <code>y\n\nplain"))
+    }
+
+    @Test
+    fun unclosedCodeCompletesBeforeFootnoteDefinition() {
+        assertEquals("x `y`\n\n\\[^1\\]: note", MarkdownV2.render("x <code>y\n\n[^1]: note"))
+    }
+
+    @Test
+    fun unclosedCodeCompletesBeforeQuote() {
+        // The quote's ">" markers are structure, never code content
+        assertEquals("a `b`\n\n> q", MarkdownV2.render("a <code>b\n> q"))
+    }
+
+    // ---------- unclosed anchors complete before pre blocks ----------
+
+    @Test
+    fun unclosedAnchorCompletesBeforeFence() {
+        // Pre-fix the anchor stayed open across the fence and its closer landed at output
+        // time — a pre entity inside a link entity, which the entities documentation
+        // forbids ("Cannot be nested inside other entities"). A Markdown link never spans
+        // blocks; the HTML anchor must not either
+        val output = MarkdownV2.render("x <a href=\"https://e.com/u\">y\n\n```\ncode\n```")
+        assertEquals("x [y](https://e.com/u)\n\n```\ncode\n```", output)
+        assertTelegramParseable(output, "unclosedAnchorBeforeFence")
+    }
 }

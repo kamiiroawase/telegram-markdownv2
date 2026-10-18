@@ -54,14 +54,17 @@ internal fun htmlFenceOf(node: Node): Pair<String, String> {
     return "<pre>" to "</pre>"
 }
 
-// The info string is untrusted: keep only letters/digits/-/+/# so it can neither leave
-// the double-quoted attribute (quotes, '<', '>' and '&' are absent by construction) nor
-// inject markup — the same filter the MarkdownV2 fence applies to its own fence line
+// The info string is untrusted: keep only ASCII letters/digits/-/+/# so it can neither
+// leave the double-quoted attribute (quotes, '<', '>' and '&' are absent by construction)
+// nor inject markup. ASCII only, deliberately narrower than the MarkdownV2 twin's filter:
+// the class attribute's grammar is the ASCII word set, and a non-ASCII language degrades
+// to a bare <pre> rather than an attribute the parse mode may reject (the fence line
+// itself carries no such grammar, so MarkdownV2 keeps Unicode languages there)
 internal fun htmlLanguageOf(fencedCodeBlock: FencedCodeBlock): String =
     fencedCodeBlock.info
         .orEmpty()
         .trim()
-        .filter { it.isLetterOrDigit() || it == '-' || it == '+' || it == '#' }
+        .filter { it.isAsciiLetterOrDigit() || it == '-' || it == '+' || it == '#' }
         .take(32)
 
 // Telegram's parse modes and entities alike have no heading entity: the level spells

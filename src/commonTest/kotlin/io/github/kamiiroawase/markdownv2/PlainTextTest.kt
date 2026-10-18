@@ -246,4 +246,24 @@ class PlainTextTest {
             }
         }
     }
+
+    @Test
+    fun spoilerMarkersVanishInPlainText() {
+        // The spoiler render's || delimiters are entity markers, not content — they drop
+        // like the emphasis markers do (a run of four, the adjacent-pair shape, resolves
+        // close-then-open the same way _a__b_ does)
+        assertEquals("sp sec end", MarkdownV2.toPlainText("sp ||sec|| end"))
+        assertEquals("ab", MarkdownV2.toPlainText("||a||||b||"))
+        assertEquals("|", MarkdownV2.toPlainText("\\|"))
+    }
+
+    @Test
+    fun emptyFenceDeFormatsToNothing() {
+        // The open fence's first line was already its close — an empty pre, and both
+        // fence lines drop. Pre-fix the closing fence leaked through as content on the
+        // garbage-input path (this library renders an empty fence with a blank middle
+        // line, which always de-formed to nothing)
+        assertEquals("", MarkdownV2.toPlainText("```\n```"))
+        assertEquals("", MarkdownV2.toPlainText("```\n\n```"))
+    }
 }

@@ -610,4 +610,83 @@ class ChunkingTest {
             assertEquals(listOf(MarkdownV2.render(content)), MarkdownV2.renderChunked(content, 100000))
         }
     }
+
+    // ---------- blank chunks never ship / heading bodies never drop (fourth audit) ----------
+
+    @Test
+    fun footnoteWhitespaceRunNeverYieldsABlankChunk() {
+        // The verbatim flattening seam (appendVerbatimChunks) used to ship whitespace-only
+        // middle pieces — the server trims message text and rejects blank text with a 400.
+        // Pre-fix a 30-space run inside a footnote code span at limit 6 shipped four
+        val pieces = MarkdownV2.renderChunked("[^1]: a`" + " ".repeat(30) + "`b", 6)
+        assertTrue(pieces.size >= 2, "expected a split: $pieces")
+        pieces.forEach { piece ->
+            assertTrue(piece.isNotBlank(), "blank chunk shipped: $pieces")
+            assertTrue(piece.length <= 6, "over-long chunk: $piece")
+            assertTelegramParseable(piece, "footnoteWhitespaceChunk")
+        }
+    }
+
+    @Test
+    fun inlineSeamWhitespaceNeverYieldsABlankChunk() {
+        // flushRaw at the inline seam used to ship the whitespace tail of a flattened
+        // node as its own chunk
+        val pieces = MarkdownV2.renderChunked("hello *world* and `code` here", 5)
+        pieces.forEach { piece ->
+            assertTrue(piece.isNotBlank(), "blank chunk shipped: $pieces")
+            assertTrue(piece.length <= 5, "over-long chunk: $piece")
+        }
+    }
+
+    @Test
+    fun quoteWhitespaceRunNeverYieldsABlankChunk() {
+        // The quote path's verbatim flush used to ship bare space segments when the
+        // limit was too small for the "> " prefix
+        val pieces = MarkdownV2.renderChunked("> a`" + " ".repeat(10) + "`b", 3)
+        pieces.forEach { piece ->
+            assertTrue(piece.isNotBlank(), "blank chunk shipped: $pieces")
+            assertTrue(piece.length <= 3, "over-long chunk: $piece")
+            assertTelegramParseable(piece, "quoteWhitespaceChunk")
+        }
+    }
+
+    @Test
+    fun headingBodyNeverLostAtSmallLimits() {
+        // Pre-fix the lead logic measured "content beyond the lead" by length: content
+        // exactly as long as the dropped lead read as the lead itself, and flattenWithLead
+        // deleted it (keepLead false at tiny limits). The lead is tracked by flag now —
+        // only the marker may drop, never the body text
+        assertEquals(listOf("abc", "zzz"), MarkdownV2.renderChunked("# abc`zzz`", 3))
+        assertEquals(listOf("abcd", "efg", "zzzz", "z"), MarkdownV2.renderChunked("# abcdefg`zzzzz`", 4))
+        assertEquals(listOf("abcdefgh", "`z`"), MarkdownV2.renderChunked("###### abcdefgh`z`", 8))
+        assertEquals(listOf("ab", "zz"), MarkdownV2.renderChunked("# ab`zz`", 2))
+    }
+
+    @Test
+    fun headingBodySurvivesAcrossTheSmallLimitWindow() {
+        // The whole window where the lead machinery operates (limits 2-9 × levels 1-6):
+        // every non-whitespace character of the body must survive in the joined chunks
+        for (content in listOf(
+            "# abcdefgh`z`",
+            "## abcdefg`zz`",
+            "### abcdef`zzz`",
+            "#### abcde`zzzz`",
+            "##### abcd`zzzzz`",
+            "###### abc`zzzzzz`",
+        )) {
+            val letters = content.substringAfter(' ').substringBefore('`')
+            val zs = content.substringAfter('`').dropLast(1)
+            for (limit in 2..9) {
+                val pieces = MarkdownV2.renderChunked(content, limit)
+                assertTrue(pieces.isNotEmpty(), "no chunks at $limit for $content")
+                val joined = pieces.joinToString("")
+                assertTrue(joined.contains(letters), "letters lost at $limit: $pieces")
+                assertTrue(joined.contains(zs), "tail lost at $limit: $pieces")
+                pieces.forEach { piece ->
+                    assertTrue(piece.isNotBlank(), "blank chunk at $limit: $pieces")
+                    assertTrue(piece.length <= limit, "over-long chunk at $limit: $piece")
+                }
+            }
+        }
+    }
 }

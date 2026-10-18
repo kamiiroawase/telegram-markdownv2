@@ -300,9 +300,12 @@ private fun shrinkEntityQuote(
     }
     val text = parts.build()
     if (text.text.isEmpty()) return EntityText.EMPTY
+    // The wrapper appends after the nested ranges — the close order the EntityText
+    // contract documents (nested ranges before the ranges containing them), the same
+    // order visit(blockQuote) and the chunking re-assembly emit
     return EntityText(
         text.text,
-        listOf(MessageEntity(MessageEntityType.BLOCKQUOTE, 0, text.text.length)) + text.entities,
+        text.entities + MessageEntity(MessageEntityType.BLOCKQUOTE, 0, text.text.length),
     )
 }
 

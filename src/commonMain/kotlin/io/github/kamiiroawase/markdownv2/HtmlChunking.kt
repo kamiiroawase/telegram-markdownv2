@@ -130,14 +130,19 @@ private fun flattenHtmlToPlainText(
     appendHtmlVerbatimChunks(text, maxLength, acc)
 }
 
-// Every piece but the tail completes; the tail stays open in [acc] as verbatim content
+// Every piece but the tail completes; the tail stays open in [acc] as verbatim content.
+// A whitespace-only piece drops instead of shipping — the server trims message text and
+// rejects blank text with a 400 (the one lossless-chunking exception; see
+// ChunkAccumulator.flush)
 private fun appendHtmlVerbatimChunks(
     text: String,
     maxLength: Int,
     acc: ChunkAccumulator,
 ) {
     val escaped = htmlEscapeChunks(text, maxLength)
-    escaped.subList(0, escaped.size - 1).forEach(acc.pieces::add)
+    escaped.subList(0, escaped.size - 1).forEach { piece ->
+        if (!piece.isBlank()) acc.pieces += piece
+    }
     acc.appendVerbatim(escaped.last())
 }
 
@@ -414,21 +419,28 @@ private fun chunkHtmlInlineGroup(
     options: RenderOptions,
     acc: ChunkAccumulator,
 ) {
-    val lead = acc.current.length
-    // Only the first node can meet the entry lead still intact in current — after any
-    // append or flatten the content there is real output the drop must not touch
-    var first = true
+    // Length of the un-glued lead current starts with (a heading prefix, or 0 when it
+    // starts empty); 0 from the moment any real content packs. Tracked by flag, not by
+    // length — a length comparison cannot tell "the lead" from "content exactly as long
+    // as the lead was", because the lead-drop branch deliberately reuses the lead's room
+    var lead = acc.current.length
     for (node in nodes) {
         val rendered = renderHtmlInlineGroup(listOf(node), options)
         if (acc.current.length + rendered.length <= maxLength) {
             acc.appendRendered(rendered)
+            // An empty render (a lone comment) leaves current exactly the lead — the
+            // marker's bare-piece protection must survive it
+            if (rendered.isNotEmpty()) lead = 0
         } else {
-            if (acc.current.length > lead) {
-                acc.flushRaw()
-            } else if (first && rendered.length <= maxLength) {
-                // current is exactly the un-glued lead: the node fits once the lead is
-                // dropped, so drop it rather than flatten the node to escaped text
+            if (lead > 0 && rendered.length <= maxLength) {
+                // current is exactly the un-glued lead and the node fits once the lead
+                // is dropped: drop it rather than flatten the node to escaped text
                 acc.current.setLength(0)
+                lead = 0
+            } else if (lead == 0 && acc.current.isNotEmpty()) {
+                // current holds real content (the lead, if any, glued at its front):
+                // it ships before the node continues on fresh ground
+                acc.flushRaw()
             }
             if (rendered.length <= maxLength && acc.current.isEmpty()) {
                 acc.appendRendered(rendered)
@@ -438,14 +450,15 @@ private fun chunkHtmlInlineGroup(
                 val text = plainText(listOf(node))
                 if (text.isNotBlank()) flattenWithHtmlLead(acc.current.toString(), text, maxLength, acc)
             }
+            lead = 0
         }
-        first = false
     }
 }
 
 /**
  * Last-resort flattening of an oversized item or inline node to escaped text: [lead] (a
- * list marker, a heading prefix, or whatever content still sits in [acc].current) stays
+ * list marker or a heading prefix — never mid-paragraph content; the inline seam flushes
+ * that first) stays
  * glued to the first piece while maxLength leaves room for it plus one escape unit — the
  * [MAX_HTML_UNIT] limit htmlEscapeChunks is promised; otherwise the lead is dropped,
  * because chunk validity and text losslessness take precedence over the marker. Consumes

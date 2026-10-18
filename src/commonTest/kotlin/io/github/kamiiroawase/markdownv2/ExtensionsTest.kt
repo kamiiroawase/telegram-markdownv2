@@ -47,9 +47,11 @@ class ExtensionsTest {
     }
 
     @Test
-    fun autolinkWwwBecomesLink() {
+    fun autolinkWwwBecomesHttpLink() {
+        // GFM §6.9: a www autolink is an http autolink — the destination carries the
+        // scheme, or the link entity resolves nowhere
         assertEquals(
-            "[www\\.example\\.com](www.example.com) bare",
+            "[www\\.example\\.com](http://www.example.com) bare",
             MarkdownV2.render("www.example.com bare"),
         )
     }

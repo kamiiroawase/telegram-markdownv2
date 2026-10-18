@@ -214,10 +214,23 @@ class HtmlRenderTest {
     }
 
     @Test
-    fun nestedQuoteNestsWrappers() {
+    fun nestedQuoteFlattensIntoOneWrapper() {
+        // Bot API formatting rules say blockquote entities can't nest: the inner level
+        // flattens into the outer wrapper (the entities twin's identical ranges degrade
+        // to the same single quote at send time)
         assertEquals(
-            "<blockquote><blockquote>deep</blockquote></blockquote>",
+            "<blockquote>deep</blockquote>",
             TelegramHtml.render("> > deep"),
+        )
+    }
+
+    @Test
+    fun deepNestedQuoteWithSiblingsFlattensInOrder() {
+        // A quote inside a quote with a sibling paragraph: the inner quote's children
+        // join the outer level in document order, one wrapper for them all
+        assertEquals(
+            "<blockquote>in\n\nsib</blockquote>",
+            TelegramHtml.render("> > in\n>\n> sib"),
         )
     }
 
@@ -612,5 +625,101 @@ class HtmlRenderTest {
         assertTrue(output.contains("text &amp; &lt;b&gt;bold&lt;/b&gt;"), "raw markup leaked: ${output.takeLast(80)}")
         assertFalse(output.contains("<b>bold"), "unescaped tag survived: ${output.takeLast(80)}")
         assertTelegramHtmlParseable(output, "depthCapInlineEmphasisFlatten")
+    }
+
+    // ---------- block tags complete a still-open inline <code> (fourth audit round) ----------
+
+    @Test
+    fun blockQuoteCompletesOpenInlineCodeTag() {
+        // Pre-fix the wrapper nested inside the open code entity — a nesting Telegram
+        // rejects ("Pre and Code can't contain nested entities"); only the four
+        // fence-wrapped kinds completed the tag
+        val output = TelegramHtml.render("a <code>b\n> q")
+        assertEquals("a <code>b</code>\n\n<blockquote>q</blockquote>", output)
+        assertTelegramHtmlParseable(output, "blockquoteCompletesCode")
+    }
+
+    @Test
+    fun listItemCompletesOpenInlineCodeTag() {
+        // The list path missed the completion too: a blockquote or pre inside a list item
+        // landed inside the code entity through the item's rendered body
+        val output = TelegramHtml.render("a <code>b\n\n- item\n\n  ```\n  c\n  ```")
+        assertEquals("a <code>b</code>\n\n• item\n\n  <pre>c</pre>", output)
+        assertTelegramHtmlParseable(output, "listItemCompletesCode")
+    }
+
+    @Test
+    fun headingCompletesOpenInlineCodeTag() {
+        val output = TelegramHtml.render("x <code>y\n\n# H")
+        assertEquals("x <code>y</code>\n\n# H", output)
+        assertTelegramHtmlParseable(output, "headingCompletesCode")
+    }
+
+    // ---------- <pre> completes a still-open anchor ----------
+
+    @Test
+    fun preCompletesOpenAnchor() {
+        // Pre-fix the <pre> landed inside the unclosed <a> — "Cannot be nested inside
+        // other entities" per the entities documentation; a Markdown link never spans
+        // blocks, so the HTML anchor must not either
+        val output = TelegramHtml.render("x <a href=\"https://e.com/u\">y\n\n```\ncode\n```")
+        assertEquals("x <a href=\"https://e.com/u\">y</a>\n\n<pre>code</pre>", output)
+        assertTelegramHtmlParseable(output, "preCompletesAnchor")
+    }
+
+    @Test
+    fun emphasisOpenedInsideAnchorCompletesWithIt() {
+        // Everything opened inside the completed anchor closes with it — a stranded <b>
+        // would cross the </a> boundary into crossed tags
+        val output = TelegramHtml.render("x <a href=\"https://e.com/u\"><b>y\n\n```\nc\n```")
+        assertEquals("x <a href=\"https://e.com/u\"><b>y</b></a>\n\n<pre>c</pre>", output)
+        assertTelegramHtmlParseable(output, "emphasisCompletesWithAnchor")
+    }
+
+    // ---------- custom emoji via the tg://emoji image syntax ----------
+
+    @Test
+    fun customEmojiImageSyntaxRendersAsTgEmojiTag() {
+        // The Bot API's MarkdownV2 custom emoji spelling renders as this format's native
+        // form, mirroring the <tg-emoji> tag path
+        val output = TelegramHtml.render("![👍](tg://emoji?id=5368324170671202286)")
+        assertEquals("<tg-emoji emoji-id=\"5368324170671202286\">👍</tg-emoji>", output)
+        assertTelegramHtmlParseable(output, "customEmojiImage")
+    }
+
+    @Test
+    fun customEmojiImageSyntaxInsideLinkDegradesToAlt() {
+        // Telegram links cannot nest: inside a link only the alt text survives
+        assertEquals(
+            "<a href=\"https://e.com/\">x 👍 y</a>",
+            TelegramHtml.render("[x ![👍](tg://emoji?id=5368324170671202286) y](https://e.com/)"),
+        )
+    }
+
+    @Test
+    fun customEmojiEmptyFallbackDropsThePair() {
+        // An empty tg-emoji pair is an empty entity — Telegram requires the fallback, so
+        // the pair rewinds (the entities twin's zero-length range drops alike)
+        assertEquals("", TelegramHtml.render("![](tg://emoji?id=5368324170671202286)"))
+    }
+
+    // ---------- fence language stays inside the attribute grammar ----------
+
+    @Test
+    fun nonAsciiFenceLanguageDegradesToBarePre() {
+        // The class attribute's grammar is the ASCII word set: a non-ASCII language drops
+        // to a bare <pre> rather than an attribute the parse mode may reject (the
+        // MarkdownV2 twin keeps Unicode languages on its fence line — no grammar there)
+        val output = TelegramHtml.render("```日本語\ncode\n```")
+        assertEquals("<pre>code</pre>", output)
+        assertTelegramHtmlParseable(output, "nonAsciiFenceLanguage")
+    }
+
+    @Test
+    fun asciiFenceLanguageStillCarries() {
+        assertEquals(
+            "<pre><code class=\"language-kotlin\">val x = 1</code></pre>",
+            TelegramHtml.render("```kotlin\nval x = 1\n```"),
+        )
     }
 }

@@ -126,10 +126,17 @@ internal class ChunkAccumulator {
         verbatimTail = true
     }
 
-    /** Flushes the in-progress chunk, trimmed unless it ends with flattened text. */
+    /**
+     * Flushes the in-progress chunk, trimmed unless it ends with flattened text. A chunk
+     * that is whitespace all the way through drops — the server trims message text and
+     * rejects blank text with a 400, so it could never be sent (see finish); the one
+     * lossless-chunking exception, and it takes a whitespace run the whole chunk long to
+     * reach.
+     */
     fun flush() {
         if (current.isEmpty()) return
-        pieces += if (verbatimTail) current.toString() else current.toString().trimEnd()
+        val piece = if (verbatimTail) current.toString() else current.toString().trimEnd()
+        if (piece.isNotBlank()) pieces += piece
         current.setLength(0)
         verbatimTail = false
     }
@@ -137,11 +144,13 @@ internal class ChunkAccumulator {
     /**
      * Flushes unconditionally raw: the inline seam glues nodes without separators, so even
      * a rendered tail's trailing whitespace is text there (the space before an emphasis
-     * marker, say).
+     * marker, say). A whitespace-only flush drops all the same — a blank chunk can never
+     * be sent (see flush).
      */
     fun flushRaw() {
         if (current.isEmpty()) return
-        pieces += current.toString()
+        val piece = current.toString()
+        if (piece.isNotBlank()) pieces += piece
         current.setLength(0)
         verbatimTail = false
     }
@@ -192,14 +201,19 @@ private fun flattenToPlainText(
     appendVerbatimChunks(text, maxLength, acc)
 }
 
-// Every piece but the tail completes; the tail stays open in [acc] as verbatim content
+// Every piece but the tail completes; the tail stays open in [acc] as verbatim content.
+// A whitespace-only piece drops instead of shipping — the server trims message text and
+// rejects blank text with a 400 (the one lossless-chunking exception; see
+// ChunkAccumulator.flush)
 private fun appendVerbatimChunks(
     text: String,
     maxLength: Int,
     acc: ChunkAccumulator,
 ) {
     val escaped = escapeChunks(text, maxLength)
-    escaped.subList(0, escaped.size - 1).forEach(acc.pieces::add)
+    escaped.subList(0, escaped.size - 1).forEach { piece ->
+        if (!piece.isBlank()) acc.pieces += piece
+    }
     acc.appendVerbatim(escaped.last())
 }
 
@@ -476,6 +490,12 @@ private fun lineGroups(node: Node): List<List<Node>> {
  * stays glued to whichever node flattens next, or is dropped outright when the first node
  * fits the limit only without it (a bare marker piece is the wrong shape either way, and
  * keeping the node's rendered structure beats keeping the marker).
+ *
+ * The lead is tracked by flag, not by length: once real content has packed, current holds
+ * text the drop-and-flatten branches must not treat as the disposable marker — and a
+ * length comparison alone cannot tell "the lead" from "content exactly as long as the
+ * lead was", because the lead-drop branch deliberately reuses the lead's room for the
+ * node that fit without it.
  */
 private fun chunkInlineGroup(
     nodes: List<Node>,
@@ -483,10 +503,9 @@ private fun chunkInlineGroup(
     options: RenderOptions,
     acc: ChunkAccumulator,
 ) {
-    val lead = acc.current.length
-    // Only the first node can meet the entry lead still intact in current — after any
-    // append or flatten the content there is real output the drop must not touch
-    var first = true
+    // Length of the un-glued lead current starts with (a heading prefix, or 0 when it
+    // starts empty); 0 from the moment any real content packs
+    var lead = acc.current.length
     for (node in nodes) {
         // A fresh visitor renders each node, so the glue this chunk's trailing backtick
         // would form with the node's opening one is invisible to it — pass the seam
@@ -498,13 +517,20 @@ private fun chunkInlineGroup(
         val rendered = renderInlineGroup(listOf(node), options, seamGlue, seamUnderscore)
         if (acc.current.length + rendered.length <= maxLength) {
             acc.appendRendered(rendered)
+            // An empty render (a lone comment) leaves current exactly the lead — the
+            // marker's bare-piece protection must survive it
+            if (rendered.isNotEmpty()) lead = 0
         } else {
-            if (acc.current.length > lead) {
-                acc.flushRaw()
-            } else if (first && rendered.length <= maxLength) {
-                // current is exactly the un-glued lead: the node fits once the lead is
-                // dropped, so drop it rather than flatten the node to escaped text
+            if (lead > 0 && rendered.length <= maxLength) {
+                // current is exactly the un-glued lead and the node fits once the lead
+                // is dropped: drop it rather than flatten the node to escaped text
                 acc.current.setLength(0)
+                lead = 0
+            } else if (lead == 0 && acc.current.isNotEmpty()) {
+                // current holds real content (the lead, if any, glued at its front —
+                // the marker's own shape): it ships before the node continues on fresh
+                // ground
+                acc.flushRaw()
             }
             if (rendered.length <= maxLength && acc.current.isEmpty()) {
                 // The seam state no longer applies here: current is empty, so the node
@@ -526,14 +552,15 @@ private fun chunkInlineGroup(
                 val text = plainText(listOf(node))
                 if (text.isNotBlank()) flattenWithLead(acc.current.toString(), text, maxLength, acc)
             }
+            lead = 0
         }
-        first = false
     }
 }
 
 /**
  * Last-resort flattening of an oversized item or inline node to escaped text: [lead] (a
- * list marker, a heading prefix, or whatever content still sits in [acc].current) stays glued
+ * list marker or a heading prefix — never mid-paragraph content; the inline seam flushes
+ * that first) stays glued
  * to the first piece while maxLength leaves room for it plus one escape unit — the ≥2
  * limit escapeChunks is promised; otherwise the lead is dropped, because chunk validity
  * and text losslessness take precedence over the marker (the same trade chunkQuotedText

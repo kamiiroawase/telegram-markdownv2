@@ -179,4 +179,24 @@ class EntityTruncationTest {
         assertEquals(EntityText("• [ ] bbbbbbbbbbbbb…", emptyList()), result)
         assertEntitiesValid(result, "taskItemTruncated")
     }
+
+    @Test
+    fun truncatedQuoteKeepsCloseOrder() {
+        // The EntityText contract: nested ranges before the ranges containing them. The
+        // truncation's quote re-assembly (shrinkEntityQuote) used to prepend the
+        // container, so the same input flipped order between the full render (nested
+        // first) and the truncated one (container first)
+        val truncated = TelegramEntities.render("> **a**\n>\n> b", 2)
+        assertEquals(
+            EntityText(
+                "a…",
+                listOf(
+                    MessageEntity(MessageEntityType.BOLD, 0, 1),
+                    MessageEntity(MessageEntityType.BLOCKQUOTE, 0, 1),
+                ),
+            ),
+            truncated,
+        )
+        assertEntitiesValid(truncated, "truncatedQuoteCloseOrder")
+    }
 }

@@ -280,6 +280,51 @@ class HtmlChunkingTest {
             assertEquals(listOf(TelegramHtml.render(content)), TelegramHtml.renderChunked(content, 100000))
         }
     }
+
+    // ---------- blank chunks never ship / heading bodies never drop (fourth audit) ----------
+
+    @Test
+    fun footnoteWhitespaceRunNeverYieldsABlankChunk() {
+        // appendHtmlVerbatimChunks used to ship whitespace-only middle pieces — the
+        // server trims message text and rejects blank text with a 400
+        val pieces = TelegramHtml.renderChunked("[^1]: a&" + " ".repeat(30) + "&b", 6)
+        assertTrue(pieces.size >= 2, "expected a split: $pieces")
+        pieces.forEach { piece ->
+            assertTrue(piece.isNotBlank(), "blank chunk shipped: $pieces")
+            assertTrue(piece.length <= 6, "over-long chunk: $piece")
+            assertTelegramHtmlParseable(piece, "footnoteWhitespaceChunk")
+        }
+    }
+
+    @Test
+    fun inlineSeamWhitespaceNeverYieldsABlankChunk() {
+        // The shared accumulator's flushRaw at the inline seam used to ship the
+        // whitespace tail of a flattened node as its own chunk
+        val pieces = TelegramHtml.renderChunked("hello *world* and <b>code</b> here", 5)
+        pieces.forEach { piece ->
+            assertTrue(piece.isNotBlank(), "blank chunk shipped: $pieces")
+            assertTrue(piece.length <= 5, "over-long chunk: $piece")
+        }
+    }
+
+    @Test
+    fun headingBodyNeverLostAtSmallLimits() {
+        // The lead is tracked by flag, not length — only the marker may drop, never the
+        // body text (pre-fix content exactly as long as the lead read as the lead and
+        // flattenWithHtmlLead deleted it)
+        for (limit in 5..13) {
+            val pieces = TelegramHtml.renderChunked("# abcdefgh<b>z</b>", limit)
+            assertTrue(pieces.isNotEmpty(), "no chunks at $limit")
+            val joined = pieces.joinToString("")
+            assertTrue(joined.contains("abcdefgh"), "body lost at $limit: $pieces")
+            assertTrue(joined.contains("z"), "tail lost at $limit: $pieces")
+            pieces.forEach { piece ->
+                assertTrue(piece.isNotBlank(), "blank chunk at $limit: $pieces")
+                assertTrue(piece.length <= limit, "over-long chunk at $limit: $piece")
+                assertTelegramHtmlParseable(piece, "headingBody at $limit")
+            }
+        }
+    }
 }
 
 // The plain-text view of rendered HTML, for the losslessness assertions: strips the

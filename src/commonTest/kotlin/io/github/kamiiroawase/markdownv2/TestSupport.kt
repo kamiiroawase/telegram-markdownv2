@@ -5,7 +5,7 @@ package io.github.kamiiroawase.markdownv2
 
 internal val maxMessageLength = MarkdownV2.MAX_MESSAGE_LENGTH
 
-private enum class Kind { BOLD, ITALIC, UNDERLINE, STRIKE, CODE, PRE, TEXTURL, BLOCKQUOTE }
+private enum class Kind { BOLD, ITALIC, UNDERLINE, STRIKE, CODE, PRE, TEXTURL, BLOCKQUOTE, SPOILER, CUSTOM_EMOJI }
 
 /**
  * Asserts [output] is a message tdlib's parse_markdown_v2 — the parser the Bot API
@@ -21,12 +21,16 @@ private enum class Kind { BOLD, ITALIC, UNDERLINE, STRIKE, CODE, PRE, TEXTURL, B
  * - "_" pairs by context: it closes an italic only when the next char is not "_", and
  *   "__" is one underline unit — glued underscore markers re-pair into shapes the
  *   parser leaves unterminated ("Can't find end of the entity");
+ * - "||" opens a spoiler entity and the next "||" closes it (a lone "|" draws the
+ *   reserved-character error);
+ * - "!" reserved unless it opens the custom emoji shape "![" — whose entity closes at
+ *   "]" with the same "](url)" tail scan a link takes;
  * - ">" may open a quote only while can_start_blockquote holds: set at message start
  *   and by an unescaped newline, cleared by any ordinary character, untouched by the
  *   reserved markers and CR;
  * - a newline inside a quote ends any open entity unless the next char is ">";
  * - a link's "](url)" tail is scanned by a dedicated loop that stops at the unescaped
- * ")";
+ *   ")";
  * - the input may not end with an open entity.
  *
  * Every render, truncation and chunk piece must pass here.
@@ -81,6 +85,8 @@ internal fun assertTelegramParseable(
                 top == Kind.TEXTURL -> c == ']'
                 top == Kind.UNDERLINE -> c == '_' && at(index + 1) == '_'
                 top == Kind.STRIKE -> c == '~'
+                top == Kind.SPOILER -> c == '|' && at(index + 1) == '|'
+                top == Kind.CUSTOM_EMOJI -> c == ']'
                 else -> false // BLOCKQUOTE never ends at its own marker
             }
         if (isEnd) {
@@ -92,11 +98,15 @@ internal fun assertTelegramParseable(
                     index++
                 }
 
+                Kind.SPOILER -> {
+                    index++
+                }
+
                 Kind.PRE -> {
                     index += 2
                 }
 
-                Kind.TEXTURL -> {
+                Kind.TEXTURL, Kind.CUSTOM_EMOJI -> {
                     if (at(index + 1) == '(') {
                         var j = index + 2
                         while (j < output.length && output[j] != ')') {
@@ -145,6 +155,28 @@ internal fun assertTelegramParseable(
             '[' -> {
                 stack.addLast(Kind.TEXTURL)
                 index++
+            }
+
+            '!' -> {
+                if (at(index + 1) == '[') {
+                    stack.addLast(Kind.CUSTOM_EMOJI)
+                    index += 2
+                } else {
+                    throw AssertionError(
+                        "Character '!' is reserved and must be escaped ($context): $output",
+                    )
+                }
+            }
+
+            '|' -> {
+                if (at(index + 1) == '|') {
+                    stack.addLast(Kind.SPOILER)
+                    index += 2
+                } else {
+                    throw AssertionError(
+                        "Character '|' is reserved and must be escaped ($context): $output",
+                    )
+                }
             }
 
             '`' -> {
@@ -429,6 +461,24 @@ internal fun assertEntitiesValid(
             val bContainsA = b.offset <= a.offset && aEnd <= bEnd
             if (overlaps && !aContainsB && !bContainsA) {
                 fail("crossing ranges: $a vs $b")
+            }
+        }
+    }
+
+    // Close order — the documented EntityText contract: a range strictly containing a
+    // later one is the container, so it must come AFTER its nested ranges, never before.
+    // Identical ranges (the nested-quote deviation) contain each other non-strictly and
+    // pass in either order
+    for (i in piece.entities.indices) {
+        for (j in i + 1 until piece.entities.size) {
+            val a = piece.entities[i]
+            val b = piece.entities[j]
+            val aEnd = a.offset + a.length
+            val bEnd = b.offset + b.length
+            val aStrictlyContainsB =
+                a.offset <= b.offset && bEnd <= aEnd && (a.offset < b.offset || aEnd > bEnd)
+            if (aStrictlyContainsB) {
+                fail("close order violated: $a (at $i) strictly contains later $b (at $j)")
             }
         }
     }

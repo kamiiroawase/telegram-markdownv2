@@ -64,8 +64,10 @@ private class OpenRange(
  *
  * Unclosed ranges complete at the nearest container boundary (an emphasis, strikethrough
  * or link/image label that closes over them) or at output time, latest-opened first, so
- * ranges always nest by containment. Code-family ranges force-close before a PRE block,
- * the same containment discipline the HTML visitor enforces.
+ * ranges always nest by containment. Code-family ranges force-close at every block start
+ * (a code entity may contain no other entities), and text_link ranges force-close before
+ * PRE blocks too (a pre entity may not sit inside a link entity) — the same containment
+ * discipline the HTML visitor enforces.
  */
 internal class EntityVisitor(
     private val depth: Int = 0,
@@ -164,6 +166,10 @@ internal class EntityVisitor(
     }
 
     override fun visit(paragraph: Paragraph) {
+        // A code range opened in an earlier block cannot span this one: Telegram rejects
+        // code entities containing other entities, and any range this paragraph opens
+        // would sit inside it (see completeOpenCodeRanges)
+        completeOpenCodeRanges()
         val start = sb.length
         visitChildren(paragraph)
         // A paragraph that rendered no visible text is no-content: the region rewinds
@@ -194,6 +200,7 @@ internal class EntityVisitor(
     // No heading entity exists in any output mode: the level spells out as literal
     // hashes, the same trade the string formats make
     override fun visit(heading: Heading) {
+        completeOpenCodeRanges()
         sb.append(plainHeadingPrefixOf(heading))
         visitChildren(heading)
         sb.append("\n\n")
@@ -211,6 +218,9 @@ internal class EntityVisitor(
     // and deduplicating across the visitor and the truncation/chunking re-assembly
     // paths would trade that cosmetic overlap for three divergent code paths
     override fun visit(blockQuote: BlockQuote) {
+        // A code range from an earlier block completes first — a blockquote range inside
+        // a code range is the nesting Telegram rejects
+        completeOpenCodeRanges()
         val start = sb.length
         var appended = false
         var child = blockQuote.firstChild
@@ -240,6 +250,7 @@ internal class EntityVisitor(
 
     // No thematic break entity exists; em dashes carry no special meaning in plain text
     override fun visit(thematicBreak: ThematicBreak) {
+        completeOpenCodeRanges()
         sb.append("———\n\n")
     }
 
@@ -247,7 +258,7 @@ internal class EntityVisitor(
         val language =
             htmlLanguageOf(fencedCodeBlock)
                 .ifEmpty { null }
-        completeOpenCodeRanges()
+        completeOpenCodeAndLinkRanges()
         val start = sb.length
         sb.append(fencedCodeBlock.literal.orEmpty().trimEnd('\n'))
         val length = sb.length - start
@@ -258,7 +269,7 @@ internal class EntityVisitor(
     }
 
     override fun visit(indentedCodeBlock: IndentedCodeBlock) {
-        completeOpenCodeRanges()
+        completeOpenCodeAndLinkRanges()
         val start = sb.length
         sb.append(indentedCodeBlock.literal.trimEnd('\n'))
         val length = sb.length - start
@@ -378,14 +389,30 @@ internal class EntityVisitor(
         }
     }
 
-    // Completes every open code range (and everything opened inside it) before a PRE
-    // block renders: left open, the code range would span the pre text — a nesting
-    // Telegram rejects. Other ranges may span block boundaries (the containment both
-    // string formats ship for emphasis), so only the code family force-closes here
+    // Completes every open code range (and everything opened inside it) before a block
+    // renders its own structure: left open, the code range would span the block's
+    // entities — a nesting Telegram rejects ("Pre and Code can't contain nested
+    // entities"). Other ranges may span block boundaries (the containment both string
+    // formats ship for emphasis), so only the code family force-closes here
     private fun completeOpenCodeRanges() {
         val outermostCode =
             openRanges.firstOrNull { it.type == MessageEntityType.CODE } ?: return
         completeOpenedAfter(outermostCode.seq - 1)
+    }
+
+    // The PRE-emitting twin of [completeOpenCodeRanges]: completes code and text_link
+    // ranges alike (everything opened inside the earliest of them) before a PRE block
+    // renders — a pre entity may not sit inside a link entity ("Cannot be nested inside
+    // other entities"), and a Markdown link never spans blocks, so an unclosed HTML
+    // anchor must not reach across one either. Formatting ranges keep the documented
+    // complete-at-output behavior (the pinned bold-over-pre containment)
+    private fun completeOpenCodeAndLinkRanges() {
+        val boundary =
+            openRanges
+                .filter { it.type == MessageEntityType.CODE || it.type == MessageEntityType.TEXT_LINK }
+                .minOfOrNull { it.seq }
+                ?: return
+        completeOpenedAfter(boundary - 1)
     }
 
     override fun visit(customBlock: CustomBlock) {
@@ -397,7 +424,10 @@ internal class EntityVisitor(
             is FootnoteDefinition -> {
                 // The definition keeps its place in the document (Telegram message text
                 // is linear): label spelled back out, content rendered as the blocks it
-                // wraps — the same visible shape the unextended parse shows
+                // wraps — the same visible shape the unextended parse shows. A code
+                // range from an earlier block completes first — the label and the
+                // definition's blocks must not sit inside it
+                completeOpenCodeRanges()
                 sb.append("[^${customBlock.label}]: ")
                 visitChildren(customBlock)
             }
@@ -414,7 +444,7 @@ internal class EntityVisitor(
             return
         }
 
-        completeOpenCodeRanges()
+        completeOpenCodeAndLinkRanges()
         val start = sb.length
         sb.append(lines.joinToString("\n"))
         entities += MessageEntity(MessageEntityType.PRE, start, sb.length - start)
@@ -448,9 +478,28 @@ internal class EntityVisitor(
 
     // Telegram message text has no images in any mode: degrade to a plain link on the
     // alt text; an alt that renders to nothing degrades to the bare URL (see
-    // visit(link)). Nested inside another link only the alt text survives
+    // visit(link)). Nested inside another link only the alt text survives. The one
+    // carve-out is the Bot API's own custom emoji spelling — an image whose destination
+    // reads tg://emoji?id=… — which renders as a custom_emoji range, the same entity the
+    // tg-emoji tag path emits (see renderEmojiTag); the guards match it: inside a link or
+    // a code range the image takes the ordinary degradation
     override fun visit(image: Image) {
         val destination = image.destination.orEmpty()
+        if (destination.isNotEmpty() && !linkEntityOpen() && codeDepth == 0) {
+            val emojiId = tgEmojiUrlIdOf(destination)
+            if (emojiId != null) {
+                val entrySeq = nextSeq++
+                openRanges.addLast(
+                    OpenRange(MessageEntityType.CUSTOM_EMOJI, sb.length, "", null, emojiId, entrySeq, html = false),
+                )
+                visitChildren(image)
+                // A fallback that rendered no text closes into a zero-length entity,
+                // which drops — Telegram requires the fallback (see closeRange)
+                completeOpenedAfter(entrySeq)
+                closeRange(openRanges.removeLast())
+                return
+            }
+        }
         // See visit(link): empty URL, nesting and open code ranges all degrade to the
         // alt text alone
         if (destination.isEmpty() || linkEntityOpen() || codeDepth > 0) {
@@ -486,7 +535,7 @@ internal class EntityVisitor(
 
         // Block-level input HTML cannot pass through in any mode: it degrades to its
         // source text in a pre range — the same trade tables make
-        completeOpenCodeRanges()
+        completeOpenCodeAndLinkRanges()
         val start = sb.length
         sb.append(literal)
         entities += MessageEntity(MessageEntityType.PRE, start, sb.length - start)
@@ -734,9 +783,11 @@ internal class EntityVisitor(
 
     // Continuation lines are indented to the marker width via applyEntityPrefix (the
     // offset-shifting twin of applyPrefix, shared with the truncation and chunking
-    // pipelines). A blank-bodied item is no-content and skips, its marker consumed —
-    // the same walk forEachEntityListItem makes
+    // pipelines). A blank-bodied item is no-content and skips, its marker consumed — the
+    // same walk forEachEntityListItem makes. A code range from an earlier block completes
+    // first — a blockquote or pre range inside an item would sit inside it
     private fun renderList(list: Node) {
+        completeOpenCodeRanges()
         val start = sb.length
         val marker = plainListMarkerOf(list)
         var item = list.firstChild
