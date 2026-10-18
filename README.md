@@ -4,7 +4,7 @@
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.kamiiroawase/telegram-markdownv2.svg)](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
-Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转换为 Telegram MarkdownV2 或 HTML**，并对超长内容做保持结构完整的截断或无损分片（Telegram 消息上限 4096 字符，分片按序发送即可完整送达——文本不丢字符，接缝处实体按段闭合）。为 LLM 机器人输出而生——模型回复是任意长度、任意结构的 Markdown，还经常带 Telegram 渲染不了的构造。
+Kotlin Multiplatform 库：把 **CommonMark（含 GFM 表格与删除线）转换为 Telegram MarkdownV2、HTML 或 entities 协议**，并对超长内容做保持结构完整的截断或无损分片（Telegram 消息上限 4096 字符，分片按序发送即可完整送达——文本不丢字符，接缝处实体按段闭合）。为 LLM 机器人输出而生——模型回复是任意长度、任意结构的 Markdown，还经常带 Telegram 渲染不了的构造。
 
 [English version](README.en.md)
 
@@ -26,6 +26,7 @@ dependencies {
 ```kotlin
 import io.github.kamiiroawase.markdownv2.MarkdownV2
 import io.github.kamiiroawase.markdownv2.TelegramHtml
+import io.github.kamiiroawase.markdownv2.TelegramEntities
 
 // parse_mode = MarkdownV2
 val text = MarkdownV2.render("**hello** world")                        // 直接发送
@@ -34,10 +35,15 @@ val parts = MarkdownV2.renderChunked(reply)                            // 无损
 val literal = MarkdownV2.escape(userInput)                             // 手动拼 MarkdownV2 时转义动态文本
 val fallback = MarkdownV2.toPlainText(rejectedPart)                    // 被拒收时还原纯文本、不带 parse_mode 重发
 
-// parse_mode = HTML —— 两个入口共享解析器、RenderOptions 与截断/分片语义
+// parse_mode = HTML —— 三个入口共享解析器、RenderOptions 与截断/分片语义
 val html = TelegramHtml.render("**hello** <tg-spoiler>world</tg-spoiler>")   // tg-spoiler、tg-emoji 原样透传
 val htmlParts = TelegramHtml.renderChunked(reply)                            // 同样无损分片，每段独立合法 HTML
 val htmlLiteral = TelegramHtml.escape(userInput)                             // 转义 & < >（属性值另转义 "）
+
+// 不带 parse_mode —— entities 协议：纯文本 + 格式化区间，从根上消灭 400
+val message = TelegramEntities.render(reply)          // EntityText(text = 纯显示文本, entities = 区间列表)
+sendMessage(text = message.text, entities = message.entitiesJson())
+val messageParts = TelegramEntities.renderChunked(reply)   // 同样无损分片，每段实体的偏移按段重基准
 ```
 
 - 官方 18 个特殊字符加反斜杠共 19 个全量转义；行内代码 / 代码块 / 链接 URL 按各自规则转义
@@ -51,6 +57,14 @@ val htmlLiteral = TelegramHtml.escape(userInput)                             // 
 - 引用是 `<blockquote>` 包装标签而非行首 `>` 前缀，因此**列表项内的引用保留引用格式**（MarkdownV2 端只能降级）；全空的引用不输出（MarkdownV2 端保留一个裸 `>` 标记）
 - 行内输入 HTML 中的 `<tg-spoiler>` 与带数字 `emoji-id` 的 `<tg-emoji>` 原样透传——MarkdownV2 表达不了的构造；代码围栏带语言时映射为 `<pre><code class="language-x">`（Telegram 据此做语法高亮）
 - 分片的下限是 5 字符（一个转义单元 `&amp;` 的长度，对应 `TelegramHtml.MIN_CHUNK_LENGTH`）；低于它返回完整渲染单片
+
+### entities 端的差异
+
+- 文本就是 Telegram 显示的原文，没有任何转义规则——"400 can't parse entities" 这一类失败不存在，纯文本兜底不再需要
+- 格式走区间而非标记：引用是 blockquote 区间（列表项内照样保留），`<tg-spoiler>`/`<tg-emoji>` 映射为原生 spoiler/custom_emoji 实体，带语言的代码块映射为带 `language` 的 pre 实体
+- 偏移按 Bot API 规则使用 UTF-16 码元——Kotlin 字符串本身就是，`EntityText` 可直接进 `sendMessage(text, entities)`；`entitiesJson()` 输出请求体格式的 JSON 数组（手写序列化，不引依赖）
+- 截断时区间钳制到幸存文本（跨界区间缩短、界外区间丢弃）；分片时结构化格式逐段重建（拆开的引用每段带自己的 blockquote 区间），跨缝的内联区间只留在持有其起点的段里——与两个字符串格式的接缝闭合纪律一致
+- 分片的下限是 2 字符（一个代理对，对应 `TelegramEntities.MIN_CHUNK_LENGTH`）
 
 ## 已知限制
 
@@ -71,7 +85,7 @@ cd telegram-markdownv2
 ./gradlew benchmark    # 性能基准：常规消息 ~0.1ms 量级，百万字符 ~10ms；发版时 CI 复跑输出附在 GitHub Release
 ```
 
-430 个行为级测试（输入/输出断言），全部平台运行；其中 HTML 端的每条输出还过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
+513 个行为级测试（输入/输出断言），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
 
 ## 许可
 

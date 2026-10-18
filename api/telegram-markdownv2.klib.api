@@ -6,6 +6,77 @@
 // - Show declarations: true
 
 // Library unique name: <io.github.kamiiroawase:telegram-markdownv2>
+final enum class io.github.kamiiroawase.markdownv2/MessageEntityType : kotlin/Enum<io.github.kamiiroawase.markdownv2/MessageEntityType> { // io.github.kamiiroawase.markdownv2/MessageEntityType|null[0]
+    enum entry BLOCKQUOTE // io.github.kamiiroawase.markdownv2/MessageEntityType.BLOCKQUOTE|null[0]
+    enum entry BOLD // io.github.kamiiroawase.markdownv2/MessageEntityType.BOLD|null[0]
+    enum entry CODE // io.github.kamiiroawase.markdownv2/MessageEntityType.CODE|null[0]
+    enum entry CUSTOM_EMOJI // io.github.kamiiroawase.markdownv2/MessageEntityType.CUSTOM_EMOJI|null[0]
+    enum entry ITALIC // io.github.kamiiroawase.markdownv2/MessageEntityType.ITALIC|null[0]
+    enum entry PRE // io.github.kamiiroawase.markdownv2/MessageEntityType.PRE|null[0]
+    enum entry SPOILER // io.github.kamiiroawase.markdownv2/MessageEntityType.SPOILER|null[0]
+    enum entry STRIKETHROUGH // io.github.kamiiroawase.markdownv2/MessageEntityType.STRIKETHROUGH|null[0]
+    enum entry TEXT_LINK // io.github.kamiiroawase.markdownv2/MessageEntityType.TEXT_LINK|null[0]
+    enum entry UNDERLINE // io.github.kamiiroawase.markdownv2/MessageEntityType.UNDERLINE|null[0]
+
+    final val entries // io.github.kamiiroawase.markdownv2/MessageEntityType.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kamiiroawase.markdownv2/MessageEntityType> // io.github.kamiiroawase.markdownv2/MessageEntityType.entries.<get-entries>|<get-entries>#static(){}[0]
+    final val wireName // io.github.kamiiroawase.markdownv2/MessageEntityType.wireName|{}wireName[0]
+        final fun <get-wireName>(): kotlin/String // io.github.kamiiroawase.markdownv2/MessageEntityType.wireName.<get-wireName>|<get-wireName>(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kamiiroawase.markdownv2/MessageEntityType // io.github.kamiiroawase.markdownv2/MessageEntityType.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kamiiroawase.markdownv2/MessageEntityType> // io.github.kamiiroawase.markdownv2/MessageEntityType.values|values#static(){}[0]
+}
+
+final class io.github.kamiiroawase.markdownv2/EntityText { // io.github.kamiiroawase.markdownv2/EntityText|null[0]
+    constructor <init>(kotlin/String, kotlin.collections/List<io.github.kamiiroawase.markdownv2/MessageEntity>) // io.github.kamiiroawase.markdownv2/EntityText.<init>|<init>(kotlin.String;kotlin.collections.List<io.github.kamiiroawase.markdownv2.MessageEntity>){}[0]
+
+    final val entities // io.github.kamiiroawase.markdownv2/EntityText.entities|{}entities[0]
+        final fun <get-entities>(): kotlin.collections/List<io.github.kamiiroawase.markdownv2/MessageEntity> // io.github.kamiiroawase.markdownv2/EntityText.entities.<get-entities>|<get-entities>(){}[0]
+    final val text // io.github.kamiiroawase.markdownv2/EntityText.text|{}text[0]
+        final fun <get-text>(): kotlin/String // io.github.kamiiroawase.markdownv2/EntityText.text.<get-text>|<get-text>(){}[0]
+
+    final fun component1(): kotlin/String // io.github.kamiiroawase.markdownv2/EntityText.component1|component1(){}[0]
+    final fun component2(): kotlin.collections/List<io.github.kamiiroawase.markdownv2/MessageEntity> // io.github.kamiiroawase.markdownv2/EntityText.component2|component2(){}[0]
+    final fun copy(kotlin/String = ..., kotlin.collections/List<io.github.kamiiroawase.markdownv2/MessageEntity> = ...): io.github.kamiiroawase.markdownv2/EntityText // io.github.kamiiroawase.markdownv2/EntityText.copy|copy(kotlin.String;kotlin.collections.List<io.github.kamiiroawase.markdownv2.MessageEntity>){}[0]
+    final fun entitiesJson(): kotlin/String // io.github.kamiiroawase.markdownv2/EntityText.entitiesJson|entitiesJson(){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kamiiroawase.markdownv2/EntityText.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kamiiroawase.markdownv2/EntityText.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kamiiroawase.markdownv2/EntityText.toString|toString(){}[0]
+
+    final object Companion { // io.github.kamiiroawase.markdownv2/EntityText.Companion|null[0]
+        final val EMPTY // io.github.kamiiroawase.markdownv2/EntityText.Companion.EMPTY|{}EMPTY[0]
+            final fun <get-EMPTY>(): io.github.kamiiroawase.markdownv2/EntityText // io.github.kamiiroawase.markdownv2/EntityText.Companion.EMPTY.<get-EMPTY>|<get-EMPTY>(){}[0]
+    }
+}
+
+final class io.github.kamiiroawase.markdownv2/MessageEntity { // io.github.kamiiroawase.markdownv2/MessageEntity|null[0]
+    constructor <init>(io.github.kamiiroawase.markdownv2/MessageEntityType, kotlin/Int, kotlin/Int, kotlin/String? = ..., kotlin/String? = ..., kotlin/String? = ...) // io.github.kamiiroawase.markdownv2/MessageEntity.<init>|<init>(io.github.kamiiroawase.markdownv2.MessageEntityType;kotlin.Int;kotlin.Int;kotlin.String?;kotlin.String?;kotlin.String?){}[0]
+
+    final val customEmojiId // io.github.kamiiroawase.markdownv2/MessageEntity.customEmojiId|{}customEmojiId[0]
+        final fun <get-customEmojiId>(): kotlin/String? // io.github.kamiiroawase.markdownv2/MessageEntity.customEmojiId.<get-customEmojiId>|<get-customEmojiId>(){}[0]
+    final val language // io.github.kamiiroawase.markdownv2/MessageEntity.language|{}language[0]
+        final fun <get-language>(): kotlin/String? // io.github.kamiiroawase.markdownv2/MessageEntity.language.<get-language>|<get-language>(){}[0]
+    final val length // io.github.kamiiroawase.markdownv2/MessageEntity.length|{}length[0]
+        final fun <get-length>(): kotlin/Int // io.github.kamiiroawase.markdownv2/MessageEntity.length.<get-length>|<get-length>(){}[0]
+    final val offset // io.github.kamiiroawase.markdownv2/MessageEntity.offset|{}offset[0]
+        final fun <get-offset>(): kotlin/Int // io.github.kamiiroawase.markdownv2/MessageEntity.offset.<get-offset>|<get-offset>(){}[0]
+    final val type // io.github.kamiiroawase.markdownv2/MessageEntity.type|{}type[0]
+        final fun <get-type>(): io.github.kamiiroawase.markdownv2/MessageEntityType // io.github.kamiiroawase.markdownv2/MessageEntity.type.<get-type>|<get-type>(){}[0]
+    final val url // io.github.kamiiroawase.markdownv2/MessageEntity.url|{}url[0]
+        final fun <get-url>(): kotlin/String? // io.github.kamiiroawase.markdownv2/MessageEntity.url.<get-url>|<get-url>(){}[0]
+
+    final fun component1(): io.github.kamiiroawase.markdownv2/MessageEntityType // io.github.kamiiroawase.markdownv2/MessageEntity.component1|component1(){}[0]
+    final fun component2(): kotlin/Int // io.github.kamiiroawase.markdownv2/MessageEntity.component2|component2(){}[0]
+    final fun component3(): kotlin/Int // io.github.kamiiroawase.markdownv2/MessageEntity.component3|component3(){}[0]
+    final fun component4(): kotlin/String? // io.github.kamiiroawase.markdownv2/MessageEntity.component4|component4(){}[0]
+    final fun component5(): kotlin/String? // io.github.kamiiroawase.markdownv2/MessageEntity.component5|component5(){}[0]
+    final fun component6(): kotlin/String? // io.github.kamiiroawase.markdownv2/MessageEntity.component6|component6(){}[0]
+    final fun copy(io.github.kamiiroawase.markdownv2/MessageEntityType = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/String? = ..., kotlin/String? = ..., kotlin/String? = ...): io.github.kamiiroawase.markdownv2/MessageEntity // io.github.kamiiroawase.markdownv2/MessageEntity.copy|copy(io.github.kamiiroawase.markdownv2.MessageEntityType;kotlin.Int;kotlin.Int;kotlin.String?;kotlin.String?;kotlin.String?){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kamiiroawase.markdownv2/MessageEntity.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kamiiroawase.markdownv2/MessageEntity.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kamiiroawase.markdownv2/MessageEntity.toString|toString(){}[0]
+}
+
 final class io.github.kamiiroawase.markdownv2/RenderOptions { // io.github.kamiiroawase.markdownv2/RenderOptions|null[0]
     constructor <init>(kotlin/Int = ..., kotlin/Function1<kotlin/Int, kotlin/Int> = ...) // io.github.kamiiroawase.markdownv2/RenderOptions.<init>|<init>(kotlin.Int;kotlin.Function1<kotlin.Int,kotlin.Int>){}[0]
 
@@ -42,6 +113,16 @@ final object io.github.kamiiroawase.markdownv2/MarkdownV2 { // io.github.kamiiro
     final fun renderChunked(kotlin/String, kotlin/Int = ..., org.commonmark.parser/Parser = ..., io.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin.collections/List<kotlin/String> // io.github.kamiiroawase.markdownv2/MarkdownV2.renderChunked|renderChunked(kotlin.String;kotlin.Int;org.commonmark.parser.Parser;io.github.kamiiroawase.markdownv2.RenderOptions){}[0]
     final fun renderChunked(org.commonmark.node/Node, kotlin/Int = ..., io.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin.collections/List<kotlin/String> // io.github.kamiiroawase.markdownv2/MarkdownV2.renderChunked|renderChunked(org.commonmark.node.Node;kotlin.Int;io.github.kamiiroawase.markdownv2.RenderOptions){}[0]
     final fun toPlainText(kotlin/String): kotlin/String // io.github.kamiiroawase.markdownv2/MarkdownV2.toPlainText|toPlainText(kotlin.String){}[0]
+}
+
+final object io.github.kamiiroawase.markdownv2/TelegramEntities { // io.github.kamiiroawase.markdownv2/TelegramEntities|null[0]
+    final const val MIN_CHUNK_LENGTH // io.github.kamiiroawase.markdownv2/TelegramEntities.MIN_CHUNK_LENGTH|{}MIN_CHUNK_LENGTH[0]
+        final fun <get-MIN_CHUNK_LENGTH>(): kotlin/Int // io.github.kamiiroawase.markdownv2/TelegramEntities.MIN_CHUNK_LENGTH.<get-MIN_CHUNK_LENGTH>|<get-MIN_CHUNK_LENGTH>(){}[0]
+
+    final fun render(kotlin/String, kotlin/Int = ..., org.commonmark.parser/Parser = ..., io.github.kamiiroawase.markdownv2/RenderOptions = ...): io.github.kamiiroawase.markdownv2/EntityText // io.github.kamiiroawase.markdownv2/TelegramEntities.render|render(kotlin.String;kotlin.Int;org.commonmark.parser.Parser;io.github.kamiiroawase.markdownv2.RenderOptions){}[0]
+    final fun render(org.commonmark.node/Node, kotlin/Int = ..., io.github.kamiiroawase.markdownv2/RenderOptions = ...): io.github.kamiiroawase.markdownv2/EntityText // io.github.kamiiroawase.markdownv2/TelegramEntities.render|render(org.commonmark.node.Node;kotlin.Int;io.github.kamiiroawase.markdownv2.RenderOptions){}[0]
+    final fun renderChunked(kotlin/String, kotlin/Int = ..., org.commonmark.parser/Parser = ..., io.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin.collections/List<io.github.kamiiroawase.markdownv2/EntityText> // io.github.kamiiroawase.markdownv2/TelegramEntities.renderChunked|renderChunked(kotlin.String;kotlin.Int;org.commonmark.parser.Parser;io.github.kamiiroawase.markdownv2.RenderOptions){}[0]
+    final fun renderChunked(org.commonmark.node/Node, kotlin/Int = ..., io.github.kamiiroawase.markdownv2/RenderOptions = ...): kotlin.collections/List<io.github.kamiiroawase.markdownv2/EntityText> // io.github.kamiiroawase.markdownv2/TelegramEntities.renderChunked|renderChunked(org.commonmark.node.Node;kotlin.Int;io.github.kamiiroawase.markdownv2.RenderOptions){}[0]
 }
 
 final object io.github.kamiiroawase.markdownv2/TelegramHtml { // io.github.kamiiroawase.markdownv2/TelegramHtml|null[0]

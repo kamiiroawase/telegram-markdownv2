@@ -1,0 +1,655 @@
+package io.github.kamiiroawase.markdownv2
+
+import org.commonmark.ext.gfm.strikethrough.Strikethrough
+import org.commonmark.ext.gfm.tables.TableBlock
+import org.commonmark.node.AbstractVisitor
+import org.commonmark.node.BlockQuote
+import org.commonmark.node.BulletList
+import org.commonmark.node.Code
+import org.commonmark.node.CustomBlock
+import org.commonmark.node.CustomNode
+import org.commonmark.node.Document
+import org.commonmark.node.Emphasis
+import org.commonmark.node.FencedCodeBlock
+import org.commonmark.node.HardLineBreak
+import org.commonmark.node.Heading
+import org.commonmark.node.HtmlBlock
+import org.commonmark.node.HtmlInline
+import org.commonmark.node.Image
+import org.commonmark.node.IndentedCodeBlock
+import org.commonmark.node.Link
+import org.commonmark.node.ListItem
+import org.commonmark.node.Node
+import org.commonmark.node.OrderedList
+import org.commonmark.node.Paragraph
+import org.commonmark.node.SoftLineBreak
+import org.commonmark.node.StrongEmphasis
+import org.commonmark.node.Text
+import org.commonmark.node.ThematicBreak
+
+// One entry per open formatting range — Markdown emphasis (this visitor's own visits),
+// HTML tags, links and block quotes alike: every range records where its text starts,
+// and closing turns it into a MessageEntity computed against the live length. A range
+// whose content stays empty closes into nothing (Telegram drops zero-length entities,
+// the same trade the HTML render's empty-pair rewind makes)
+private class OpenRange(
+    val type: MessageEntityType,
+    val start: Int,
+    // TEXT_LINK only: the URL, "" for a href-less anchor (no entity on close), or the
+    // NESTED_LITERAL_ANCHOR sentinel while an outer link is open (tag text goes literal)
+    val url: String,
+    // PRE only
+    val language: String?,
+    // CUSTOM_EMOJI only
+    val customEmojiId: String?,
+    val seq: Int,
+    // Pushed by an input HTML tag rather than by this visitor's own visits — only
+    // html-owned entries may be matched and popped by a closing tag
+    val html: Boolean,
+    // A code-family tag nested inside an open code range: no entity, no depth of its own
+    val merged: Boolean = false,
+)
+
+/**
+ * Renders the full AST to the entities protocol: plain display text plus formatting
+ * ranges over it. The text carries no markup and needs no escaping — the whole class of
+ * parse failures the string formats defend against cannot arise — so this visitor only
+ * does bookkeeping: append text, track range starts, compute lengths on close.
+ *
+ * Unclosed ranges complete at the nearest container boundary (an emphasis, strikethrough
+ * or link/image label that closes over them) or at output time, latest-opened first, so
+ * ranges always nest by containment. Code-family ranges force-close before a PRE block,
+ * the same containment discipline the HTML visitor enforces.
+ */
+internal class EntityVisitor(
+    private val depth: Int = 0,
+    private val options: RenderOptions = RenderOptions(),
+) : AbstractVisitor() {
+    private val sb = StringBuilder()
+
+    // Closed ranges, in close order (nested ranges before their containers)
+    private val entities = mutableListOf<MessageEntity>()
+
+    private val openRanges = ArrayDeque<OpenRange>()
+
+    private var nextSeq = 0
+
+    // Depth of open Markdown link entities (Link and Image both render as text_link);
+    // HTML anchors are tracked in [openRanges]. Telegram links cannot nest, so while any
+    // link entity is open, link-like constructs degrade (see visit(link), visit(image)
+    // and renderAnchorTag)
+    private var openMarkdownLinks = 0
+
+    // Nesting depth of open code ranges: keeps Markdown code spans and code-family HTML
+    // tags from nesting a second code level inside the first (nested code renders
+    // exactly as single code)
+    private var codeDepth = 0
+
+    // Nesting depth of inline emphasis (emphasis recurses within the same visitor; deep
+    // nesting flattens)
+    private var inlineDepth = 0
+
+    /**
+     * Returns the rendered text with entities, completing any unclosed ranges
+     * latest-opened first. A range completed here may have covered the trailing block
+     * separator (the MarkdownV2/HTML twins trim before appending closers; ranges have
+     * no closer text), so entities clamp to the trimmed length.
+     */
+    fun output(): EntityText {
+        while (openRanges.isNotEmpty()) {
+            closeRange(openRanges.removeLast())
+        }
+        val text = sb.toString().trim()
+        return EntityText(text, entities.toList().clampedTo(text.length))
+    }
+
+    // Turns the range into its entity, measured against the live length. A zero-length
+    // range drops: Telegram ignores-or-rejects empty entities, and an empty range
+    // formats nothing. A href-less anchor (the empty url) and a nested sentinel close
+    // silently; a real anchor whose label stayed blank rewinds and degrades to the bare
+    // URL text. Every code-typed range owns a codeDepth unit (merged ones included, see
+    // renderHtmlInlineTag); closing gives it back
+    private fun closeRange(range: OpenRange) {
+        if (range.type == MessageEntityType.CODE) codeDepth--
+        when {
+            range.merged -> {}
+
+            range.type == MessageEntityType.TEXT_LINK && range.url.isEmpty() -> {}
+
+            range.type == MessageEntityType.TEXT_LINK && range.url == NESTED_LITERAL_ANCHOR -> {}
+
+            range.type == MessageEntityType.TEXT_LINK && regionIsBlank(range.start) -> {
+                // A blank label means nothing was emitted after the range opened —
+                // anything opened inside would have emitted text — so this range is the
+                // latest open entry and rewinding discards only whitespace
+                sb.setLength(range.start)
+                sb.append(range.url)
+            }
+
+            else -> {
+                val length = sb.length - range.start
+                if (length > 0) {
+                    entities +=
+                        MessageEntity(
+                            range.type,
+                            range.start,
+                            length,
+                            range.url.takeIf { range.type == MessageEntityType.TEXT_LINK },
+                            range.language,
+                            range.customEmojiId,
+                        )
+                }
+            }
+        }
+    }
+
+    override fun visit(text: Text) {
+        sb.append(text.literal)
+    }
+
+    override fun visit(document: Document) {
+        visitChildren(document)
+    }
+
+    override fun visit(paragraph: Paragraph) {
+        val start = sb.length
+        visitChildren(paragraph)
+        // A paragraph that rendered no visible text is no-content: the region rewinds
+        // and no separator follows — the same blank-render skip every pipeline makes
+        if (regionIsBlank(start)) {
+            sb.setLength(start)
+        } else {
+            sb.append("\n\n")
+        }
+    }
+
+    // No heading entity exists in any output mode: the level spells out as literal
+    // hashes, the same trade the string formats make
+    override fun visit(heading: Heading) {
+        sb.append(plainHeadingPrefixOf(heading))
+        visitChildren(heading)
+        sb.append("\n\n")
+    }
+
+    // A quote is one blockquote range over its children's text — no line-prefix
+    // grammar, no wrapper tags, so quotes inside list items keep their formatting (the
+    // MarkdownV2 render must degrade them there). An all-blank quote renders nothing:
+    // an empty range is no quote at all
+    override fun visit(blockQuote: BlockQuote) {
+        val start = sb.length
+        var appended = false
+        var child = blockQuote.firstChild
+        while (child != null) {
+            val rendered = renderQuoteChild(child)
+            if (rendered.text.isNotBlank()) {
+                appendEntityText(sb, entities, if (appended) "\n\n" else "", rendered)
+                appended = true
+            }
+            child = child.next
+        }
+        if (!appended) return
+        val length = sb.length - start
+        if (length > 0) {
+            entities += MessageEntity(MessageEntityType.BLOCKQUOTE, start, length)
+        }
+        sb.append("\n\n")
+    }
+
+    override fun visit(bulletList: BulletList) {
+        renderList(bulletList)
+    }
+
+    override fun visit(orderedList: OrderedList) {
+        renderList(orderedList)
+    }
+
+    // No thematic break entity exists; em dashes carry no special meaning in plain text
+    override fun visit(thematicBreak: ThematicBreak) {
+        sb.append("———\n\n")
+    }
+
+    override fun visit(fencedCodeBlock: FencedCodeBlock) {
+        val language =
+            htmlLanguageOf(fencedCodeBlock)
+                .ifEmpty { null }
+        completeOpenCodeRanges()
+        val start = sb.length
+        sb.append(fencedCodeBlock.literal.orEmpty().trimEnd('\n'))
+        val length = sb.length - start
+        if (length > 0) {
+            entities += MessageEntity(MessageEntityType.PRE, start, length, language = language)
+        }
+        sb.append("\n\n")
+    }
+
+    override fun visit(indentedCodeBlock: IndentedCodeBlock) {
+        completeOpenCodeRanges()
+        val start = sb.length
+        sb.append(indentedCodeBlock.literal.trimEnd('\n'))
+        val length = sb.length - start
+        if (length > 0) {
+            entities += MessageEntity(MessageEntityType.PRE, start, length)
+        }
+        sb.append("\n\n")
+    }
+
+    override fun visit(code: Code) {
+        if (code.literal.isEmpty()) {
+            // An empty span would be an empty entity; the parser never produces one,
+            // this covers hand-built ASTs
+            return
+        }
+        if (codeDepth > 0) {
+            // Inside an open code range the span's own entity would nest a second code
+            // level; keep the backticks as visible text instead — exactly how both
+            // string formats render the shape
+            sb.append('`').append(code.literal).append('`')
+        } else {
+            val start = sb.length
+            sb.append(code.literal)
+            entities += MessageEntity(MessageEntityType.CODE, start, sb.length - start)
+        }
+    }
+
+    override fun visit(emphasis: Emphasis) {
+        if (!enterInline()) {
+            appendPlainText(sb, emphasis)
+            return
+        }
+        val seq = nextSeq++
+        openRanges.addLast(OpenRange(MessageEntityType.ITALIC, sb.length, "", null, null, seq, html = false))
+        visitChildren(emphasis)
+        completeOpenedAfter(seq)
+        closeRange(openRanges.removeLast())
+        exitInline()
+    }
+
+    override fun visit(strongEmphasis: StrongEmphasis) {
+        if (!enterInline()) {
+            appendPlainText(sb, strongEmphasis)
+            return
+        }
+        val seq = nextSeq++
+        openRanges.addLast(OpenRange(MessageEntityType.BOLD, sb.length, "", null, null, seq, html = false))
+        visitChildren(strongEmphasis)
+        completeOpenedAfter(seq)
+        closeRange(openRanges.removeLast())
+        exitInline()
+    }
+
+    override fun visit(customNode: CustomNode) {
+        when (customNode) {
+            is Strikethrough -> {
+                if (!enterInline()) {
+                    appendPlainText(sb, customNode)
+                    return
+                }
+                val seq = nextSeq++
+                openRanges.addLast(
+                    OpenRange(MessageEntityType.STRIKETHROUGH, sb.length, "", null, null, seq, html = false),
+                )
+                visitChildren(customNode)
+                completeOpenedAfter(seq)
+                closeRange(openRanges.removeLast())
+                exitInline()
+            }
+
+            else -> {
+                super.visit(customNode)
+            }
+        }
+    }
+
+    /**
+     * Completes unclosed ranges opened strictly after [seq] — latest-opened first —
+     * before the entry owning [seq] closes itself. Runs when an inline container —
+     * emphasis, strikethrough, a Markdown link or image label — closes with input HTML
+     * tags still open inside it (missing closing tags, or upstream parsing defects).
+     */
+    private fun completeOpenedAfter(seq: Int) {
+        while (openRanges.isNotEmpty() && openRanges.last().seq > seq) {
+            closeRange(openRanges.removeLast())
+        }
+    }
+
+    // Completes every open code range (and everything opened inside it) before a PRE
+    // block renders: left open, the code range would span the pre text — a nesting
+    // Telegram rejects. Other ranges may span block boundaries (the containment both
+    // string formats ship for emphasis), so only the code family force-closes here
+    private fun completeOpenCodeRanges() {
+        val outermostCode =
+            openRanges.firstOrNull { it.type == MessageEntityType.CODE } ?: return
+        completeOpenedAfter(outermostCode.seq - 1)
+    }
+
+    override fun visit(customBlock: CustomBlock) {
+        if (customBlock is TableBlock) {
+            visitTable(customBlock)
+        } else {
+            super.visit(customBlock)
+        }
+    }
+
+    private fun visitTable(table: TableBlock) {
+        val lines = renderTableLines(table, options)
+        if (lines.isEmpty()) {
+            return
+        }
+
+        completeOpenCodeRanges()
+        val start = sb.length
+        sb.append(lines.joinToString("\n"))
+        entities += MessageEntity(MessageEntityType.PRE, start, sb.length - start)
+        sb.append("\n\n")
+    }
+
+    override fun visit(link: Link) {
+        val destination = link.destination.orEmpty()
+        // Telegram rejects text_link entities with an empty URL, and links cannot nest
+        // (a nested Link cannot come out of CommonMark parsing; the guard covers
+        // hand-built ASTs) — degrade to the link text alone in both cases
+        if (destination.isEmpty() || linkEntityOpen()) {
+            visitChildren(link)
+            return
+        }
+        val entrySeq = nextSeq++
+        openMarkdownLinks++
+        openRanges.addLast(
+            OpenRange(MessageEntityType.TEXT_LINK, sb.length, destination, null, null, entrySeq, html = false),
+        )
+        visitChildren(link)
+        openMarkdownLinks--
+        // Telegram also rejects link entities with empty text: a label that renders to
+        // no visible text degrades to the bare URL (see closeRange). Rewinding is safe —
+        // inside a label every pushed range was accompanied by output
+        completeOpenedAfter(entrySeq)
+        closeRange(openRanges.removeLast())
+    }
+
+    // Telegram message text has no images in any mode: degrade to a plain link on the
+    // alt text; an alt that renders to nothing degrades to the bare URL (see
+    // visit(link)). Nested inside another link only the alt text survives
+    override fun visit(image: Image) {
+        val destination = image.destination.orEmpty()
+        if (destination.isEmpty() || linkEntityOpen()) {
+            visitChildren(image)
+            return
+        }
+        val entrySeq = nextSeq++
+        openMarkdownLinks++
+        openRanges.addLast(
+            OpenRange(MessageEntityType.TEXT_LINK, sb.length, destination, null, null, entrySeq, html = false),
+        )
+        visitChildren(image)
+        openMarkdownLinks--
+        completeOpenedAfter(entrySeq)
+        closeRange(openRanges.removeLast())
+    }
+
+    // Telegram message text renders both break kinds as plain newlines
+    override fun visit(softLineBreak: SoftLineBreak) {
+        sb.append('\n')
+    }
+
+    override fun visit(hardLineBreak: HardLineBreak) {
+        sb.append('\n')
+    }
+
+    override fun visit(htmlBlock: HtmlBlock) {
+        val literal = htmlBlock.literal.orEmpty().trim()
+        // "<!--" is a "<!" — one prefix covers comments and declarations alike
+        if (literal.isEmpty() || literal.startsWith("<!") || literal.startsWith("<?")) {
+            return
+        }
+
+        // Block-level input HTML cannot pass through in any mode: it degrades to its
+        // source text in a pre range — the same trade tables make
+        completeOpenCodeRanges()
+        val start = sb.length
+        sb.append(literal)
+        entities += MessageEntity(MessageEntityType.PRE, start, sb.length - start)
+        sb.append("\n\n")
+    }
+
+    override fun visit(htmlInline: HtmlInline) {
+        renderHtmlInlineTag(htmlInline.literal)
+    }
+
+    /**
+     * A closing tag matches its range only as the innermost open HTML entry, otherwise
+     * its text stays visible literally — an orphan `</b>` closing nothing formats
+     * nothing, and showing it as text is what both string formats do. Anchors behave
+     * the same; an `<a>` without href pushes the empty-url range and its closing only
+     * pops, emitting no entity.
+     */
+    private fun renderHtmlInlineTag(literal: String) {
+        val tag = literal.trim()
+        if (tag.startsWith("<!") || tag.startsWith("<?")) {
+            return
+        }
+
+        val parts =
+            parseHtmlTag(tag) ?: run {
+                sb.append(tag)
+                return
+            }
+        if (parts.name == "br") {
+            sb.append('\n')
+            return
+        }
+        if (parts.name == "a") {
+            renderAnchorTag(tag, parts)
+            return
+        }
+
+        val mapped =
+            when (parts.name) {
+                "b", "strong" -> MessageEntityType.BOLD
+                "i", "em" -> MessageEntityType.ITALIC
+                "u", "ins" -> MessageEntityType.UNDERLINE
+                "s", "del", "strike" -> MessageEntityType.STRIKETHROUGH
+                "code", "kbd", "samp", "tt" -> MessageEntityType.CODE
+                "tg-spoiler" -> MessageEntityType.SPOILER
+                "tg-emoji" -> return renderEmojiTag(tag, parts)
+                else -> null
+            }
+        if (mapped == null || parts.selfClosing) {
+            // Unknown names (and self-closing emphasis forms) stay visible text
+            sb.append(tag)
+            return
+        }
+        if (parts.closing) {
+            val top = openRanges.lastOrNull()
+            if (top != null && top.html && top.type == mapped) {
+                openRanges.removeLast()
+                // closeRange handles both plain entries and merged ones (which emit no
+                // entity but still give their code-depth unit back)
+                closeRange(top)
+            } else {
+                sb.append(tag)
+            }
+            return
+        }
+        if (mapped == MessageEntityType.CODE && codeDepth > 0) {
+            // A code-family tag never nests a second code level: inside an open code
+            // range it merges into it, the tags dropping while the content continues
+            // code-formatted
+            openRanges.addLast(
+                OpenRange(MessageEntityType.CODE, sb.length, "", null, null, nextSeq++, html = true, merged = true),
+            )
+            codeDepth++
+            return
+        }
+        openRanges.addLast(OpenRange(mapped, sb.length, "", null, null, nextSeq++, html = true))
+        if (mapped == MessageEntityType.CODE) codeDepth++
+    }
+
+    // <tg-emoji> maps to the custom_emoji entity — one of the constructs only the
+    // entities protocol expresses natively. The id must decode to digits (custom emoji
+    // ids are numeric); anything else degrades to visible text like every unknown tag
+    private fun renderEmojiTag(
+        tag: String,
+        parts: TagParts,
+    ) {
+        // The closing tag carries no attributes to validate — match it before the id
+        // check, or a legal </tg-emoji> would read as id-less and go literal
+        if (parts.closing) {
+            if (!parts.selfClosing) {
+                val top = openRanges.lastOrNull()
+                if (top != null && top.html && top.type == MessageEntityType.CUSTOM_EMOJI && !top.merged) {
+                    openRanges.removeLast()
+                    closeRange(top)
+                    return
+                }
+            }
+            sb.append(tag)
+            return
+        }
+        val id =
+            tgEmojiIdOf(parts.attrs) ?: run {
+                sb.append(tag)
+                return
+            }
+        openRanges.addLast(
+            OpenRange(MessageEntityType.CUSTOM_EMOJI, sb.length, "", null, id, nextSeq++, html = true),
+        )
+    }
+
+    private fun renderAnchorTag(
+        tag: String,
+        parts: TagParts,
+    ) {
+        if (parts.selfClosing) {
+            sb.append(tag)
+            return
+        }
+        if (parts.closing) {
+            // See renderHtmlInlineTag: </a> matches only the innermost open range — and
+            // only an HTML-owned one, never a Markdown link's own range
+            val top = openRanges.lastOrNull()
+            if (top == null || !top.html || top.type != MessageEntityType.TEXT_LINK) {
+                sb.append(tag)
+                return
+            }
+            openRanges.removeLast()
+            when {
+                top.url == NESTED_LITERAL_ANCHOR -> {
+                    sb.append(tag)
+                }
+
+                top.url.isEmpty() -> {}
+
+                else -> {
+                    closeRange(top)
+                }
+            }
+            return
+        }
+        // Telegram links cannot nest: while any link entity is open (Markdown link,
+        // image link or an outer anchor), an inner anchor and its closing tag stay
+        // visible literally
+        if (linkEntityOpen()) {
+            openRanges.addLast(
+                OpenRange(
+                    MessageEntityType.TEXT_LINK,
+                    sb.length,
+                    NESTED_LITERAL_ANCHOR,
+                    null,
+                    null,
+                    nextSeq++,
+                    html = true,
+                ),
+            )
+            sb.append(tag)
+            return
+        }
+        // href="" is treated like a missing href: the empty URL degrades to plain text
+        val href = extractHref(parts.attrs)
+        openRanges.addLast(
+            OpenRange(
+                MessageEntityType.TEXT_LINK,
+                sb.length,
+                href.orEmpty(),
+                null,
+                null,
+                nextSeq++,
+                html = true,
+            ),
+        )
+    }
+
+    private fun linkEntityOpen(): Boolean = openRanges.any { it.type == MessageEntityType.TEXT_LINK } || openMarkdownLinks > 0
+
+    // Whether the output region starting at [start] renders no visible text: empty or
+    // whitespace only. The label callers check it immediately after the label's
+    // children, so the region runs exactly to the end of the current output; any text a
+    // label had opened would have emitted a character, so a blank label region
+    // guarantees nothing was left open inside it
+    private fun regionIsBlank(start: Int): Boolean {
+        for (index in start until sb.length) {
+            if (!sb[index].isWhitespace()) return false
+        }
+        return true
+    }
+
+    private fun enterInline(): Boolean {
+        if (inlineDepth >= MAX_RENDER_DEPTH) return false
+        inlineDepth++
+        return true
+    }
+
+    private fun exitInline() {
+        inlineDepth--
+    }
+
+    // Continuation lines are indented to the marker width via applyEntityPrefix (the
+    // offset-shifting twin of applyPrefix, shared with the truncation and chunking
+    // pipelines). A blank-bodied item is no-content and skips, its marker consumed —
+    // the same walk forEachEntityListItem makes
+    private fun renderList(list: Node) {
+        val start = sb.length
+        val marker = plainListMarkerOf(list)
+        var item = list.firstChild
+        while (item != null) {
+            if (item is ListItem) {
+                val prefix = marker()
+                val body = renderChild(item)
+                if (body.text.isNotBlank()) {
+                    appendEntityText(sb, entities, "", applyEntityPrefix(prefix, body))
+                    sb.append('\n')
+                }
+            }
+            item = item.next
+        }
+        if (sb.length > start) sb.append('\n')
+    }
+
+    // Renders a nested block (quote body, list item) in a child visitor; at the depth
+    // cap the subtree flattens to plain text (see MAX_RENDER_DEPTH). Trailing newlines
+    // are trimmed here — callers prepend their own prefixes and separators
+    private fun renderChild(node: Node): EntityText =
+        if (depth + 1 >= MAX_RENDER_DEPTH) {
+            val plain = StringBuilder()
+            appendPlainText(plain, node)
+            trimTrailingNewlines(EntityText(plain.toString(), emptyList()))
+        } else {
+            val visitor = EntityVisitor(depth + 1, options)
+            visitor.visitChildren(node)
+            trimTrailingNewlines(visitor.output())
+        }
+
+    // The quote-child variant: the node renders through its own full block shape —
+    // visit(node), not visitChildren(node) — so a nested blockQuote child arrives with
+    // its own blockquote entity for the caller to nest. Depth capping and
+    // trailing-newline trimming match renderChild
+    private fun renderQuoteChild(node: Node): EntityText =
+        if (depth + 1 >= MAX_RENDER_DEPTH) {
+            val plain = StringBuilder()
+            appendPlainText(plain, node)
+            trimTrailingNewlines(EntityText(plain.toString(), emptyList()))
+        } else {
+            val visitor = EntityVisitor(depth + 1, options)
+            node.accept(visitor)
+            trimTrailingNewlines(visitor.output())
+        }
+}

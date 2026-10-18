@@ -1,3 +1,22 @@
+public final class io/github/kamiiroawase/markdownv2/EntityText {
+	public static final field Companion Lio/github/kamiiroawase/markdownv2/EntityText$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/util/List;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Ljava/util/List;)Lio/github/kamiiroawase/markdownv2/EntityText;
+	public static synthetic fun copy$default (Lio/github/kamiiroawase/markdownv2/EntityText;Ljava/lang/String;Ljava/util/List;ILjava/lang/Object;)Lio/github/kamiiroawase/markdownv2/EntityText;
+	public final fun entitiesJson ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEntities ()Ljava/util/List;
+	public final fun getText ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kamiiroawase/markdownv2/EntityText$Companion {
+	public final fun getEMPTY ()Lio/github/kamiiroawase/markdownv2/EntityText;
+}
+
 public final class io/github/kamiiroawase/markdownv2/MarkdownV2 {
 	public static final field INSTANCE Lio/github/kamiiroawase/markdownv2/MarkdownV2;
 	public static final field MAX_MESSAGE_LENGTH I
@@ -13,6 +32,45 @@ public final class io/github/kamiiroawase/markdownv2/MarkdownV2 {
 	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/MarkdownV2;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
 	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/MarkdownV2;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
 	public final fun toPlainText (Ljava/lang/String;)Ljava/lang/String;
+}
+
+public final class io/github/kamiiroawase/markdownv2/MessageEntity {
+	public fun <init> (Lio/github/kamiiroawase/markdownv2/MessageEntityType;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Lio/github/kamiiroawase/markdownv2/MessageEntityType;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun copy (Lio/github/kamiiroawase/markdownv2/MessageEntityType;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lio/github/kamiiroawase/markdownv2/MessageEntity;
+	public static synthetic fun copy$default (Lio/github/kamiiroawase/markdownv2/MessageEntity;Lio/github/kamiiroawase/markdownv2/MessageEntityType;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kamiiroawase/markdownv2/MessageEntity;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCustomEmojiId ()Ljava/lang/String;
+	public final fun getLanguage ()Ljava/lang/String;
+	public final fun getLength ()I
+	public final fun getOffset ()I
+	public final fun getType ()Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public final fun getUrl ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kamiiroawase/markdownv2/MessageEntityType : java/lang/Enum {
+	public static final field BLOCKQUOTE Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static final field BOLD Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static final field CODE Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static final field CUSTOM_EMOJI Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static final field ITALIC Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static final field PRE Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static final field SPOILER Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static final field STRIKETHROUGH Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static final field TEXT_LINK Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static final field UNDERLINE Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWireName ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static fun values ()[Lio/github/kamiiroawase/markdownv2/MessageEntityType;
 }
 
 public final class io/github/kamiiroawase/markdownv2/RenderOptions {
@@ -37,6 +95,19 @@ public final class io/github/kamiiroawase/markdownv2/RenderOptions$Companion {
 
 public final class io/github/kamiiroawase/markdownv2/RenderOptionsKt {
 	public static final fun defaultDisplayWidth (I)I
+}
+
+public final class io/github/kamiiroawase/markdownv2/TelegramEntities {
+	public static final field INSTANCE Lio/github/kamiiroawase/markdownv2/TelegramEntities;
+	public static final field MIN_CHUNK_LENGTH I
+	public final fun render (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;)Lio/github/kamiiroawase/markdownv2/EntityText;
+	public final fun render (Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;)Lio/github/kamiiroawase/markdownv2/EntityText;
+	public static synthetic fun render$default (Lio/github/kamiiroawase/markdownv2/TelegramEntities;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Lio/github/kamiiroawase/markdownv2/EntityText;
+	public static synthetic fun render$default (Lio/github/kamiiroawase/markdownv2/TelegramEntities;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Lio/github/kamiiroawase/markdownv2/EntityText;
+	public final fun renderChunked (Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public final fun renderChunked (Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramEntities;Ljava/lang/String;ILorg/commonmark/parser/Parser;Lio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
+	public static synthetic fun renderChunked$default (Lio/github/kamiiroawase/markdownv2/TelegramEntities;Lorg/commonmark/node/Node;ILio/github/kamiiroawase/markdownv2/RenderOptions;ILjava/lang/Object;)Ljava/util/List;
 }
 
 public final class io/github/kamiiroawase/markdownv2/TelegramHtml {

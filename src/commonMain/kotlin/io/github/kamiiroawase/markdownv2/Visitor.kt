@@ -225,6 +225,16 @@ internal fun extractAttribute(
 internal fun extractHref(attrs: String): String? = extractAttribute(attrs, "href")?.takeIf { it.isNotEmpty() }?.let(::decodeHtmlEntities)
 
 /**
+ * Extracts a tg-emoji tag's emoji-id attribute and validates it the way both output
+ * formats require: the value must decode to digits only (custom emoji ids are numeric);
+ * absent, empty or non-numeric yields null — the degradation trigger.
+ */
+internal fun tgEmojiIdOf(attrs: String): String? =
+    extractAttribute(attrs, "emoji-id")
+        ?.let(::decodeHtmlEntities)
+        ?.takeIf { it.isNotEmpty() && it.all { char -> char.isDigit() } }
+
+/**
  * Decodes the supported HTML entities (`&amp;`, `&#38;`, `&#x26;`, …) in attribute values
  * and de-formatted text; `&` without a well-formed entity stays literal. Browsers decode
  * entities in attributes before using the value, so an href extracted raw would link to

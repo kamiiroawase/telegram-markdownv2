@@ -4,7 +4,7 @@
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.kamiiroawase/telegram-markdownv2.svg)](https://central.sonatype.com/artifact/io.github.kamiiroawase/telegram-markdownv2)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
-Kotlin Multiplatform library that converts **CommonMark (incl. GFM tables & strikethrough) into Telegram MarkdownV2 or HTML**, with structure-preserving truncation or lossless chunking for over-length content (Telegram caps messages at 4096 characters; chunks sent in order deliver all the content — no character is dropped, entities straddling a seam close per piece). Built for LLM bot output — model replies are arbitrary Markdown of unpredictable structure, frequently containing constructs Telegram cannot render.
+Kotlin Multiplatform library that converts **CommonMark (incl. GFM tables & strikethrough) into Telegram MarkdownV2, HTML or the entities protocol**, with structure-preserving truncation or lossless chunking for over-length content (Telegram caps messages at 4096 characters; chunks sent in order deliver all the content — no character is dropped, entities straddling a seam close per piece). Built for LLM bot output — model replies are arbitrary Markdown of unpredictable structure, frequently containing constructs Telegram cannot render.
 
 [中文版](README.md)
 
@@ -27,6 +27,7 @@ dependencies {
 ```kotlin
 import io.github.kamiiroawase.markdownv2.MarkdownV2
 import io.github.kamiiroawase.markdownv2.TelegramHtml
+import io.github.kamiiroawase.markdownv2.TelegramEntities
 
 // parse_mode = MarkdownV2
 val text = MarkdownV2.render("**hello** world")                        // send as-is
@@ -35,11 +36,17 @@ val parts = MarkdownV2.renderChunked(reply)                            // lossle
 val literal = MarkdownV2.escape(userInput)                             // escape dynamic text when hand-assembling MarkdownV2
 val fallback = MarkdownV2.toPlainText(rejectedPart)                    // de-format a rejected piece, resend without parse_mode
 
-// parse_mode = HTML — both entries share the parser, RenderOptions and the
+// parse_mode = HTML — all three entries share the parser, RenderOptions and the
 // truncation/chunking semantics
 val html = TelegramHtml.render("**hello** <tg-spoiler>world</tg-spoiler>")   // tg-spoiler and tg-emoji pass through
 val htmlParts = TelegramHtml.renderChunked(reply)                            // same lossless chunking, each piece valid HTML
 val htmlLiteral = TelegramHtml.escape(userInput)                             // escapes & < > (attributes also escape ")
+
+// no parse_mode — the entities protocol: plain text plus formatting ranges; the
+// whole class of parse failures cannot arise
+val message = TelegramEntities.render(reply)          // EntityText(text = plain display text, entities = ranges)
+sendMessage(text = message.text, entities = message.entitiesJson())
+val messageParts = TelegramEntities.renderChunked(reply)   // same lossless chunking, offsets re-based per piece
 ```
 
 - All 19 escapable characters (Telegram's 18 official special characters plus the backslash) escaped; inline code / code blocks / link URLs follow their own escaping rules
@@ -53,6 +60,14 @@ val htmlLiteral = TelegramHtml.escape(userInput)                             // 
 - A quote is a `<blockquote>` wrapper tag rather than a line-start `>` prefix, so **a quote inside a list item keeps its formatting** (the MarkdownV2 side must degrade it); an all-blank quote renders nothing (the MarkdownV2 side keeps a bare `>` marker)
 - `<tg-spoiler>` and `<tg-emoji emoji-id="…">` from inline input HTML pass through as-is — constructs MarkdownV2 cannot express; a fenced code block with a language maps to `<pre><code class="language-x">` (which Telegram syntax-highlights)
 - Chunking needs room for one escape unit — 5 characters, an `&amp;` (`TelegramHtml.MIN_CHUNK_LENGTH`); below that the full render returns as a single chunk
+
+### How the entities side differs
+
+- The text is exactly what Telegram displays, with no escaping rules at all — the "400 can't parse entities" class of failures cannot happen, and the plain-text fallback becomes unnecessary rather than automatic
+- Formatting rides on ranges instead of markup: a quote is a blockquote range (kept inside list items too), `<tg-spoiler>`/`<tg-emoji>` map to native spoiler/custom_emoji entities, and a fenced code block with a language maps to a pre range carrying it
+- Offsets are UTF-16 code units the way the Bot API counts them — which Kotlin strings already are, so an EntityText drops into sendMessage(text, entities) as-is; entitiesJson() emits the request-body JSON array (hand-rolled, no dependency added)
+- Truncation clamps ranges to the surviving text (a straddling range shortens, a fully-beyond one drops); chunking re-establishes structural formatting per piece (a split quote carries a blockquote range on every piece) while an inline range straddling a seam stays in the piece holding its start — the same seam discipline the string formats apply
+- Chunking needs room for one surrogate pair — 2 characters (`TelegramEntities.MIN_CHUNK_LENGTH`)
 
 ## Known limitations
 
@@ -73,7 +88,7 @@ cd telegram-markdownv2
 ./gradlew benchmark    # perf benchmark: typical messages ~0.1 ms, 1M characters ~10 ms; CI re-runs attach the output to every GitHub Release
 ```
 
-430 behavior-level tests (input/output assertions), running on every platform; every HTML-side output additionally passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), as the MarkdownV2 side does (`assertTelegramParseable`). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
+513 behavior-level tests (input/output assertions), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
 
 ## License
 

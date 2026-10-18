@@ -363,3 +363,68 @@ internal fun sweepContents(): List<String> =
         add("<i>aaaa</i><i>bbbb</i> cccc <u>dddd</u><u>eeee</u>")
         add("<u>aaaa<i>bbbb</i></u> cccc <i></i> dddd")
     }
+
+/**
+ * Asserts [piece] is an entities-protocol message the Bot API accepts as-is: every
+ * range sits inside the text with positive length, never splits a surrogate pair, and
+ * carries exactly the fields its type requires (text_link a non-empty url, custom_emoji
+ * a numeric id, nothing else carrying either). Overlapping ranges must nest by
+ * containment — crossing ranges are the one shape tdlib rejects outright.
+ *
+ * Every entities render, truncation and chunk piece must pass here.
+ */
+internal fun assertEntitiesValid(
+    piece: EntityText,
+    context: String,
+) {
+    fun fail(message: String): Nothing = throw AssertionError("$message ($context): $piece")
+
+    // A boundary lands between the halves of a surrogate pair when the char before it
+    // is a high surrogate and the char at it a low one
+    fun boundarySafe(position: Int) {
+        if (position > 0 && position < piece.text.length) {
+            val before = piece.text[position - 1]
+            val at = piece.text[position]
+            if (before.isHighSurrogate() && at.isLowSurrogate()) {
+                fail("range boundary at $position splits a surrogate pair")
+            }
+        }
+    }
+
+    for (entity in piece.entities) {
+        if (entity.offset < 0) fail("negative offset: $entity")
+        if (entity.length <= 0) fail("non-positive length: $entity")
+        if (entity.offset + entity.length > piece.text.length) {
+            fail("range beyond text (text is ${piece.text.length}): $entity")
+        }
+        if (entity.type == MessageEntityType.TEXT_LINK) {
+            if (entity.url.isNullOrEmpty()) fail("text_link without a url: $entity")
+        } else if (entity.url != null) {
+            fail("url on a ${entity.type.wireName} entity: $entity")
+        }
+        if (entity.type == MessageEntityType.CUSTOM_EMOJI) {
+            if (entity.customEmojiId.isNullOrEmpty()) fail("custom_emoji without an id: $entity")
+            if (!entity.customEmojiId.all { it.isDigit() }) fail("non-numeric custom_emoji_id: $entity")
+        } else if (entity.customEmojiId != null) {
+            fail("custom_emoji_id on a ${entity.type.wireName} entity: $entity")
+        }
+        boundarySafe(entity.offset)
+        boundarySafe(entity.offset + entity.length)
+    }
+
+    // Overlap must be containment, never crossing
+    for (i in piece.entities.indices) {
+        for (j in i + 1 until piece.entities.size) {
+            val a = piece.entities[i]
+            val b = piece.entities[j]
+            val aEnd = a.offset + a.length
+            val bEnd = b.offset + b.length
+            val overlaps = a.offset < bEnd && b.offset < aEnd
+            val aContainsB = a.offset <= b.offset && bEnd <= aEnd
+            val bContainsA = b.offset <= a.offset && aEnd <= bEnd
+            if (overlaps && !aContainsB && !bContainsA) {
+                fail("crossing ranges: $a vs $b")
+            }
+        }
+    }
+}

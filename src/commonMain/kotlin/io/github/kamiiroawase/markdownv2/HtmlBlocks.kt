@@ -64,30 +64,31 @@ internal fun htmlLanguageOf(fencedCodeBlock: FencedCodeBlock): String =
         .filter { it.isLetterOrDigit() || it == '-' || it == '+' || it == '#' }
         .take(32)
 
-// Telegram HTML has no heading entity either: the level spells out as literal hashes
-// gluing onto the heading text — the full render, truncation and chunking all prefix
-// with this
-internal fun htmlHeadingPrefixOf(heading: Heading): String = "#".repeat(heading.level) + " "
+// Telegram's parse modes and entities alike have no heading entity: the level spells
+// out as literal hashes gluing onto the heading text — the HTML and entities pipelines
+// both prefix with this
+internal fun plainHeadingPrefixOf(heading: Heading): String = "#".repeat(heading.level) + " "
 
 // The per-item marker factory for a list: bullets get "• ", ordered lists "N. " with N
-// advancing per item from the list's own start number — the dot needs no escaping in HTML
-// text (unlike MarkdownV2's). A fresh factory per list; consumers must invoke it exactly
-// once per item, blank-bodied ones included, so ordered numbering matches the full
-// render's
-internal fun htmlListMarkerOf(list: Node): () -> String {
+// advancing per item from the list's own start number — the dot needs no escaping in
+// either unescaped output format (unlike MarkdownV2's; see Blocks.listMarkerOf). A fresh
+// factory per list; consumers must invoke it exactly once per item, blank-bodied ones
+// included, so ordered numbering matches the full render's
+internal fun plainListMarkerOf(list: Node): () -> String {
     val ordered = list as? OrderedList ?: return { "• " }
     var number = ordered.markerStartNumber ?: 1
     return { "${number++}. " }
 }
 
 /**
- * Walks a list's items the way every HTML rendering path must: non-ListItem children
+ * Walks a list's items the way every unescaped rendering path must: non-ListItem children
  * skip, the marker is taken — its number consumed — for every item including ones whose
  * body drops out, and a body that renders to nothing but whitespace is no-content and
  * skips too (HtmlVisitor.renderList makes the same walk, so the full render emits exactly
- * the items this walk visits). [visit] receives each surviving item in document order
- * with its marker and pre-rendered body; returning false stops the walk (truncation drops
- * the items that follow whole — chunking never stops and always returns true).
+ * the items this walk visits; the entities pipeline's forEachEntityListItem walks alike).
+ * [visit] receives each surviving item in document order with its marker and pre-rendered
+ * body; returning false stops the walk (truncation drops the items that follow whole —
+ * chunking never stops and always returns true).
  */
 internal fun forEachHtmlListItem(
     list: Node,
@@ -95,7 +96,7 @@ internal fun forEachHtmlListItem(
     options: RenderOptions,
     visit: (item: ListItem, prefix: String, body: String) -> Boolean,
 ) {
-    val marker = htmlListMarkerOf(list)
+    val marker = plainListMarkerOf(list)
     var item = list.firstChild
     while (item != null) {
         if (item is ListItem) {

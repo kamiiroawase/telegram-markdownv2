@@ -82,7 +82,7 @@ private fun chunkHtmlBlockInto(
         }
 
         node is Heading -> {
-            chunkHtmlParagraph(node, maxLength, options, htmlHeadingPrefixOf(node), acc)
+            chunkHtmlParagraph(node, maxLength, options, plainHeadingPrefixOf(node), acc)
         }
 
         node is Paragraph -> {

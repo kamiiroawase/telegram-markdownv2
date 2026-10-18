@@ -214,7 +214,7 @@ internal class HtmlVisitor(
     // hashes (no escaping needed — '#' carries no meaning in HTML text), the same trade
     // the MarkdownV2 render makes
     override fun visit(heading: Heading) {
-        sb.append(htmlHeadingPrefixOf(heading))
+        sb.append(plainHeadingPrefixOf(heading))
         visitChildren(heading)
         sb.append("\n\n")
     }
@@ -583,12 +583,8 @@ internal class HtmlVisitor(
             sb.append(escapeHtmlText(tag))
             return
         }
-        val id =
-            extractAttribute(parts.attrs, "emoji-id")
-                ?.let(::decodeHtmlEntities)
-                ?.filter { it.isDigit() }
-                .orEmpty()
-        if (id.isEmpty() || parts.selfClosing) {
+        val id = tgEmojiIdOf(parts.attrs)
+        if (id == null || parts.selfClosing) {
             sb.append(escapeHtmlText(tag))
             return
         }
@@ -670,7 +666,7 @@ internal class HtmlVisitor(
     // truncation and chunking agree on which items exist and how they number
     private fun renderList(list: Node) {
         val start = sb.length
-        val marker = htmlListMarkerOf(list)
+        val marker = plainListMarkerOf(list)
         var item = list.firstChild
         while (item != null) {
             if (item is ListItem) {

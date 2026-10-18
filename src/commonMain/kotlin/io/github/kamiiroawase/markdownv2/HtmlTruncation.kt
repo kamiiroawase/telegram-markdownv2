@@ -111,7 +111,7 @@ private fun shrinkHtml(
         }
 
         node is Heading -> {
-            shrinkHtmlParagraph(node, budget, options, htmlHeadingPrefixOf(node))
+            shrinkHtmlParagraph(node, budget, options, plainHeadingPrefixOf(node))
         }
 
         node is Paragraph -> {
