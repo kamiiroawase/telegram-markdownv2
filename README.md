@@ -19,7 +19,7 @@ dependencies {
     // KMP 消费方在 commonMain 引用根坐标（Gradle module metadata 自动解析平台变体）；
     // 需要钉住具体变体时加后缀：-android / -jvm / -js / -wasm-js / -linuxx64 /
     // -linuxarm64 / -macosarm64 / -mingwx64 / -iosarm64 / -iosx64 / -iossimulatorarm64
-    implementation("io.github.kamiiroawase:telegram-markdownv2:2.4.1")
+    implementation("io.github.kamiiroawase:telegram-markdownv2:3.0.0")
 }
 ```
 
@@ -48,9 +48,7 @@ val messageParts = TelegramEntities.renderChunked(reply)   // 同样无损分片
 // 分片装饰：每片带头尾（页码 / 签名），三个入口都有对应重载
 val pages = MarkdownV2.renderChunked(
     reply,
-    decoration = ChunkDecoration(header = { i, n -> "第 ${i + 1}/$n 页
-
-" }),
+    decoration = ChunkDecoration(header = { i, n -> "第 ${i + 1}/$n 页\n\n" }),
 )
 ```
 
@@ -83,6 +81,7 @@ import eu.vendeli.tgbot.api.message.sendMessage
 import eu.vendeli.tgbot.types.component.ParseMode
 import eu.vendeli.tgbot.types.msg.EntityType
 import eu.vendeli.tgbot.types.msg.MessageEntity
+import io.github.kamiiroawase.markdownv2.MessageEntity as TmMessageEntity
 
 // HTML：parse_mode = HTML
 sendMessage(TelegramHtml.render(reply))
@@ -90,7 +89,7 @@ sendMessage(TelegramHtml.render(reply))
     .send(user, bot)
 
 // entities：不发 parse_mode，直接传区间（字段与 Bot API 一致）
-fun MessageEntity.toKtgram() = MessageEntity(
+fun TmMessageEntity.toKtgram() = MessageEntity(
     type = when (type) {
         MessageEntityType.BOLD -> EntityType.Bold
         MessageEntityType.ITALIC -> EntityType.Italic
@@ -121,9 +120,7 @@ sendMessage(formatted.text)
 ```kotlin
 val pages = TelegramEntities.renderChunked(
     reply,
-    decoration = ChunkDecoration(footer = { i, n -> if (n > 1) "
-
-第 ${i + 1}/$n 页" else "" }),
+    decoration = ChunkDecoration(footer = { i, n -> if (n > 1) "\n\n第 ${i + 1}/$n 页" else "" }),
 )
 
 var page = 0

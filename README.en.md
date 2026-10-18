@@ -20,7 +20,7 @@ dependencies {
     // metadata resolves the platform variant); pin a variant by suffix: -android /
     // -jvm / -js / -wasm-js / -linuxx64 / -linuxarm64 / -macosarm64 / -mingwx64 /
     // -iosarm64 / -iosx64 / -iossimulatorarm64
-    implementation("io.github.kamiiroawase:telegram-markdownv2:2.4.1")
+    implementation("io.github.kamiiroawase:telegram-markdownv2:3.0.0")
 }
 ```
 
@@ -52,9 +52,7 @@ val messageParts = TelegramEntities.renderChunked(reply)   // same lossless chun
 // all three entry points carry the overload
 val pages = MarkdownV2.renderChunked(
     reply,
-    decoration = ChunkDecoration(header = { i, n -> "Part ${i + 1}/$n
-
-" }),
+    decoration = ChunkDecoration(header = { i, n -> "Part ${i + 1}/$n\n\n" }),
 )
 ```
 
@@ -89,6 +87,7 @@ import eu.vendeli.tgbot.api.message.sendMessage
 import eu.vendeli.tgbot.types.component.ParseMode
 import eu.vendeli.tgbot.types.msg.EntityType
 import eu.vendeli.tgbot.types.msg.MessageEntity
+import io.github.kamiiroawase.markdownv2.MessageEntity as TmMessageEntity
 
 // HTML: parse_mode = HTML
 sendMessage(TelegramHtml.render(reply))
@@ -96,7 +95,7 @@ sendMessage(TelegramHtml.render(reply))
     .send(user, bot)
 
 // entities: no parse_mode, ranges passed straight through (fields match the Bot API)
-fun MessageEntity.toKtgram() = MessageEntity(
+fun TmMessageEntity.toKtgram() = MessageEntity(
     type = when (type) {
         MessageEntityType.BOLD -> EntityType.Bold
         MessageEntityType.ITALIC -> EntityType.Italic
@@ -129,9 +128,7 @@ the returned `Message`, edit it on navigation:
 ```kotlin
 val pages = TelegramEntities.renderChunked(
     reply,
-    decoration = ChunkDecoration(footer = { i, n -> if (n > 1) "
-
-Part ${i + 1}/$n" else "" }),
+    decoration = ChunkDecoration(footer = { i, n -> if (n > 1) "\n\nPart ${i + 1}/$n" else "" }),
 )
 
 var page = 0
