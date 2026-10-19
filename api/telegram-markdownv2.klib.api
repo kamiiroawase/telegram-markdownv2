@@ -11,6 +11,7 @@ final enum class io.github.kamiiroawase.markdownv2/MessageEntityType : kotlin/En
     enum entry BOLD // io.github.kamiiroawase.markdownv2/MessageEntityType.BOLD|null[0]
     enum entry CODE // io.github.kamiiroawase.markdownv2/MessageEntityType.CODE|null[0]
     enum entry CUSTOM_EMOJI // io.github.kamiiroawase.markdownv2/MessageEntityType.CUSTOM_EMOJI|null[0]
+    enum entry EXPANDABLE_BLOCKQUOTE // io.github.kamiiroawase.markdownv2/MessageEntityType.EXPANDABLE_BLOCKQUOTE|null[0]
     enum entry ITALIC // io.github.kamiiroawase.markdownv2/MessageEntityType.ITALIC|null[0]
     enum entry PRE // io.github.kamiiroawase.markdownv2/MessageEntityType.PRE|null[0]
     enum entry SPOILER // io.github.kamiiroawase.markdownv2/MessageEntityType.SPOILER|null[0]

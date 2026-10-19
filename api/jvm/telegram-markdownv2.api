@@ -73,6 +73,7 @@ public final class io/github/kamiiroawase/markdownv2/MessageEntityType : java/la
 	public static final field BOLD Lio/github/kamiiroawase/markdownv2/MessageEntityType;
 	public static final field CODE Lio/github/kamiiroawase/markdownv2/MessageEntityType;
 	public static final field CUSTOM_EMOJI Lio/github/kamiiroawase/markdownv2/MessageEntityType;
+	public static final field EXPANDABLE_BLOCKQUOTE Lio/github/kamiiroawase/markdownv2/MessageEntityType;
 	public static final field ITALIC Lio/github/kamiiroawase/markdownv2/MessageEntityType;
 	public static final field PRE Lio/github/kamiiroawase/markdownv2/MessageEntityType;
 	public static final field SPOILER Lio/github/kamiiroawase/markdownv2/MessageEntityType;

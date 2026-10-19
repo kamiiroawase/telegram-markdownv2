@@ -52,7 +52,7 @@ public object TelegramHtml {
         // The Parser interface types parse() as Node?: the default parser never returns
         // null for non-null input, but a custom implementation may — such a document
         // renders to nothing
-        val document = parser.parse(content) ?: return ""
+        val document = parseForRender(content, parser) ?: return ""
         return render(document, maxLength, options)
     }
 
@@ -126,7 +126,7 @@ public object TelegramHtml {
         options: RenderOptions = RenderOptions(),
     ): List<String> {
         // See the render(content) overload: only a custom parser can return null here
-        val document = parser.parse(content) ?: return emptyList()
+        val document = parseForRender(content, parser) ?: return emptyList()
         return renderChunked(document, maxLength, options)
     }
 
@@ -181,7 +181,7 @@ public object TelegramHtml {
         options: RenderOptions = RenderOptions(),
         decoration: ChunkDecoration,
     ): List<String> {
-        val document = parser.parse(content) ?: return emptyList()
+        val document = parseForRender(content, parser) ?: return emptyList()
         return renderChunked(document, maxLength, options, decoration)
     }
 

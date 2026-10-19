@@ -305,7 +305,7 @@ private fun shrinkEntityQuote(
     // order visit(blockQuote) and the chunking re-assembly emit
     return EntityText(
         text.text,
-        text.entities + MessageEntity(MessageEntityType.BLOCKQUOTE, 0, text.text.length),
+        text.entities + MessageEntity(blockquoteTypeOf(quote), 0, text.text.length),
     )
 }
 

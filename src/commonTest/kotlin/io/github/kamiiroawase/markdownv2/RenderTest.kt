@@ -1904,4 +1904,30 @@ class RenderTest {
             MarkdownV2.render("| a\\|b |\n| --- |\n| c |"),
         )
     }
+
+    // ---------- the ninth audit round: output-time URL escaping behind completed code ----------
+
+    @Test
+    fun completedCodeEntityDoesNotLeakItsEscapeContextIntoTheAnchorUrl() {
+        // The output()-time completion arms hand no htmlCodeDepth unit back, so the
+        // co-completing anchor's URL escaped by code rules (only \` and \\) and the
+        // URL's ')' went bare — the reserved-character 400. The URL lands AFTER the
+        // code closer in the closers builder, outside the entity, so it escapes by URL
+        // rules: the context reads the stack (a code entity still open below the
+        // anchor), not the stale global counter (pre-fix:
+        // "[text`more`](http://e.com/(1))")
+        val output = MarkdownV2.render("<a href=\"http://e.com/(1)\">text<code>more")
+        assertEquals("[text`more`](http://e.com/(1\\))", output)
+        assertTelegramParseable(output, "anchorUrlBehindCompletedCode")
+    }
+
+    @Test
+    fun anchorUrlInsideStillOpenCodeKeepsCodeEscaping() {
+        // The mirror that guards the fix's stack read: a code entity BELOW the anchor
+        // stays open around the anchor's whole region, and the completed URL genuinely
+        // sits inside it — '(' and ')' are literal content there, escaped by nothing
+        val output = MarkdownV2.render("<code>x<a href=\"http://e.com/(1)\">y")
+        assertEquals("`x[y](http://e.com/(1))`", output)
+        assertTelegramParseable(output, "anchorUrlInsideOpenCode")
+    }
 }

@@ -307,7 +307,8 @@ private fun shrinkHtmlQuote(
     retriable: Boolean,
     options: RenderOptions,
 ): String {
-    val innerBudget = budget - HTML_QUOTE_OPEN.length - HTML_QUOTE_CLOSE.length
+    val (quoteOpen, quoteClose) = htmlQuoteTagsOf(quote)
+    val innerBudget = budget - quoteOpen.length - quoteClose.length
     if (innerBudget <= 0) return ""
 
     val parts = StringBuilder()
@@ -345,7 +346,7 @@ private fun shrinkHtmlQuote(
         }
     }
     if (parts.isEmpty()) return ""
-    return "$HTML_QUOTE_OPEN$parts$HTML_QUOTE_CLOSE"
+    return "$quoteOpen$parts$quoteClose"
 }
 
 // Fallback for a nested (non-retriable) quote child that does not fit: the child's

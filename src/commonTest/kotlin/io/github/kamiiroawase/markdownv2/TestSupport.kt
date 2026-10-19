@@ -56,6 +56,18 @@ internal fun assertTelegramParseable(
             index += 2
             continue
         }
+        // The expandable blockquote opener: "**" at a line-start position gluing onto a
+        // ">" — the asterisks are the expandable flag, the ">" opens the quote the
+        // regular marker path below handles (only a quote's FIRST line carries them;
+        // continuation lines are ordinary ">" lines, and a quote directly followed by
+        // another "**>" line ends at that newline, the separator the official example
+        // documents as an empty bold entity). Unambiguous at a line start: a bold
+        // opener's '>' content always escapes, so bare "**>" there is necessarily the
+        // flag
+        if (c == '*' && canStart && at(index + 1) == '*' && at(index + 2) == '>') {
+            index += 2
+            continue
+        }
         val top = stack.lastOrNull()
         val reserved =
             when (top) {
@@ -312,6 +324,23 @@ internal fun assertTelegramHtmlParseable(
                     // MarkdownV2 port below makes no such check: its glued ">>" markers
                     // are that format's pinned, documented deviation)
                     if (tag == "blockquote" && "blockquote" in stack) fail("nested blockquote entities")
+                    // A pre or blockquote is a block-level entity: inside an open anchor,
+                    // tg-emoji or inline code it is the "Cannot be nested inside other
+                    // entities" shape Telegram rejects — the completions before every
+                    // block-emitting site keep it unreachable
+                    if ((tag == "pre" || tag == "blockquote") &&
+                        ("a" in stack || "tg-emoji" in stack || "code" in stack)
+                    ) {
+                        fail(
+                            "<$tag> inside <${if ("a" in stack) {
+                                "a"
+                            } else if ("tg-emoji" in stack) {
+                                "tg-emoji"
+                            } else {
+                                "code"
+                            }}>",
+                        )
+                    }
                     if (tag == "code" && top == "pre" && !attrs.matches(Regex("^ class=\"language-[\\w+#-]*\"$"))) {
                         fail("code inside pre must carry the language class")
                     }
@@ -323,7 +352,12 @@ internal fun assertTelegramHtmlParseable(
                         fail("tg-emoji without a numeric emoji-id")
                     }
                     if (tag != "a" && tag != "code" && tag != "tg-emoji" && attrs.isNotBlank()) {
-                        fail("unexpected attributes on <$tag>")
+                        // The one documented blockquote attribute: the expandable flag
+                        // (the parser of Telegram's own examples accepts exactly this
+                        // spelling and nothing else on the wrapper)
+                        if (!(tag == "blockquote" && attrs.matches(Regex("^ expandable$")))) {
+                            fail("unexpected attributes on <$tag>")
+                        }
                     }
                     stack.addLast(tag)
                 } else {
@@ -373,6 +407,11 @@ internal fun sweepContents(): List<String> =
         )
         add("1. item with a long body " + "word ".repeat(12) + "\n2. short\n3. " + "more ".repeat(15))
         add("> quote line one\n> quote line two\n>\n> - quoted item one\n> - quoted item two")
+        // The expandable quote spelling: the "**" first-line lead must ride every seam
+        // the string formats make, the wrapper/budget arithmetic must count the wider
+        // HTML tag, and the entities ranges must keep their own type per piece
+        add("<blockquote expandable>\nquoted aaaa bbbb\nmore quote cccc dddd eeee ffff\n</blockquote>")
+        add("<blockquote expandable>\n<blockquote>\ninner aaaa bbbb\n</blockquote>\nouter cccc dddd eeee ffff gggg hhhh\n</blockquote>")
         // Top-level nested quotes with enough body to force truncation and chunking
         // splits: every seam must flatten them into a single wrapper level exactly like
         // the full render — Bot API formatting rules say blockquote entities can't nest
@@ -424,7 +463,10 @@ internal fun sweepContents(): List<String> =
  * range sits inside the text with positive length, never splits a surrogate pair, and
  * carries exactly the fields its type requires (text_link a non-empty url, custom_emoji
  * a numeric id, nothing else carrying either). Overlapping ranges must nest by
- * containment — crossing ranges are the one shape tdlib rejects outright.
+ * containment — crossing ranges are the one shape tdlib rejects outright — and the
+ * nesting obeys the type-level containment discipline: pre and code contain nothing,
+ * block-level ranges sit inside no other entity, and links and custom emoji never nest
+ * in each other (a blockquote inside a blockquote is the one documented exemption).
  *
  * Every entities render, truncation and chunk piece must pass here.
  */
@@ -497,6 +539,72 @@ internal fun assertEntitiesValid(
                 a.offset <= b.offset && bEnd <= aEnd && (a.offset < b.offset || aEnd > bEnd)
             if (aStrictlyContainsB) {
                 fail("close order violated: $a (at $i) strictly contains later $b (at $j)")
+            }
+        }
+    }
+
+    // Type-level containment — the discipline every pipeline ships (crossing ranges above
+    // catch only the geometry): "pre and code entities can't contain other entities";
+    // block-level ranges (pre, blockquote) sit inside no other entity ("Cannot be nested
+    // inside other entities"); links never nest; a custom emoji holds exactly its one
+    // emoji, so nothing of link or code shape sits inside it ("all other entities can't
+    // contain each other"). The one documented exemption: a blockquote inside a
+    // blockquote (the nested-quote deviation the server repairs silently); formatting
+    // ranges span freely (the pinned bold-over-pre containment), and a code span inside
+    // a text_link label is the shipped label-with-code shape
+    fun containmentViolation(
+        inner: MessageEntityType,
+        outer: MessageEntityType,
+    ): String? {
+        if (outer == MessageEntityType.CODE || outer == MessageEntityType.PRE) {
+            return "$outer containing $inner"
+        }
+        return when (inner) {
+            MessageEntityType.PRE, MessageEntityType.BLOCKQUOTE, MessageEntityType.EXPANDABLE_BLOCKQUOTE -> {
+                if (outer == MessageEntityType.TEXT_LINK || outer == MessageEntityType.CUSTOM_EMOJI) {
+                    "$inner inside $outer"
+                } else {
+                    null
+                }
+            }
+
+            MessageEntityType.TEXT_LINK, MessageEntityType.CUSTOM_EMOJI -> {
+                if (outer == MessageEntityType.TEXT_LINK || outer == MessageEntityType.CUSTOM_EMOJI) {
+                    "$inner inside $outer"
+                } else {
+                    null
+                }
+            }
+
+            MessageEntityType.CODE -> {
+                if (outer == MessageEntityType.CUSTOM_EMOJI) {
+                    "code inside custom_emoji"
+                } else {
+                    null
+                }
+            }
+
+            else -> {
+                null
+            }
+        }
+    }
+
+    for (i in piece.entities.indices) {
+        for (j in i + 1 until piece.entities.size) {
+            val a = piece.entities[i]
+            val b = piece.entities[j]
+            val aEnd = a.offset + a.length
+            val bEnd = b.offset + b.length
+            val aStrictlyContainsB =
+                a.offset <= b.offset && bEnd <= aEnd && (a.offset < b.offset || aEnd > bEnd)
+            val bStrictlyContainsA =
+                b.offset <= a.offset && aEnd <= bEnd && (b.offset < a.offset || bEnd > aEnd)
+            if (aStrictlyContainsB) {
+                containmentViolation(b.type, a.type)?.let { fail("$it: $a strictly contains $b") }
+            }
+            if (bStrictlyContainsA) {
+                containmentViolation(a.type, b.type)?.let { fail("$it: $b strictly contains $a") }
             }
         }
     }

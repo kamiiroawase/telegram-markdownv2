@@ -943,4 +943,76 @@ class HtmlRenderTest {
             TelegramHtml.render("| a\\|b |\n| --- |\n| c |"),
         )
     }
+
+    // ---------- the ninth audit round: list boundaries and zero-output closers ----------
+
+    @Test
+    fun listItemPreCompletesOpenAnchor() {
+        // Pre-fix renderList completed only code tags: items render through child
+        // visitors, so the wrapper tags their blocks emit landed inside an anchor this
+        // visitor still held open — the same "Cannot be nested inside other entities"
+        // shape the direct blocks complete away
+        val output = TelegramHtml.render("<a href=\"u\">x\n\n- item\n\n  ```\n  c\n  ```")
+        assertEquals("<a href=\"u\">x</a>\n\n• item\n\n  <pre>c</pre>", output)
+        assertTelegramHtmlParseable(output, "listItemPreCompletesAnchor")
+    }
+
+    @Test
+    fun listItemQuoteCompletesOpenAnchor() {
+        val output = TelegramHtml.render("<a href=\"u\">x\n\n- > quoted")
+        assertEquals("<a href=\"u\">x</a>\n\n• <blockquote>quoted</blockquote>", output)
+        assertTelegramHtmlParseable(output, "listItemQuoteCompletesAnchor")
+    }
+
+    @Test
+    fun listItemPreCompletesOpenCustomEmojiTag() {
+        // The tg-emoji twin of the anchor case: completeOpenInlineCodeAndAnchorTags
+        // completes the emoji tag too, so the item's <pre> stays outside it
+        val output = TelegramHtml.render("<tg-emoji emoji-id=\"5\">x\n\n- item\n\n  ```\n  c\n  ```")
+        assertEquals("<tg-emoji emoji-id=\"5\">x</tg-emoji>\n\n• item\n\n  <pre>c</pre>", output)
+        assertTelegramHtmlParseable(output, "listItemPreCompletesEmoji")
+    }
+
+    @Test
+    fun anchorCloserPopsZeroOutputSentinels() {
+        // </a> now shares the </code> path's zero-output probe: a merged tg-emoji (or
+        // any merged tag) between the anchor and its closer emitted nothing, so the
+        // closer reaches the anchor beneath it (pre-fix: "<a href=\"u\">xy&lt;/a&gt;tail</a>"
+        // — stray visible text with the tail swallowed into the link)
+        val output = TelegramHtml.render("<a href=\"u\">x<tg-emoji emoji-id=\"1\">y</a>tail")
+        assertEquals("<a href=\"u\">xy</a>tail", output)
+        assertTelegramHtmlParseable(output, "anchorCloserPopsSentinels")
+    }
+
+    @Test
+    fun anchorCloserBehindRealCodeStaysLiteral() {
+        // A REAL code entity — one that emitted its opener — blocks the closer:
+        // popping through it would emit </a> inside the code's content, crossed tags.
+        // Only the zero-output entries above never block (the pinned innermost-only
+        // discipline; the merged inner <code> is exactly the entry the probe skips)
+        val output = TelegramHtml.render("<a href=\"u\">x<code>a<code>b</a>tail")
+        assertEquals("<a href=\"u\">x<code>ab&lt;/a&gt;tail</code></a>", output)
+        assertTelegramHtmlParseable(output, "anchorCloserBehindRealCode")
+    }
+
+    @Test
+    fun emojiCloserMatchesTheImageTwinTightly() {
+        // </tg-emoji> draws the same boundary the image spelling (see visit(image))
+        // always drew: everything opened inside the fallback completes first, then the
+        // emoji closes. Pre-fix the closer went literal whenever anything sat on top —
+        // including zero-output merged entries — and the two spellings of one construct
+        // diverged
+        assertEquals(
+            "<tg-emoji emoji-id=\"5\">&lt;a&gt;x</tg-emoji> tail",
+            TelegramHtml.render("<tg-emoji emoji-id=\"5\"><a>x</tg-emoji> tail"),
+        )
+        assertEquals(
+            "<tg-emoji emoji-id=\"5\">x</tg-emoji> tail",
+            TelegramHtml.render("<tg-emoji emoji-id=\"5\"><code>x</tg-emoji> tail"),
+        )
+        assertEquals(
+            "<tg-emoji emoji-id=\"7\"><b>x</b></tg-emoji> tail",
+            TelegramHtml.render("<tg-emoji emoji-id=\"7\"><b>x</tg-emoji> tail"),
+        )
+    }
 }

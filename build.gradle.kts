@@ -146,9 +146,6 @@ kotlin {
 
         commonTest.dependencies {
             implementation(libs.kotlin.test)
-            // Drive the customNode/customBlock defensive branches with a real third-party
-            // extension
-            implementation(libs.commonmark.ext.footnotes)
         }
     }
 

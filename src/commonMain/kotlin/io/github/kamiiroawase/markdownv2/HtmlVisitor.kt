@@ -286,11 +286,14 @@ internal class HtmlVisitor(
         // Code entities and anchors from an earlier block complete first — the wrapper
         // is a block-level entity: Telegram rejects block tags inside inline code, and a
         // blockquote may no more sit inside a link entity than a pre can (the entities
-        // documentation's "Cannot be nested inside other entities")
+        // documentation's "Cannot be nested inside other entities"). The wrapper pair
+        // carries the expandable attribute when the parse rewrite marked the quote (see
+        // isExpandableQuote)
         completeOpenInlineCodeAndAnchorTags()
-        sb.append("<blockquote>")
+        val (open, close) = htmlQuoteTagsOf(blockQuote)
+        sb.append(open)
         sb.append(pieces.joinToString("\n\n"))
-        sb.append("</blockquote>\n\n")
+        sb.append(close).append("\n\n")
     }
 
     // Collects the quote's rendered children, flattening nested quotes into the same
@@ -836,10 +839,15 @@ internal class HtmlVisitor(
         // check, or a legal </tg-emoji> would read as id-less and go literal
         if (parts.closing) {
             if (!parts.selfClosing) {
-                val top = openTags.lastOrNull()
-                if (top is OpenInlineTag && top.html && top.tag == "tg-emoji") {
-                    openTags.removeLast()
-                    closeInlineTag(top, sb)
+                val entry = openTags.lastOrNull { it is OpenInlineTag && it.html && it.tag == "tg-emoji" }
+                if (entry != null) {
+                    // Whatever opened inside the fallback closes before the emoji does —
+                    // the same boundary the image spelling draws (see visit(image)): left
+                    // open it would cross the </tg-emoji> boundary into crossed tags, or
+                    // pop under the cast below. completeOpenedAfter leaves the entry
+                    // innermost by construction
+                    completeOpenedAfter(entry.seq)
+                    closeInlineTag(openTags.removeLast() as OpenInlineTag, sb)
                     return
                 }
             }
@@ -907,12 +915,33 @@ internal class HtmlVisitor(
             // anchor closed while something opened inside it is still open goes literal
             // rather than emitting a crossed closer
             val top = openTags.lastOrNull()
-            if (top !is OpenAnchorTag) {
-                sb.append(escapeHtmlText(tag))
+            if (top is OpenAnchorTag) {
+                openTags.removeLast()
+                closeAnchor(top, sb, matched = true)
                 return
             }
-            openTags.removeLast()
-            closeAnchor(top, sb, matched = true)
+            // Zero-output entries never block a closer on their own (see
+            // renderHtmlInlineTag): a merged tag or a href-less sentinel anchor emitted
+            // nothing, so a legitimate </a> must reach the anchor beneath them — a
+            // merged tg-emoji inside the anchor used to escape literally, surfacing as
+            // visible text and stranding the block's remainder inside the link. The
+            // entries pop only when a real match sits beneath; otherwise everything
+            // stays open exactly as before
+            var probe = openTags.size - 1
+            while (probe >= 0 && emitsNothing(openTags[probe])) probe--
+            val beneath = if (probe >= 0) openTags[probe] else null
+            if (beneath is OpenAnchorTag) {
+                while (openTags.last() !== beneath) {
+                    when (val popped = openTags.removeLast()) {
+                        is OpenInlineTag -> closeInlineTag(popped, sb)
+                        is OpenAnchorTag -> closeAnchor(popped, sb, matched = false)
+                    }
+                }
+                openTags.removeLast()
+                closeAnchor(beneath, sb, matched = true)
+            } else {
+                sb.append(escapeHtmlText(tag))
+            }
             return
         }
         // Telegram links cannot nest: while any link entity is open (Markdown link, image
@@ -983,11 +1012,13 @@ internal class HtmlVisitor(
     // Continuation lines are indented to the marker width via applyPrefix (shared with
     // the truncation and chunking pipelines). A blank-bodied item is no-content and skips,
     // its marker consumed — the same walk forEachHtmlListItem makes, so the full render,
-    // truncation and chunking agree on which items exist and how they number. A code tag
-    // from an earlier block completes first — the marker is structure, and a block quote
-    // or pre inside an item would sit inside the code entity
+    // truncation and chunking agree on which items exist and how they number. Code tags,
+    // custom-emoji tags and anchors from an earlier block complete first — items render
+    // through child visitors, so the wrapper tags their blocks emit (a marker is
+    // structure, a block quote or pre inside an item is a block-level entity) must not
+    // land inside an entity this visitor still holds open
     private fun renderList(list: Node) {
-        completeOpenInlineCodeTags()
+        completeOpenInlineCodeAndAnchorTags()
         val start = sb.length
         val marker = plainListMarkerOf(list)
         var item = list.firstChild

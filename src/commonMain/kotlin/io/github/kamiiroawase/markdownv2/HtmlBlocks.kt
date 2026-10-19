@@ -118,3 +118,14 @@ internal fun forEachHtmlListItem(
 // MarkdownV2 quote satisfies has no HTML counterpart, a wrapper tag pair replaces it
 internal const val HTML_QUOTE_OPEN = "<blockquote>"
 internal const val HTML_QUOTE_CLOSE = "</blockquote>"
+
+// The expandable variant Telegram's own parse-mode documentation spells; the wrapper
+// pair a quote renders with when the parse rewrite marked it (see isExpandableQuote)
+internal const val HTML_QUOTE_OPEN_EXPANDABLE = "<blockquote expandable>"
+
+internal fun htmlQuoteTagsOf(quote: Node): Pair<String, String> =
+    if (isExpandableQuote(quote)) {
+        HTML_QUOTE_OPEN_EXPANDABLE to HTML_QUOTE_CLOSE
+    } else {
+        HTML_QUOTE_OPEN to HTML_QUOTE_CLOSE
+    }

@@ -307,12 +307,13 @@ private fun chunkEntityQuote(
 ) {
     // Offset in acc.current where the currently open quote span started; -1 when none
     var quoteStart = -1
+    val quoteType = blockquoteTypeOf(quote)
 
     fun closeQuoteSpan() {
         if (quoteStart >= 0) {
             val length = acc.length - quoteStart
             if (length > 0) {
-                acc.current.entities += MessageEntity(MessageEntityType.BLOCKQUOTE, quoteStart, length)
+                acc.current.entities += MessageEntity(quoteType, quoteStart, length)
             }
             quoteStart = -1
         }
@@ -336,7 +337,7 @@ private fun chunkEntityQuote(
                     val temp = EntityChunkAccumulator()
                     chunkEntityBlockInto(node, rendered, maxLength, depth + 1, options, temp)
                     temp.finish().forEach { piece ->
-                        acc.pieces += blockquoteEntityOf(piece)
+                        acc.pieces += blockquoteEntityOf(piece, quoteType)
                     }
                 }
             }
@@ -346,16 +347,19 @@ private fun chunkEntityQuote(
     closeQuoteSpan()
 }
 
-// Wraps a piece's text in one blockquote range over the whole piece, keeping the piece's
-// own (nested) entities — appended after them, the close order the EntityText contract
-// documents (nested ranges before the ranges containing them)
-private fun blockquoteEntityOf(piece: EntityText): EntityText =
+// Wraps a piece's text in one quote range of [type] over the whole piece, keeping the
+// piece's own (nested) entities — appended after them, the close order the EntityText
+// contract documents (nested ranges before the ranges containing them)
+private fun blockquoteEntityOf(
+    piece: EntityText,
+    type: MessageEntityType,
+): EntityText =
     if (piece.text.isEmpty()) {
         piece
     } else {
         EntityText(
             piece.text,
-            piece.entities + MessageEntity(MessageEntityType.BLOCKQUOTE, 0, piece.text.length),
+            piece.entities + MessageEntity(type, 0, piece.text.length),
         )
     }
 

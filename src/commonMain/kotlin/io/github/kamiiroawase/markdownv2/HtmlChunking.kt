@@ -293,7 +293,8 @@ private fun chunkHtmlQuote(
     }
     if (children.isEmpty()) return
 
-    val innerLimit = maxLength - HTML_QUOTE_OPEN.length - HTML_QUOTE_CLOSE.length
+    val (quoteOpenTag, quoteCloseTag) = htmlQuoteTagsOf(quote)
+    val innerLimit = maxLength - quoteOpenTag.length - quoteCloseTag.length
     if (innerLimit < MAX_HTML_UNIT) {
         // Not even one escape unit fits wrapped — the quote formatting yields to
         // validity and text losslessness, the same trade chunkQuotedText makes when its
@@ -323,17 +324,17 @@ private fun chunkHtmlQuote(
                 current.isEmpty() -> ""
                 else -> "\n\n"
             }
-        val add = joiner + (if (quoteOpen) "" else HTML_QUOTE_OPEN) + rendered
-        if (current.length + add.length + HTML_QUOTE_CLOSE.length <= maxLength) {
+        val add = joiner + (if (quoteOpen) "" else quoteOpenTag) + rendered
+        if (current.length + add.length + quoteCloseTag.length <= maxLength) {
             current.append(add)
             quoteOpen = true
         } else {
-            if (quoteOpen) current.append(HTML_QUOTE_CLOSE)
+            if (quoteOpen) current.append(quoteCloseTag)
             if (current.isNotEmpty()) pieces += current.toString()
             current = StringBuilder()
             quoteOpen = false
-            if (HTML_QUOTE_OPEN.length + rendered.length + HTML_QUOTE_CLOSE.length <= maxLength) {
-                current.append(HTML_QUOTE_OPEN).append(rendered)
+            if (quoteOpenTag.length + rendered.length + quoteCloseTag.length <= maxLength) {
+                current.append(quoteOpenTag).append(rendered)
                 quoteOpen = true
             } else {
                 // The child alone overflows even a fresh wrapper: chunk it at the inner
@@ -350,12 +351,12 @@ private fun chunkHtmlQuote(
                     chunkHtmlBlockInto(node, rendered, innerLimit, depth + 1, options, temp)
                 }
                 temp.finish().forEach { piece ->
-                    pieces += HTML_QUOTE_OPEN + piece + HTML_QUOTE_CLOSE
+                    pieces += quoteOpenTag + piece + quoteCloseTag
                 }
             }
         }
     }
-    if (quoteOpen) current.append(HTML_QUOTE_CLOSE)
+    if (quoteOpen) current.append(quoteCloseTag)
     if (current.isNotEmpty()) pieces += current.toString()
 
     pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)

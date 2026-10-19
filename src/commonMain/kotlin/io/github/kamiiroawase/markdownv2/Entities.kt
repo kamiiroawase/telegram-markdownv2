@@ -35,6 +35,13 @@ public enum class MessageEntityType(
     /** A Markdown block quote. */
     BLOCKQUOTE("blockquote"),
 
+    /**
+     * An `<blockquote expandable>` HTML block — the collapsible quote variant; plain
+     * CommonMark input has no spelling of its own (see [TelegramEntities] for the
+     * recognized input form).
+     */
+    EXPANDABLE_BLOCKQUOTE("expandable_blockquote"),
+
     /** A `<tg-emoji emoji-id="…">` tag; carries [MessageEntity.customEmojiId]. */
     CUSTOM_EMOJI("custom_emoji"),
 }

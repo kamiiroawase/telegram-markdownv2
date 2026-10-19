@@ -690,7 +690,22 @@ internal class Visitor(
                         }
 
                         else -> {
-                            closers.append("](${escapeUrlInContext(entity.url)})")
+                            // The entities above this anchor already completed — their
+                            // closers precede the ](url) in the closers builder, so the URL
+                            // sits outside them — while any code entity below it on the
+                            // stack stays open around the anchor's whole region. The
+                            // completion arms above hand no depth unit back, so the URL
+                            // context reads the remaining stack, not the counter
+                            // (escapeUrlInContext would count completed code entities too)
+                            val codeBelow =
+                                openEntities.any {
+                                    it is OpenEmphasisMarker &&
+                                        it.marker == "`" &&
+                                        it.codeDelimiter != CodeDelimiter.SUPPRESSED
+                                }
+                            closers.append(
+                                "](${if (codeBelow) escapeCode(entity.url) else escapeUrl(entity.url)})",
+                            )
                         }
                     }
                 }
@@ -815,7 +830,11 @@ internal class Visitor(
             }
             return
         }
-        sb.append(if (pieces.isEmpty()) ">" else pieces.joinToString("\n>\n"))
+        // An expandable quote (the <blockquote expandable> spelling the parse rewrite
+        // marks) opens its first line with "**" ahead of the marker (see
+        // expandableQuoteMarkerOf); the empty-quote fallback takes the same lead
+        val lead = expandableQuoteMarkerOf(blockQuote)
+        sb.append(if (pieces.isEmpty()) "$lead>" else lead + pieces.joinToString("\n>\n"))
         sb.append("\n\n")
     }
 

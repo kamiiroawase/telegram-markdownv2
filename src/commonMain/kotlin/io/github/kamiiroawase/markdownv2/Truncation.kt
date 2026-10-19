@@ -285,12 +285,18 @@ private fun shrinkQuote(
     retriable: Boolean,
     options: RenderOptions,
 ): String {
+    // The expandable "**" rides the quote's first placed line (see
+    // expandableQuoteMarkerOf): reserved up front so the child arithmetic stays exact,
+    // then prepended to whichever piece lands first — the tail path's pieces all open
+    // with their own '>' markers, so the lead glues in front of them alike
+    val lead = expandableQuoteMarkerOf(quote)
     val parts = StringBuilder()
     var node = quote.firstChild
     while (node != null) {
         // See renderBlocks: check the budget before rendering the child
+        val head = if (parts.isEmpty()) lead else ""
         val separator = if (parts.isEmpty()) "" else "\n>\n"
-        val remaining = budget - parts.length - separator.length
+        val remaining = budget - head.length - parts.length - separator.length
         if (remaining <= 0) break
 
         val rendered = renderBlock(node, depth + 1, options)
@@ -306,12 +312,12 @@ private fun shrinkQuote(
         }
         val prefixed = prefixQuoteLevel(node is BlockQuote, rendered)
         if (prefixed.length <= remaining) {
-            parts.append(separator).append(prefixed)
+            parts.append(separator).append(head).append(prefixed)
             node = node.next
         } else {
             val shrunk = shrinkQuoteTail(node, remaining, depth, retriable, options)
             if (shrunk.isNotEmpty()) {
-                parts.append(separator).append(shrunk)
+                parts.append(separator).append(head).append(shrunk)
             }
             break
         }

@@ -258,9 +258,10 @@ internal class EntityVisitor(
     // and deduplicating across the visitor and the truncation/chunking re-assembly
     // paths would trade that cosmetic overlap for three divergent code paths
     override fun visit(blockQuote: BlockQuote) {
-        // A code range from an earlier block completes first — a blockquote range inside
-        // a code range is the nesting Telegram rejects
-        completeOpenCodeRanges()
+        // Code, link and custom-emoji ranges from an earlier block complete first — a
+        // blockquote range inside any of them is the nesting Telegram rejects (see
+        // completeOpenCodeLinkAndEmojiRanges)
+        completeOpenCodeLinkAndEmojiRanges()
         val start = sb.length
         var appended = false
         var child = blockQuote.firstChild
@@ -275,7 +276,9 @@ internal class EntityVisitor(
         if (!appended) return
         val length = sb.length - start
         if (length > 0) {
-            entities += MessageEntity(MessageEntityType.BLOCKQUOTE, start, length)
+            // An expandable quote (the <blockquote expandable> spelling the parse rewrite
+            // marks, see isExpandableQuote) carries its own entity type
+            entities += MessageEntity(blockquoteTypeOf(blockQuote), start, length)
         }
         sb.append("\n\n")
     }
@@ -298,24 +301,28 @@ internal class EntityVisitor(
         val language =
             htmlLanguageOf(fencedCodeBlock)
                 .ifEmpty { null }
-        completeOpenCodeAndLinkRanges()
+        val literal = fencedCodeBlock.literal.orEmpty().trimEnd('\n')
+        completeOpenCodeLinkAndEmojiRanges()
+        // An empty body renders to nothing at all — no pre range and no block separator
+        // either: a lone separator would leave a blank line where the code block dropped
+        // out (the HTML twin's emptyFenceRendersNothing). The completion above still
+        // runs — an unclosed range must not reach across the block even when the block
+        // itself drops out
+        if (literal.isEmpty()) return
         val start = sb.length
-        sb.append(fencedCodeBlock.literal.orEmpty().trimEnd('\n'))
-        val length = sb.length - start
-        if (length > 0) {
-            entities += MessageEntity(MessageEntityType.PRE, start, length, language = language)
-        }
+        sb.append(literal)
+        entities += MessageEntity(MessageEntityType.PRE, start, sb.length - start, language = language)
         sb.append("\n\n")
     }
 
     override fun visit(indentedCodeBlock: IndentedCodeBlock) {
-        completeOpenCodeAndLinkRanges()
+        val literal = indentedCodeBlock.literal.trimEnd('\n')
+        completeOpenCodeLinkAndEmojiRanges()
+        // See visit(fencedCodeBlock): an empty body renders nothing
+        if (literal.isEmpty()) return
         val start = sb.length
-        sb.append(indentedCodeBlock.literal.trimEnd('\n'))
-        val length = sb.length - start
-        if (length > 0) {
-            entities += MessageEntity(MessageEntityType.PRE, start, length)
-        }
+        sb.append(literal)
+        entities += MessageEntity(MessageEntityType.PRE, start, sb.length - start)
         sb.append("\n\n")
     }
 
@@ -330,6 +337,12 @@ internal class EntityVisitor(
             // level; keep the backticks as visible text instead — exactly how both
             // string formats render the shape
             sb.append('`').append(code.literal).append('`')
+        } else if (customEmojiOpen()) {
+            // A code entity can't nest inside a custom emoji ("all other entities can't
+            // contain each other"): the span's content renders as the fallback's plain
+            // text, backticks dropped — the same silent degradation the tag path makes
+            // of a code-family tag there (the HTML twin's visit(code) matches)
+            sb.append(code.literal)
         } else {
             val start = sb.length
             sb.append(code.literal)
@@ -440,17 +453,22 @@ internal class EntityVisitor(
         completeOpenedAfter(outermostCode.seq - 1)
     }
 
-    // The PRE-emitting twin of [completeOpenCodeRanges]: completes code and text_link
-    // ranges alike (everything opened inside the earliest of them) before a PRE block
-    // renders — a pre entity may not sit inside a link entity ("Cannot be nested inside
-    // other entities"), and a Markdown link never spans blocks, so an unclosed HTML
-    // anchor must not reach across one either. Formatting ranges keep the documented
+    // The block-entity twin of [completeOpenCodeRanges]: completes code, text_link and
+    // custom_emoji ranges alike (everything opened inside the earliest of them) before a
+    // block that emits — or whose children emit — its own block-level entity: a pre or
+    // blockquote range may not sit inside a link entity ("Cannot be nested inside other
+    // entities") nor inside a custom emoji ("all other entities can't contain each
+    // other"), and a Markdown link never spans blocks, so an unclosed HTML anchor must
+    // not reach across one either. Formatting ranges keep the documented
     // complete-at-output behavior (the pinned bold-over-pre containment)
-    private fun completeOpenCodeAndLinkRanges() {
+    private fun completeOpenCodeLinkAndEmojiRanges() {
         val boundary =
             openRanges
-                .filter { it.type == MessageEntityType.CODE || it.type == MessageEntityType.TEXT_LINK }
-                .minOfOrNull { it.seq }
+                .filter {
+                    it.type == MessageEntityType.CODE ||
+                        it.type == MessageEntityType.TEXT_LINK ||
+                        it.type == MessageEntityType.CUSTOM_EMOJI
+                }.minOfOrNull { it.seq }
                 ?: return
         completeOpenedAfter(boundary - 1)
     }
@@ -464,10 +482,12 @@ internal class EntityVisitor(
             is FootnoteDefinition -> {
                 // The definition keeps its place in the document (Telegram message text
                 // is linear): label spelled back out, content rendered as the blocks it
-                // wraps — the same visible shape the unextended parse shows. A code
-                // range from an earlier block completes first — the label and the
-                // definition's blocks must not sit inside it
-                completeOpenCodeRanges()
+                // wraps — the same visible shape the unextended parse shows. Code, link
+                // and custom-emoji ranges from an earlier block complete first — the
+                // label and the definition's blocks must not sit inside them (the
+                // definition's own children re-check at their own boundaries; this also
+                // keeps a child blockquote from landing inside an unclosed anchor)
+                completeOpenCodeLinkAndEmojiRanges()
                 sb.append("[^${customBlock.label}]: ")
                 visitChildren(customBlock)
             }
@@ -484,7 +504,7 @@ internal class EntityVisitor(
             return
         }
 
-        completeOpenCodeAndLinkRanges()
+        completeOpenCodeLinkAndEmojiRanges()
         val start = sb.length
         sb.append(lines.joinToString("\n"))
         entities += MessageEntity(MessageEntityType.PRE, start, sb.length - start)
@@ -575,7 +595,7 @@ internal class EntityVisitor(
 
         // Block-level input HTML cannot pass through in any mode: it degrades to its
         // source text in a pre range — the same trade tables make
-        completeOpenCodeAndLinkRanges()
+        completeOpenCodeLinkAndEmojiRanges()
         val start = sb.length
         sb.append(literal)
         entities += MessageEntity(MessageEntityType.PRE, start, sb.length - start)
@@ -705,6 +725,26 @@ internal class EntityVisitor(
                 sb.append(tag)
                 return
             }
+        // Links cannot nest and a custom emoji counts as link-open (see linkEntityOpen):
+        // an inner tag — inside a link or another custom emoji — degrades, a merged entry
+        // keeping its closer silent while the fallback renders as plain text, the same
+        // degradation the image path makes of an inner emoji and the HTML twin makes of
+        // the tag
+        if (linkEntityOpen()) {
+            openRanges.addLast(
+                OpenRange(
+                    MessageEntityType.CUSTOM_EMOJI,
+                    sb.length,
+                    "",
+                    null,
+                    id,
+                    nextSeq++,
+                    html = true,
+                    merged = true,
+                ),
+            )
+            return
+        }
         if (codeDepth > 0) {
             // A custom emoji entity can't nest inside code: the tags drop, the emoji char
             // renders as plain code text (merged keeps the closer silent)
@@ -808,7 +848,21 @@ internal class EntityVisitor(
         )
     }
 
-    private fun linkEntityOpen(): Boolean = openRanges.any { it.type == MessageEntityType.TEXT_LINK } || openMarkdownLinks > 0
+    // A link entity is open when a text_link range is (or a Markdown link), or a
+    // custom-emoji range: the HTML twin's linkEntityOpen counts its tg-emoji tags the
+    // same way (merged entries included), so links cannot nest inside a custom emoji
+    // here either and the twin formats agree
+    private fun linkEntityOpen(): Boolean =
+        openRanges.any {
+            it.type == MessageEntityType.TEXT_LINK || it.type == MessageEntityType.CUSTOM_EMOJI
+        } || openMarkdownLinks > 0
+
+    // Whether a real custom-emoji range is open: not one of the merged no-output
+    // degradations, which sit inside a code range or a link and are no custom emoji at
+    // all. "All other entities can't contain each other" bars a code entity from
+    // nesting inside one, so code spans render as plain fallback text while one is open
+    // (see visit(code); the HTML twin's customEmojiOpen matches)
+    private fun customEmojiOpen(): Boolean = openRanges.any { it.type == MessageEntityType.CUSTOM_EMOJI && !it.merged }
 
     // Whether the output region starting at [start] renders no visible text: empty or
     // whitespace only. The label callers check it immediately after the label's
@@ -835,10 +889,12 @@ internal class EntityVisitor(
     // Continuation lines are indented to the marker width via applyEntityPrefix (the
     // offset-shifting twin of applyPrefix, shared with the truncation and chunking
     // pipelines). A blank-bodied item is no-content and skips, its marker consumed — the
-    // same walk forEachEntityListItem makes. A code range from an earlier block completes
-    // first — a blockquote or pre range inside an item would sit inside it
+    // same walk forEachEntityListItem makes. Code, link and custom-emoji ranges from an
+    // earlier block complete first: items render through child visitors whose own
+    // blockquote or pre ranges must not land inside a range this visitor still holds
+    // open (the HTML twin's renderList completes the same set)
     private fun renderList(list: Node) {
-        completeOpenCodeRanges()
+        completeOpenCodeLinkAndEmojiRanges()
         val start = sb.length
         val marker = plainListMarkerOf(list)
         var item = list.firstChild

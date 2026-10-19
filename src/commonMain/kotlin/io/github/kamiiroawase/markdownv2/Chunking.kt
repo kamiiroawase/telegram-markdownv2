@@ -345,6 +345,11 @@ private fun chunkQuote(
     // Whether any child placed content (mirrors visit(blockQuote)'s pieces.isEmpty()
     // test for the bare-marker fallback below)
     var content = false
+    // The expandable "**" rides the quote's first placed line (see
+    // expandableQuoteMarkerOf); consumed by whichever emission places it, and yielded
+    // outright where its two characters have no reserved room — the structured seam and
+    // the tiny limits below budget their pieces to the bare "> " prefix exactly
+    var lead = expandableQuoteMarkerOf(quote)
     var node = quote.firstChild
     while (node != null) {
         // renderBlock already trims trailing newlines — the same shape renderQuoteChild
@@ -356,17 +361,23 @@ private fun chunkQuote(
             val nested = node is BlockQuote
             val prefixed = prefixQuoteLevel(nested, rendered)
             val separator = if (acc.current.isEmpty()) "" else "\n>\n"
-            if (acc.current.length + separator.length + prefixed.length <= maxLength) {
-                acc.appendRendered(separator + prefixed)
+            if (acc.current.length + lead.length + separator.length + prefixed.length <= maxLength) {
+                acc.appendRendered(lead + separator + prefixed)
+                lead = ""
                 content = true
             } else {
                 acc.flush()
-                if (prefixed.length <= maxLength) {
-                    acc.appendRendered(prefixed)
+                if (lead.length + prefixed.length <= maxLength) {
+                    acc.appendRendered(lead + prefixed)
+                    lead = ""
                     content = true
                 } else {
                     // The structured split keeps the child's formatting; the flatten
-                    // fallback covers the tiny limits no prefix headroom exists for
+                    // fallback covers the tiny limits no prefix headroom exists for.
+                    // Either way the expandable lead yields here — the seam budgets its
+                    // pieces without those two characters, and the quote chunks on as a
+                    // regular one
+                    lead = ""
                     if (appendStructuredQuoteChild(node, rendered, nested, maxLength, depth, options, acc)) {
                         content = true
                     } else {
@@ -386,8 +397,10 @@ private fun chunkQuote(
     if (!content) {
         // Reaching here means every child blank-skipped, so the caller's flushed/current
         // state is empty (both entries into chunkBlockInto flush or start fresh) and the
-        // 1-char marker fits every chunking maxLength (the public guard keeps it ≥ 2)
-        acc.appendRendered(">")
+        // 1-char marker fits every chunking maxLength (the public guard keeps it ≥ 2).
+        // The expandable marker is 3 characters: at a limit too small for it the flag
+        // yields and the bare regular marker ships — the tiny-limit trade
+        acc.appendRendered(if (lead.isEmpty() || lead.length + 1 <= maxLength) "$lead>" else ">")
     }
 }
 

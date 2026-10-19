@@ -19,8 +19,8 @@ public data class RenderOptions(
      * blow the whole table, header included, past the message length limit.
      *
      * @throws IllegalArgumentException if the value is less than 1, or if the display
-     * width [displayWidthOf] assigns to the truncation ellipsis (…) exceeds it — every
-     * truncated cell would then overshoot the cap.
+     * width [displayWidthOf] assigns to the truncation ellipsis (…) is negative or
+     * exceeds it — every truncated cell would then overshoot the cap.
      */
     public val maxCellWidth: Int = DEFAULT_MAX_CELL_WIDTH,
     /**

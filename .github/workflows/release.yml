@@ -124,7 +124,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full clone: the version derives from the nearest v* tag; a shallow clone misses it
+          # Full clone: the version derives from the exact v* tag sitting at HEAD (there is
+          # deliberately no nearest-tag fallback — see build.gradle.kts); a shallow clone
+          # misses the tag
           fetch-depth: 0
 
       # The READMEs document the released coordinates; a forgotten bump ships stale

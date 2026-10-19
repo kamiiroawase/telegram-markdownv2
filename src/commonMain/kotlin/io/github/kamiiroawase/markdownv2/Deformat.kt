@@ -325,6 +325,19 @@ private fun scanLinePrefix(
     while (index < rendered.length) {
         val char = rendered[index]
         when {
+            char == '*' && index + 2 < rendered.length &&
+                rendered[index + 1] == '*' &&
+                rendered[index + 2] == '>' &&
+                depth < maxDepth -> {
+                // The expandable quote's opener ("**>", the first line only —
+                // continuations take the ordinary markers). The two asterisks strip with
+                // the quote unit they open; plain text has no expandable carrier, so the
+                // quote de-formats as a regular one. An unambiguous structure marker: a
+                // bold opener's '>' content always escapes ('\>'), so bare "**>" at a
+                // line start is necessarily the renderer's flag
+                index += 2
+            }
+
             char == '>' && depth < maxDepth -> {
                 index++
                 depth++

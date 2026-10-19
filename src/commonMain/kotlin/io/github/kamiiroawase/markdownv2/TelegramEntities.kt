@@ -55,7 +55,7 @@ public object TelegramEntities {
         // The Parser interface types parse() as Node?: the default parser never returns
         // null for non-null input, but a custom implementation may — such a document
         // renders to nothing
-        val document = parser.parse(content) ?: return EntityText.EMPTY
+        val document = parseForRender(content, parser) ?: return EntityText.EMPTY
         return render(document, maxLength, options)
     }
 
@@ -125,7 +125,7 @@ public object TelegramEntities {
         parser: Parser = MarkdownV2.defaultParser,
         options: RenderOptions = RenderOptions(),
     ): List<EntityText> {
-        val document = parser.parse(content) ?: return emptyList()
+        val document = parseForRender(content, parser) ?: return emptyList()
         return renderChunked(document, maxLength, options)
     }
 
@@ -178,7 +178,7 @@ public object TelegramEntities {
         options: RenderOptions = RenderOptions(),
         decoration: ChunkDecoration,
     ): List<EntityText> {
-        val document = parser.parse(content) ?: return emptyList()
+        val document = parseForRender(content, parser) ?: return emptyList()
         return renderChunked(document, maxLength, options, decoration)
     }
 

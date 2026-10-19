@@ -716,4 +716,131 @@ class EntityRenderTest {
         )
         assertEntitiesValid(pre, "rewindStartConvergesBeforePre")
     }
+
+    // ---------- the ninth audit round: empty fences, quote boundaries, custom-emoji containment ----------
+
+    @Test
+    fun emptyFenceRendersNothing() {
+        // Pre-fix the dropped PRE still emitted its block separator, leaving a blank
+        // line where the code block dropped out — the HTML twin's emptyFenceRendersNothing
+        val result = TelegramEntities.render("x\n\n```\n```\n\ny")
+        assertEquals(EntityText("x\n\ny", emptyList()), result)
+        assertEntitiesValid(result, "emptyFenceRendersNothing")
+    }
+
+    @Test
+    fun quoteCompletesOpenLinkRange() {
+        // Pre-fix the unclosed anchor stayed open across the quote — BLOCKQUOTE strictly
+        // inside TEXT_LINK, "Cannot be nested inside other entities". The quote now
+        // draws the same completion the PRE-emitting blocks make
+        val result = TelegramEntities.render("x <a href=\"https://e.com/u\">y\n\n> quoted")
+        assertEquals(
+            EntityText(
+                "x y\n\nquoted",
+                listOf(
+                    MessageEntity(MessageEntityType.TEXT_LINK, 2, 3, url = "https://e.com/u"),
+                    MessageEntity(MessageEntityType.BLOCKQUOTE, 5, 6),
+                ),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "quoteCompletesLink")
+    }
+
+    @Test
+    fun listQuoteCompletesOpenLinkRange() {
+        // The list twin: items render through child visitors, so a quote inside an item
+        // landed inside a range the list's own visitor still held open
+        val result = TelegramEntities.render("x <a href=\"https://e.com/u\">y\n\n- > quoted")
+        assertEquals(
+            EntityText(
+                "x y\n\n• quoted",
+                listOf(
+                    MessageEntity(MessageEntityType.TEXT_LINK, 2, 3, url = "https://e.com/u"),
+                    MessageEntity(MessageEntityType.BLOCKQUOTE, 7, 6),
+                ),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "listQuoteCompletesLink")
+    }
+
+    @Test
+    fun blockCompletesOpenCustomEmojiRange() {
+        // Pre-fix CUSTOM_EMOJI sat outside the containment discipline entirely: a fence
+        // (or quote) after an unclosed tag landed strictly inside the emoji range. The
+        // boundary completion now covers custom_emoji alongside code and links
+        val result = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x\n\n```\ncode\n```")
+        assertEquals(
+            EntityText(
+                "x\n\ncode",
+                listOf(
+                    MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 3, customEmojiId = "5"),
+                    MessageEntity(MessageEntityType.PRE, 3, 4),
+                ),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "blockCompletesEmoji")
+    }
+
+    @Test
+    fun quoteCompletesOpenCustomEmojiRange() {
+        val result = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x\n\n> quoted")
+        assertEquals(
+            EntityText(
+                "x\n\nquoted",
+                listOf(
+                    MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 3, customEmojiId = "5"),
+                    MessageEntity(MessageEntityType.BLOCKQUOTE, 3, 6),
+                ),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "quoteCompletesEmoji")
+    }
+
+    @Test
+    fun linkInsideCustomEmojiDegradesToLabel() {
+        // linkEntityOpen now counts custom emoji — the HTML twin's own count — so a
+        // link (Markdown or anchor tag) inside an open emoji degrades to its label
+        // text instead of nesting TEXT_LINK inside CUSTOM_EMOJI
+        val result = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x [y](https://e.com) z")
+        assertEquals(
+            listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 5, customEmojiId = "5")),
+            result.entities,
+        )
+        assertEquals("x y z", result.text)
+        assertEntitiesValid(result, "linkInsideEmoji")
+    }
+
+    @Test
+    fun codeInsideCustomEmojiRendersPlain() {
+        // A code span inside an open custom emoji renders as plain fallback text —
+        // backticks dropped, the same degradation the HTML twin's visit(code) makes
+        val result = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x `c` y</tg-emoji>")
+        assertEquals(
+            EntityText("x c y", listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 5, customEmojiId = "5"))),
+            result,
+        )
+        assertEntitiesValid(result, "codeInsideEmoji")
+    }
+
+    @Test
+    fun nestedCustomEmojiDegradesToFallback() {
+        // Both spellings of a nested custom emoji — the image syntax and a literal
+        // inner tag — degrade to the inner fallback text; the outer range stays single
+        val image = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x ![y](tg://emoji?id=6) z")
+        assertEquals(
+            EntityText("x y z", listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 5, customEmojiId = "5"))),
+            image,
+        )
+        assertEntitiesValid(image, "nestedEmojiImage")
+        val tag = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x <tg-emoji emoji-id=\"6\">y</tg-emoji> z")
+        assertEquals(
+            EntityText("x y z", listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 5, customEmojiId = "5"))),
+            tag,
+        )
+        assertEntitiesValid(tag, "nestedEmojiTag")
+    }
 }
