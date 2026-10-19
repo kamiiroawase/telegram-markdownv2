@@ -36,9 +36,10 @@ public enum class MessageEntityType(
     BLOCKQUOTE("blockquote"),
 
     /**
-     * An `<blockquote expandable>` HTML block — the collapsible quote variant; plain
-     * CommonMark input has no spelling of its own (see [TelegramEntities] for the
-     * recognized input form).
+     * An `<blockquote expandable>` HTML block — the open tag on its own line, the
+     * closing tag the block's last line — the collapsible quote variant; plain
+     * CommonMark input has no spelling of its own (every render entry's KDoc states
+     * the recognized form).
      */
     EXPANDABLE_BLOCKQUOTE("expandable_blockquote"),
 

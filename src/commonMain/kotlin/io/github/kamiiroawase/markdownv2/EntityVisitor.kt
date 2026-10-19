@@ -50,6 +50,11 @@ private data class OpenRange(
     val html: Boolean,
     // A code-family tag nested inside an open code range: no entity, no depth of its own
     val merged: Boolean = false,
+    // Whether a CODE-typed range took a codeDepth unit at open (closeRange hands it
+    // back on close). The in-code merge takes one; the in-custom-emoji merge degrades
+    // inside an entity that is no code at all and takes none — the HTML twin's
+    // OpenInlineTag.ownsCodeDepth marks the same split
+    val ownsCodeDepth: Boolean = true,
     // TEXT_LINK only: the anchor literalized because an outer link was open (tag text goes
     // literal) — a type-level mark, not a URL value, so a real href can never collide with
     // it (Visitor.kt and HtmlVisitor.kt carry the same mark)
@@ -130,10 +135,10 @@ internal class EntityVisitor(
     // range drops: Telegram ignores-or-rejects empty entities, and an empty range
     // formats nothing. A href-less anchor (the empty url) and a nested mark close
     // silently; a real anchor whose label stayed blank rewinds and degrades to the bare
-    // URL text. Every code-typed range owns a codeDepth unit (merged ones included, see
-    // renderHtmlInlineTag); closing gives it back
+    // URL text. Every code-typed range that took a codeDepth unit at open (merged ones
+    // included, see renderHtmlInlineTag) gives it back here
     private fun closeRange(range: OpenRange) {
-        if (range.type == MessageEntityType.CODE) codeDepth--
+        if (range.type == MessageEntityType.CODE && range.ownsCodeDepth) codeDepth--
         when {
             range.merged -> {}
 
@@ -148,9 +153,17 @@ internal class EntityVisitor(
                 // inside the blank label left entities behind (a whitespace-only code span
                 // registers CODE over its spaces); their offsets sit in the rewound
                 // region, so they drop with it — kept, they would format whichever text
-                // the rewind re-seats at those offsets (the URL, or the next paragraph)
+                // the rewind re-seats at those offsets (the URL, or the next paragraph).
+                // The blank region also swallowed the pending block separator (the
+                // paragraph's "\n\n", or whatever boundary completes the range); the URL
+                // would glue straight onto the next block's text without it, so the
+                // trailing newline run lifts and re-emits around the URL — the same lift
+                // the HTML twin's completeThroughSeparator makes for its closers
+                var separatorLength = 0
+                while (separatorLength < sb.length && sb[sb.length - 1 - separatorLength] == '\n') separatorLength++
                 rewindTo(range.start)
                 sb.append(range.url)
+                repeat(separatorLength) { sb.append('\n') }
             }
 
             else -> {
@@ -671,6 +684,27 @@ internal class EntityVisitor(
             codeDepth++
             return
         }
+        if (mapped == MessageEntityType.CODE && customEmojiOpen()) {
+            // A code entity can't nest inside a custom emoji either ("all other entities
+            // can't contain each other"): the tags drop — merged keeps the closer matched
+            // and emission-free — and the content continues as plain fallback text. No
+            // codeDepth unit: the emoji is no code entity, so the merge took none (the
+            // HTML twin's renderHtmlInlineTag makes the same split, see ownsCodeDepth)
+            openRanges.addLast(
+                OpenRange(
+                    MessageEntityType.CODE,
+                    sb.length,
+                    "",
+                    null,
+                    null,
+                    nextSeq++,
+                    html = true,
+                    merged = true,
+                    ownsCodeDepth = false,
+                ),
+            )
+            return
+        }
         if (codeDepth > 0) {
             // Any other formatting tag inside an open code range would nest an entity
             // Telegram rejects ("Pre and Code can't contain nested entities"): the tag
@@ -697,12 +731,16 @@ internal class EntityVisitor(
         // check, or a legal </tg-emoji> would read as id-less and go literal
         if (parts.closing) {
             if (!parts.selfClosing) {
-                val top = openRanges.lastOrNull()
-                // Merged entries match too: a tag degraded inside an open code range
-                // closes as silently as it opened
-                if (top != null && top.html && top.type == MessageEntityType.CUSTOM_EMOJI) {
-                    openRanges.removeLast()
-                    closeRange(top)
+                val entry = openRanges.lastOrNull { it.html && it.type == MessageEntityType.CUSTOM_EMOJI }
+                if (entry != null) {
+                    // Whatever opened inside the fallback completes before the emoji
+                    // does — the same boundary the image spelling draws (see
+                    // visit(image)): left open it would cross the </tg-emoji> boundary
+                    // into crossed ranges, or the closer would go literal over a nested
+                    // entry (merged entries match too: a tag degraded inside an open
+                    // code range or link closes as silently as it opened)
+                    completeOpenedAfter(entry.seq)
+                    closeRange(openRanges.removeLast())
                     return
                 }
             }

@@ -53,9 +53,10 @@ internal class HtmlBlockQuote(
 
 // A whole-line `<blockquote>` or `<blockquote expandable>` open tag: the name is
 // case-insensitive like every HTML tag, the expandable flag is the bare attribute
-// exactly as Telegram's parse-mode documentation spells it, and nothing else may ride
-// along — any other attribute keeps the block on the ordinary pre-degradation path
-private val HTML_QUOTE_OPEN_TAG = Regex("^<blockquote(\\s+expandable)?\\s*>", RegexOption.IGNORE_CASE)
+// spelled with plain spaces or tabs ahead of it (a tag split across lines is no tag —
+// the attribute may not ride a newline), and nothing else may ride along — any other
+// attribute keeps the block on the ordinary pre-degradation path
+private val HTML_QUOTE_OPEN_TAG = Regex("^<blockquote([ \\t]+expandable)?[ \\t]*>", RegexOption.IGNORE_CASE)
 
 /**
  * Recognizes the one HTML-block spelling whose block meaning the library maps instead of

@@ -62,7 +62,9 @@ public object MarkdownV2 {
      * (the default) disables truncation — the full document renders regardless of
      * length; pass [MAX_MESSAGE_LENGTH] to clip to the Telegram message limit.
      * Constructs Telegram cannot render (tables, raw HTML) are degraded to fenced code
-     * blocks; a blockquote inside a list item degrades to its content — the Bot API
+     * blocks — the one exception is a block-level `<blockquote>`/`<blockquote
+     * expandable>` HTML block (open tag on its own line), which maps to a real quote —
+     * a blockquote inside a list item degrades to its content — the Bot API
      * accepts an unescaped '>' only at a line start, never behind a list marker or
      * continuation indent; underscore-family emphasis whose markers would glue onto
      * another '_' marker (two italics side by side, an italic opening straight after
@@ -140,7 +142,9 @@ public object MarkdownV2 {
      * Emphasis markers vanish (`*bold*`, `_italic_`, `__underline__`, `~strike~`) — runs of
      * glued markers included, so `_a__b_` (the render of two italics side by side) resolves
      * to plain `ab` — code spans and fenced blocks keep their content — a code block inside
-     * a quote de-formats to its content with the per-line quote markers stripped — quote
+     * a quote de-formats to its content with the per-line quote markers stripped — an
+     * expandable quote's first-line `**` lead drops with them (plain text has no
+     * expandable carrier; the quote de-formats as a regular one) — quote
      * `>` prefixes drop wherever they sit (at a line start, behind a list marker or a
      * continuation indent — list structure itself stays — and on the continuation line of
      * a label or code span soft-broken inside a quote) — escapes
@@ -266,10 +270,14 @@ public object MarkdownV2 {
                 }
             },
             decoration = decoration,
-            // A quote piece's leading '>' must stay line-initial; a header not ending in
-            // a newline would push it mid-line, so the engine separates them — the one
+            // A quote piece's leading markers must stay line-initial; a header not
+            // ending in a newline would push them mid-line — a bare '>' would draw the
+            // reserved-character 400, and an expandable quote's "**>" would re-read as
+            // a bold opener ahead of one — so the engine separates them: the one
             // grammar shape a decoration could otherwise break
-            separatorNeeded = { head, piece -> head.isNotEmpty() && !head.endsWith("\n") && piece.startsWith(">") },
+            separatorNeeded = { head, piece ->
+                head.isNotEmpty() && !head.endsWith("\n") && (piece.startsWith(">") || piece.startsWith("**>"))
+            },
         )
 
     /**

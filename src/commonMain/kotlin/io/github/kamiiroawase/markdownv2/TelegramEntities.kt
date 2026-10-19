@@ -42,8 +42,11 @@ public object TelegramEntities {
      * [maxLength] of 0 or less (the default) disables truncation; pass
      * [MarkdownV2.MAX_MESSAGE_LENGTH] to clip to the Telegram message limit. Constructs
      * Telegram cannot render degrade the same way they do for the string formats:
-     * tables and raw HTML blocks become pre-formatted text, a link with an empty label
-     * degrades to the bare URL, and an entity whose content renders to nothing drops.
+     * tables and raw HTML blocks become pre-formatted text — the one exception is a
+     * block-level `<blockquote>`/`<blockquote expandable>` HTML block (open tag on its
+     * own line), which maps to a real blockquote/expandable_blockquote range — a link
+     * with an empty label degrades to the bare URL, and an entity whose content
+     * renders to nothing drops.
      * Rendering knobs live in [options].
      */
     public fun render(

@@ -374,18 +374,19 @@ private fun chunkQuote(
                 } else {
                     // The structured split keeps the child's formatting; the flatten
                     // fallback covers the tiny limits no prefix headroom exists for.
-                    // Either way the expandable lead yields here — the seam budgets its
-                    // pieces without those two characters, and the quote chunks on as a
-                    // regular one
-                    lead = ""
-                    if (appendStructuredQuoteChild(node, rendered, nested, maxLength, depth, options, acc)) {
+                    // The expandable lead rides the seam's first placed piece — the
+                    // seam reserves its width while it is pending — and yields only
+                    // when nothing placed can fit it
+                    if (appendStructuredQuoteChild(node, rendered, nested, maxLength, depth, options, acc, lead)) {
+                        lead = ""
                         content = true
                     } else {
                         // Untrimmed, same trade as the list path above; flattenTextOf for
                         // the same renders-but-extracts-to-nothing shapes (a lone break)
                         val text = flattenTextOf(node, depth + 1, options)
                         if (text.isNotBlank()) {
-                            chunkQuotedText(text, maxLength, acc)
+                            chunkQuotedText(text, maxLength, acc, lead)
+                            lead = ""
                             content = true
                         }
                     }
@@ -417,6 +418,12 @@ private fun chunkQuote(
  * only: their lines already carry the inner level's markers, and a deeper level's fence
  * markers hide behind them, so pairing markers from text alone cannot be exact — an
  * overflowing nested piece flattens instead (the tier the old path always took).
+ *
+ * [lead] (the expandable quote's "**", pending while the quote's first line is still
+ * unplaced) rides the first placed piece: the inner limit reserves its width while it
+ * is pending, so a single-line first piece always carries it, and it yields only when
+ * nothing placed can fit it (the tiny-limit tier) — the same ride-or-yield every other
+ * seam makes.
  */
 private fun appendStructuredQuoteChild(
     node: Node,
@@ -426,8 +433,9 @@ private fun appendStructuredQuoteChild(
     depth: Int,
     options: RenderOptions,
     acc: ChunkAccumulator,
+    lead: String = "",
 ): Boolean {
-    val innerLimit = maxLength - 2
+    val innerLimit = maxLength - 2 - lead.length
     if (innerLimit < 2) return false
     if (node.isFenceWrappedBlock()) {
         // A fence child goes straight to the prefixed-fence packer: the generic inner
@@ -436,32 +444,36 @@ private fun appendStructuredQuoteChild(
         // is the one that actually counts. Its own tiny-limit tier then flattens the
         // content as quoted text — keeping every line the old whole-child flatten kept
         val lines = rendered.lines()
-        return packPrefixedFence(lines.first(), lines.subList(1, lines.size - 1), maxLength, acc)
+        return packPrefixedFence(lines.first(), lines.subList(1, lines.size - 1), maxLength, acc, lead)
     }
     val temp = ChunkAccumulator()
     chunkBlockInto(node, rendered, innerLimit, depth + 1, options, temp)
     val pieces = temp.finish()
     if (pieces.isEmpty()) return false
 
+    var pendingLead = lead
     var produced = false
     for (piece in pieces) {
         if (nested) {
             val glued = prefixQuoteLevel(nested = true, block = piece)
-            if (glued.length <= maxLength) {
-                appendQuoteChunk(glued, maxLength, acc)
+            if (pendingLead.length + glued.length <= maxLength) {
+                appendQuoteChunk(pendingLead + glued, maxLength, acc)
+                pendingLead = ""
                 produced = true
             } else {
                 val text = deformat(piece)
                 if (text.isNotBlank()) {
-                    chunkQuotedText(text, maxLength, acc)
+                    chunkQuotedText(text, maxLength, acc, pendingLead)
+                    pendingLead = ""
                     produced = true
                 }
             }
             continue
         }
         val prefixed = prefixQuoteLevel(nested = false, block = piece)
-        if (prefixed.length <= maxLength) {
-            appendQuoteChunk(prefixed, maxLength, acc)
+        if (pendingLead.length + prefixed.length <= maxLength) {
+            appendQuoteChunk(pendingLead + prefixed, maxLength, acc)
+            pendingLead = ""
             produced = true
             continue
         }
@@ -482,7 +494,10 @@ private fun appendStructuredQuoteChild(
                 var end = index + 1
                 while (end < lines.size && !isFenceMarkerLine(lines[end])) end++
                 if (end < lines.size) {
-                    produced = packPrefixedFence(line, lines.subList(index + 1, end), maxLength, acc) || produced
+                    val placed =
+                        packPrefixedFence(line, lines.subList(index + 1, end), maxLength, acc, pendingLead)
+                    produced = placed || produced
+                    if (placed) pendingLead = ""
                     index = end + 1
                     continue
                 }
@@ -492,12 +507,14 @@ private fun appendStructuredQuoteChild(
                 // so it flattens as quoted text, the same trade packPrefixedFence's
                 // tiny-budget fallback makes (the marker line carries no escape
                 // sequences; the unescape keeps the round-trip honest regardless)
-                chunkQuotedText(unescapeMarkdownV2(line), maxLength, acc)
+                chunkQuotedText(unescapeMarkdownV2(line), maxLength, acc, pendingLead)
+                pendingLead = ""
                 produced = true
                 index++
                 continue
             }
-            appendQuoteChunk(prefixQuoteLevel(nested = false, block = line), maxLength, acc)
+            appendQuoteChunk(pendingLead + prefixQuoteLevel(nested = false, block = line), maxLength, acc)
+            pendingLead = ""
             produced = true
             index++
         }
@@ -525,39 +542,47 @@ private fun appendQuoteChunk(
 // Re-prefixes one fence's already-escaped content lines into "> "-marked groups, every
 // group carrying its own marker pair (each group is a standalone fence inside the quote,
 // the shape the full render's quoted fences take). Whitespace-only groups drop — a piece
-// whose visible text is blank is unsendable (see ChunkAccumulator.flush). Returns
-// whether anything was placed
+// whose visible text is blank is unsendable (see ChunkAccumulator.flush). [lead] (the
+// expandable "**") rides the first emitted group's open line, its width reserving into
+// that group's budget alone. Returns whether anything was placed
 private fun packPrefixedFence(
     openLine: String,
     contentLines: List<String>,
     maxLength: Int,
     acc: ChunkAccumulator,
+    lead: String = "",
 ): Boolean {
     val open = "> $openLine"
     val close = "> ```"
     // 2 = the newlines joining the marker lines to the content
     val budget = maxLength - open.length - close.length - 2
-    if (budget < 2) {
+    if (budget - lead.length < 2) {
         // Not even one escape unit fits between the markers: the fence formatting
         // yields — the content flattens as quoted text (chunkQuotedText's own
         // tiny-limit trade), unescaped first (the lines arrive already escaped)
         val text = unescapeMarkdownV2(contentLines.joinToString("\n"))
-        if (text.isNotBlank()) chunkQuotedText(text, maxLength, acc)
+        if (text.isNotBlank()) chunkQuotedText(text, maxLength, acc, lead)
         return text.isNotBlank()
     }
     var produced = false
     var current = StringBuilder()
+    var firstGroup = true
     for (line in contentLines) {
         val segments =
-            if (line.length > budget) splitEscapedUnits(line, budget) else listOf(line)
+            if (line.length > budget - lead.length) {
+                splitEscapedUnits(line, budget - lead.length)
+            } else {
+                listOf(line)
+            }
         for (segment in segments) {
             val joiner = if (current.isEmpty()) "" else "\n"
-            if (current.length + joiner.length + segment.length <= budget) {
+            if (current.length + joiner.length + segment.length <= budget - (if (firstGroup) lead.length else 0)) {
                 current.append(joiner).append(segment)
             } else {
                 if (current.isNotBlank()) {
-                    appendQuoteChunk("$open\n$current\n$close", maxLength, acc)
+                    appendQuoteChunk("${if (firstGroup) lead else ""}$open\n$current\n$close", maxLength, acc)
                     produced = true
+                    firstGroup = false
                 }
                 current.setLength(0)
                 current.append(segment)
@@ -565,7 +590,7 @@ private fun packPrefixedFence(
         }
     }
     if (current.isNotBlank()) {
-        appendQuoteChunk("$open\n$current\n$close", maxLength, acc)
+        appendQuoteChunk("${if (firstGroup) lead else ""}$open\n$current\n$close", maxLength, acc)
         produced = true
     }
     return produced
@@ -647,24 +672,32 @@ private fun unescapeMarkdownV2(text: String): String =
 
 // Escaped text chunked line-wise with "> " prefixes; a line longer than the budget splits at
 // escape-unit boundaries. With a maxLength too small for "> " + one escape unit the prefix
-// is dropped — validity and text losslessness take precedence over the quote formatting
+// is dropped — validity and text losslessness take precedence over the quote formatting.
+// [lead] (the expandable "**", carried while the quote's first line is still unplaced)
+// rides the first placed line when its width fits alongside one escape unit and drops
+// otherwise — the same precedence
 private fun chunkQuotedText(
     text: String,
     maxLength: Int,
     acc: ChunkAccumulator,
+    lead: String = "",
 ) {
     val prefixFits = maxLength >= 4
-    val budget = if (prefixFits) maxLength - 2 else maxLength
+    // The lead rides only while one escape unit still fits beside "> " and it; below
+    // that floor the split budget itself would collapse, so the flag yields — the
+    // tiny-limit precedence
+    var pendingLead = if (prefixFits && maxLength - 2 - lead.length >= 2) lead else ""
     for (line in text.lines()) {
         val escapedLine = escapeText(line)
+        val budget = if (prefixFits) maxLength - 2 - pendingLead.length else maxLength
         val segments =
             if (escapedLine.length > budget) splitEscapedUnits(escapedLine, budget) else listOf(escapedLine)
         for (segment in segments) {
             val prefixed =
                 when {
                     !prefixFits -> segment
-                    segment.isEmpty() -> ">"
-                    else -> "> $segment"
+                    segment.isEmpty() -> if (pendingLead.isEmpty()) ">" else "$pendingLead>"
+                    else -> "$pendingLead> $segment"
                 }
             if (acc.current.isEmpty()) {
                 acc.appendVerbatim(prefixed)
@@ -674,6 +707,7 @@ private fun chunkQuotedText(
                 acc.flush()
                 acc.appendVerbatim(prefixed)
             }
+            pendingLead = ""
         }
     }
 }

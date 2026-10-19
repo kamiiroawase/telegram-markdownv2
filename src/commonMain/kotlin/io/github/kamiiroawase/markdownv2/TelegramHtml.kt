@@ -37,7 +37,9 @@ public object TelegramHtml {
      * disables truncation — the full document renders regardless of length; pass
      * [MarkdownV2.MAX_MESSAGE_LENGTH] to clip to the Telegram message limit. Constructs
      * Telegram cannot render degrade the same way they do for MarkdownV2: tables, raw
-     * HTML blocks and other unsupported shapes become escaped text in a `<pre>`, a link
+     * HTML blocks and other unsupported shapes become escaped text in a `<pre>` — the
+     * one exception is a block-level `<blockquote>`/`<blockquote expandable>` HTML
+     * block (open tag on its own line), which maps to a real quote wrapper — a link
      * with an empty label or URL degrades to the non-empty piece (the bare URL when the
      * label rendered nothing, the label text when the URL is empty — there is no URL to
      * show), and an entity whose content renders to nothing drops its tags. Rendering

@@ -105,6 +105,7 @@ fun TmMessageEntity.toKtgram() = MessageEntity(
         MessageEntityType.PRE -> EntityType.Pre
         MessageEntityType.TEXT_LINK -> EntityType.TextLink
         MessageEntityType.BLOCKQUOTE -> EntityType.Blockquote
+        MessageEntityType.EXPANDABLE_BLOCKQUOTE -> EntityType.ExpandableBlockquote
         MessageEntityType.CUSTOM_EMOJI -> EntityType.CustomEmoji
     },
     offset = offset,
@@ -153,7 +154,7 @@ editMessageText(first.messageId, pages[++page].text)
 - HTML 端的块级输入 HTML（`<div>` 等）仍降级为 `<pre>` 转义文本，不透传；唯一例外是块级的 `<blockquote>` / `<blockquote expandable>`（开标签独占一行、闭标签是块内最后一行，内容按 Markdown 内联解析）——映射为真正的引用块，三格式分别输出 `>` / `**>` 行首标记（`**` 只在首行，符合官方语法）、`<blockquote>` / `<blockquote expandable>` 包装标签与 `blockquote` / `expandable_blockquote` 实体；引用嵌套按各格式既有规则展平，entities 端沿用"引用套引用"的已知重叠（见下）；`render(document)` 系列不重写调用方自带的 AST，该拼写只对库内解析的字符串入口生效
 - entities 端对引用套引用（`> > x`）产出嵌套的 blockquote 区间——Bot API 格式化规则禁止 blockquote 嵌套，但服务端发送时静默修复（丢弃内层区间），消息照常送达；对原始区间数组做严格校验的消费方需自行去重
 - 分片的"不丢字符"有三个纯空白例外：接缝触发时待拼接的纯空白行丢弃（代码块顶部或中部皆是）；超出单块预算的纯空白代码行整行丢弃；全空白的扁平化分片丢弃（服务端拒绝空白消息）——丢失的都是 Telegram 永远不会显示、或会整条拒收的空白
-- 分片还有一个结构标记例外：上限小到放不下"结构标记 + 一个内容单元"时（自定义的极小 maxLength），列表标记（`• `、`10. `）或标题井号丢弃以保住正文——正文文本永不丢弃，与三格式一致的 lead-drop 取舍（各入口 `renderChunked` 的 KDoc 已注明）
+- 分片还有一个结构标记例外：上限小到放不下"结构标记 + 一个内容单元"时（自定义的极小 maxLength），列表标记（`• `、`10. `）或标题井号丢弃以保住正文——正文文本永不丢弃，与三格式一致的 lead-drop 取舍（各入口 `renderChunked` 的 KDoc 已注明）；可展开引用的首行 `**` 标记属同一族：分片放得下就随首片携带，极小限额放不下时让位（三格式在该档位一致让位）
 - 列表项内的代码块：续行缩进（对齐列表标记宽度）落在 pre 实体内部，三格式显示的代码行都带缩进噪声且互有差异（MarkdownV2 端每行前置标记宽度的空格，HTML/entities 端仅续行缩进）——列表连续性与代码块有效性不可兼得时的既定取舍
 
 ## 开发
@@ -168,7 +169,7 @@ cd telegram-markdownv2
 
 API 参考（Dokka）随 main 分支推送自动部署到 [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/)。
 
-746 个测试——745 个行为级（输入/输出断言）外加 1 个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、按 close order 排列、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
+752 个测试——751 个行为级（输入/输出断言）外加 1 个种子化随机文档的性质测试（150 个种子，生成器覆盖强调/代码/链接/引用/列表/任务列表/表格/脚注/autolink/原始 HTML/emoji 的随机组合，对三格式断言全部不变量），全部平台运行；其中 HTML 端的每条输出过一道 tdlib HTML 解析器的规则移植（`assertTelegramHtmlParseable`），MarkdownV2 端同理（`assertTelegramParseable`），entities 端过结构校验（区间在界内、按包含嵌套、按 close order 排列、不劈开代理对）。质量门禁全挂在 `build` 上：Spotless 格式、`explicitApi()` 显式 API、binary-compatibility-validator 公开 API 快照（有意变更时跑 `./gradlew apiDump`）。
 
 ## 许可
 

@@ -217,4 +217,46 @@ class ExpandableQuoteTest {
         val regularPlain = MarkdownV2.toPlainText(MarkdownV2.render("> a\n> b"))
         assertEquals(regularPlain, expandablePlain)
     }
+
+    // ---------- the re-audit round: decoration separators, seam lead, matcher strictness ----------
+
+    @Test
+    fun decoratedChunkingSeparatesTheHeaderFromTheLead() {
+        // separatorNeeded must recognize the "**>" piece head too: a header not ending
+        // in a newline would otherwise glue onto the flag, and mid-line "**" reads as a
+        // bold opener ahead of a bare unescaped '>' — the exact 400 the separator
+        // exists to prevent (pre-fix piece 0: "Part:**> quoted aaaa bbbb")
+        val pieces =
+            MarkdownV2.renderChunked(
+                "<blockquote expandable>\nquoted aaaa bbbb\nmore quote cccc dddd eeee ffff\n</blockquote>",
+                60,
+                decoration = ChunkDecoration(header = { _, _ -> "Part:" }),
+            )
+        assertEquals(listOf("Part:\n**> quoted aaaa bbbb\n> more quote cccc dddd eeee ffff"), pieces)
+        pieces.forEachIndexed { i, piece -> assertTelegramParseable(piece, "decoratedLead$i") }
+    }
+
+    @Test
+    fun chunkingSeamCarriesTheLeadWhenItFits() {
+        // The structured seam reserves the lead's width while it is pending: the same
+        // input that keeps the flag whole at 55 keeps it on the seam's first piece at
+        // 50 (pre-fix the pieces silently downgraded to a regular quote)
+        val pieces =
+            MarkdownV2.renderChunked(
+                "<blockquote expandable>\nquoted aaaa bbbb\nmore quote cccc dddd eeee ffff\n</blockquote>",
+                50,
+            )
+        assertEquals(listOf("**> quoted aaaa bbbb", "> more quote cccc dddd eeee ffff"), pieces)
+        pieces.forEachIndexed { i, piece -> assertTelegramParseable(piece, "seamLead$i") }
+    }
+
+    @Test
+    fun matcherAdmitsNoNewlineInsideTheTag() {
+        // A tag split across lines is no tag: the block keeps the ordinary html-block
+        // degradation (pre-tightening the \s in the attribute gap matched the newline)
+        assertEquals(
+            "```\n<blockquote\nexpandable>\nx\n</blockquote>\n```",
+            MarkdownV2.render("<blockquote\nexpandable>\nx\n</blockquote>"),
+        )
+    }
 }

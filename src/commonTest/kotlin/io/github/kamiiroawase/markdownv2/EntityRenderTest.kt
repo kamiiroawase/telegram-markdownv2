@@ -843,4 +843,69 @@ class EntityRenderTest {
         )
         assertEntitiesValid(tag, "nestedEmojiTag")
     }
+
+    // ---------- the re-audit round: the code tag inside an emoji, the blank-label separator, the emoji closer ----------
+
+    @Test
+    fun codeTagInsideCustomEmojiRendersPlain() {
+        // The TAG spelling of the code-in-emoji shape visit(code) already degrades —
+        // pre-fix renderHtmlInlineTag opened a real CODE range inside CUSTOM_EMOJI,
+        // the very nesting this suite's own type rules reject. The merge takes no
+        // codeDepth unit (the emoji is no code entity); the kbd/samp/tt twins share
+        // the branch
+        val result = TelegramEntities.render("""<tg-emoji emoji-id="5">x <code>c</code> y</tg-emoji>""")
+        assertEquals(
+            EntityText("x c y", listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 5, customEmojiId = "5"))),
+            result,
+        )
+        assertEntitiesValid(result, "codeTagInsideEmoji")
+        val unclosed = TelegramEntities.render("""<tg-emoji emoji-id="5">x <kbd>c""")
+        assertEquals(
+            listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 3, customEmojiId = "5")),
+            unclosed.entities,
+        )
+        assertEntitiesValid(unclosed, "kbdTagInsideEmojiUnclosed")
+    }
+
+    @Test
+    fun blankLabelAnchorKeepsTheBlockSeparator() {
+        // The blank-label rewind swallowed the pending "\n\n" block separator with the
+        // whitespace, gluing the bare URL straight onto the next block's text
+        // ("x http://u/xq") — the trailing newline run lifts and re-emits around the
+        // URL now, the same lift the HTML twin's completeThroughSeparator makes
+        val quote = TelegramEntities.render("x <a href=\"http://u/x\"> \n\n> q")
+        assertEquals(
+            EntityText("x http://u/x\n\nq", listOf(MessageEntity(MessageEntityType.BLOCKQUOTE, 14, 1))),
+            quote,
+        )
+        assertEntitiesValid(quote, "blankLabelBeforeQuote")
+        val fence = TelegramEntities.render("x <a href=\"http://u/x\"> \n\n```\nc\n```")
+        assertEquals(
+            EntityText(
+                "x http://u/x\n\nc",
+                listOf(
+                    MessageEntity(MessageEntityType.PRE, 14, 1),
+                ),
+            ),
+            fence,
+        )
+        assertEntitiesValid(fence, "blankLabelBeforeFence")
+    }
+
+    @Test
+    fun emojiCloserCompletesNestedEntriesTightly() {
+        // The </tg-emoji> twin of the HTML fix: the anchor literalized inside the
+        // emoji (links cannot nest in it) completes at the closer instead of stranding
+        // a literal "</tg-emoji>" under the range (pre-fix text:
+        // "x <a href="u">y</tg-emoji> tail" with CUSTOM_EMOJI spanning all 31 chars)
+        val result = TelegramEntities.render("""<tg-emoji emoji-id="5">x <a href="u">y</tg-emoji> tail""")
+        assertEquals(
+            EntityText(
+                "x <a href=\"u\">y tail",
+                listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 15, customEmojiId = "5")),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "emojiCloserTight")
+    }
 }
