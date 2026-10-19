@@ -1890,4 +1890,18 @@ class RenderTest {
             "invalidEmojiFallbacks",
         )
     }
+
+    // ---------- the eighth audit round: the degraded table's pipe cells ----------
+
+    @Test
+    fun tableDegradeSubstitutesCellPipes() {
+        // A literal pipe in cell text — a GFM "\|" escape, or a code span's pipe —
+        // reads as a column edge in the degraded pipe layout, and the code block
+        // admits no escaping ("\|" would display its backslash); the fullwidth
+        // lookalike stands in, re-measured so the alignment stays exact
+        assertEquals(
+            "```\n| a｜b |\n| ---- |\n| c    |\n```",
+            MarkdownV2.render("| a\\|b |\n| --- |\n| c |"),
+        )
+    }
 }

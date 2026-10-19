@@ -763,6 +763,30 @@ class ChunkingTest {
     }
 
     @Test
+    fun chunkedQuoteFootnoteFenceKeepsEveryChunkParseable() {
+        // The marker classification saw through the list structures a fence hides
+        // behind but not the footnote definition's escaped label ("\[^1\]: ```" —
+        // the label renders ahead of the definition's first block): the opener went
+        // unpaired and rode into its chunk raw, stranding an unterminated fence on
+        // both sides (pre-fix chunk 1 was "> \[^1\]: ```\n>" — "Can't find the end
+        // of the PRE entity"). The label line now classifies as the opener; at this
+        // tiny limit the pair's budget tier flattens and the label re-seats as
+        // quoted text while the empty fence drops
+        val pieces = MarkdownV2.renderChunked("> [^1]: ```\n>   code one\n>   ```", 18)
+        assertEquals(listOf("> \\[^1\\]: ", "> code one", "> ```\n>\n> ```"), pieces)
+        pieces.forEach { assertTelegramParseable(it, "quoteFootnoteFence") }
+    }
+
+    @Test
+    fun chunkedQuoteFootnoteFenceRegroupsMarkersPerChunk() {
+        // At a limit the prefixed pair fits whole, the label keeps its fence — the
+        // same whole-piece shape the list-marker twins above pin
+        val pieces = MarkdownV2.renderChunked("> [^1]: ```\n>   code one\n>   ```", 24)
+        assertEquals(listOf("> \\[^1\\]: ```\n>\n> ```", "> code one", "> ```\n>\n> ```"), pieces)
+        pieces.forEach { assertTelegramParseable(it, "quoteFootnoteFenceRegroup") }
+    }
+
+    @Test
     fun chunkedQuoteListTableDegradesToFenceGroupsNotStrandedMarkers() {
         // The table (fence-wrapped render) twin of the code-fence shape
         val pieces = MarkdownV2.renderChunked("> - | a | b |\n>   | --- | --- |\n>   | 1 | 2 |", 61)

@@ -473,7 +473,16 @@ private fun appendStructuredQuoteChild(
                     index = end + 1
                     continue
                 }
-                // An unpaired marker cannot come from the renderers; place it as text
+                // An unpaired marker cannot come from the renderers; it must not ride
+                // into a chunk raw — a bare "```" line opens a fence no chunk closes,
+                // exactly the Telegram parse failure this regrouping exists to prevent —
+                // so it flattens as quoted text, the same trade packPrefixedFence's
+                // tiny-budget fallback makes (the marker line carries no escape
+                // sequences; the unescape keeps the round-trip honest regardless)
+                chunkQuotedText(unescapeMarkdownV2(line), maxLength, acc)
+                produced = true
+                index++
+                continue
             }
             appendQuoteChunk(prefixQuoteLevel(nested = false, block = line), maxLength, acc)
             produced = true
@@ -553,10 +562,13 @@ private fun packPrefixedFence(
 // run (letters/digits/-/+/#, ≤ 32 — the Visitor's fence filter), optionally behind the
 // list structure a fence inside a list item carries — a continuation indent (applyPrefix)
 // and/or a rendered list marker ("• ", "N\. ") when the fence opens the item's first line,
-// so "• ```", "  ```" and "1\. ```kotlin" classify alike. Both code escapers escape
-// content backticks and text-side backticks escape the same way, so no line outside a
-// fence — flattened escaped text, paragraph content, another item's marker-bearing text
-// line — can carry an unescaped one behind that structure: the classification is exact
+// so "• ```", "  ```" and "1\. ```kotlin" classify alike — or behind a footnote
+// definition's escaped label, whose first block opens after the "\[…\]: " the definition
+// renders ahead of it (footnote-defined fences in list items stack both shapes). Both
+// code escapers escape content backticks and text-side backticks escape the same way, so
+// no line outside a fence — flattened escaped text, paragraph content, another item's
+// marker-bearing text line — can carry an unescaped one behind that structure: the
+// classification is exact
 private fun isFenceMarkerLine(line: String): Boolean {
     var index = 0
     while (index < line.length && line[index] == ' ') index++
@@ -573,6 +585,30 @@ private fun isFenceMarkerLine(line: String): Boolean {
             index = markerStart
         }
     }
+    if (isFenceAt(line, index)) return true
+    // The footnote label: "\[" as text, the label's chars escaped or plain, then the
+    // "\]" whose tail reads ": " before the fence. The label may hold its own "\]: " —
+    // that candidate's tail is label content, not a fence, and the scan continues to
+    // the real terminator
+    if (!line.startsWith("\\[", index)) return false
+    var scan = index + 2
+    while (scan + 1 < line.length) {
+        if (line[scan] == '\\' && line[scan + 1] == ']' &&
+            line.startsWith(": ", scan + 2) &&
+            isFenceAt(line, scan + 4)
+        ) {
+            return true
+        }
+        scan += if (line[scan] == '\\') 2 else 1
+    }
+    return false
+}
+
+// The fence head the classification strips down to: "```" plus the filtered language run
+private fun isFenceAt(
+    line: String,
+    index: Int,
+): Boolean {
     if (!line.startsWith("```", index)) return false
     val language = line.substring(index + 3)
     return language.isEmpty() ||

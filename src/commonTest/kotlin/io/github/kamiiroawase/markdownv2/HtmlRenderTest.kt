@@ -905,4 +905,42 @@ class HtmlRenderTest {
             TelegramHtml.render("<tg-emoji emoji-id=\"5\"><b>x</b></tg-emoji>"),
         )
     }
+
+    // ---------- the eighth audit round: emoji completions at block boundaries, output-time fallbacks, table pipes ----------
+
+    @Test
+    fun preCompletesOpenCustomEmojiTag() {
+        // Pre-fix the block landed inside the unclosed <tg-emoji> — a pre/blockquote
+        // nested in the custom-emoji fallback, the containment the anchor twin
+        // completes (preCompletesOpenAnchor); linkEntityOpen already counts a real
+        // custom emoji among its link entities, so the boundary treats it alike
+        val fence = TelegramHtml.render("<tg-emoji emoji-id=\"5\">x\n\n```\nc\n```")
+        assertEquals("<tg-emoji emoji-id=\"5\">x</tg-emoji>\n\n<pre>c</pre>", fence)
+        assertTelegramHtmlParseable(fence, "preCompletesEmoji")
+        val quote = TelegramHtml.render("<tg-emoji emoji-id=\"5\">x\n> q")
+        assertEquals("<tg-emoji emoji-id=\"5\">x</tg-emoji>\n\n<blockquote>q</blockquote>", quote)
+        assertTelegramHtmlParseable(quote, "blockquoteCompletesEmoji")
+    }
+
+    @Test
+    fun blankCustomEmojiFallbackAtOutputKeepsItsUrl() {
+        // The output-time blank widening let the empty branch win over the URL
+        // degradation and silently dropped the address (pre-fix: "a") — the anchor
+        // twin keeps its bare URL at output (closeAnchor's blank label) and mid-render
+        // ships it (blankEmojiFallbackDegradesToTheBareUrl); a zero-length fallback
+        // still drops, the entities twin's own empty-fallback trade
+        assertEquals("a tg://emoji?id=5", TelegramHtml.render("a <tg-emoji emoji-id=\"5\"> <!-- c -->"))
+    }
+
+    @Test
+    fun tableDegradeSubstitutesCellPipes() {
+        // The pipe layout admits no escape sequence, and a bare pipe reads as a column
+        // edge (a GFM "\|" cell escape lands here as a plain pipe) — the fullwidth
+        // lookalike keeps the cell one column, re-measured so the alignment stays
+        // exact (the MarkdownV2 and entities twins share the same table renderer)
+        assertEquals(
+            "<pre>| a｜b |\n| ---- |\n| c    |</pre>",
+            TelegramHtml.render("| a\\|b |\n| --- |\n| c |"),
+        )
+    }
 }

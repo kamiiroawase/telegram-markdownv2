@@ -11,7 +11,9 @@ import org.commonmark.node.Node
  * Renders a GFM table as monospaced aligned multi-line text (for code-block degradation):
  * the first row acts as the header, characters measure via [RenderOptions.displayWidthOf]
  * (wide chars align at double width by default), missing cells are padded empty and surplus
- * cells are dropped.
+ * cells are dropped. A literal pipe in cell text substitutes its fullwidth lookalike —
+ * the layout admits no escaping, and a bare pipe would read as a column edge (see
+ * [cellText]); the widths derive from the substituted text, so alignment stays exact.
  */
 internal fun renderTableLines(
     table: TableBlock,
@@ -94,10 +96,15 @@ private fun padCell(
     }
 }
 
+// The pipe layout cannot carry a literal pipe: inside the code-block degradation it
+// admits no escaping ("\|" would display its backslash), and left bare the character
+// reads as a column edge — a GFM "\|" cell escape and a code span's pipe both land
+// here as plain text. The fullwidth lookalike stands in: visible, never a separator,
+// and re-measured by the same display-width pass so the columns stay aligned
 private fun cellText(cell: TableCell): String {
     val sb = StringBuilder()
     appendPlainText(sb, cell)
-    return sb.toString().trim()
+    return sb.toString().trim().replace('|', '｜')
 }
 
 private fun Node.tableRows(): List<List<TableCell>> {

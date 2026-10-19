@@ -35,7 +35,7 @@ import org.commonmark.node.ThematicBreak
 // and closing turns it into a MessageEntity computed against the live length. A range
 // whose content stays empty closes into nothing (Telegram drops zero-length entities,
 // the same trade the HTML render's empty-pair rewind makes)
-private class OpenRange(
+private data class OpenRange(
     val type: MessageEntityType,
     val start: Int,
     // TEXT_LINK only: the URL, "" for a href-less anchor (no entity on close)
@@ -209,7 +209,12 @@ internal class EntityVisitor(
     // later over whatever text re-seats at its start is exactly how the string twins
     // treat an unclosed tag (their openers stay visible and complete at output time), so
     // all three formats format the same trailing text — see
-    // unclosedAnchorInBlankParagraphCompletesAcrossFormats
+    // unclosedAnchorInBlankParagraphCompletesAcrossFormats. A survivor that opened
+    // inside the rewound region carries a start beyond the rewind point: kept as-is, its
+    // close would measure the range from inside whatever text re-seats there (an entity
+    // strictly nested inside a later PRE, or a format range missing the re-seated text's
+    // first characters) where the twins complete from the region's first character — so
+    // its start converges to the rewind point
     private fun rewindTo(start: Int) {
         // A rewind never extends: setLength past the live length would pad the gap with
         // NUL characters. The shape arises when a range opened inside a blank paragraph
@@ -224,6 +229,10 @@ internal class EntityVisitor(
             if (entity.offset + entity.length > start) {
                 entities[index] = entity.copy(length = start - entity.offset)
             }
+        }
+        for (index in openRanges.indices) {
+            val range = openRanges[index]
+            if (range.start > start) openRanges[index] = range.copy(start = start)
         }
         sb.setLength(start)
     }

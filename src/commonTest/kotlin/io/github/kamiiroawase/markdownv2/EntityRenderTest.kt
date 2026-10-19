@@ -655,8 +655,16 @@ class EntityRenderTest {
         assertEquals(EntityText("u", emptyList()), rendered)
         assertEntitiesValid(rendered, "blankLabelPastRewind")
 
+        // With text re-seated after the rewind, the converged start (see
+        // rangeOpenedAfterRewoundTextConvergesToTheRewindPoint) makes the anchor
+        // complete over that text as the link itself — the same completion the HTML
+        // twin ships and the pinned blank-paragraph cross-format contract pins —
+        // where it used to degrade to a trailing bare URL under the stale start
         val across = TelegramEntities.render("` `      <a href=\"u\">\n\nx")
-        assertEquals("x\n\nu", across.text)
+        assertEquals(
+            EntityText("x", listOf(MessageEntity(MessageEntityType.TEXT_LINK, 0, 1, "u"))),
+            across,
+        )
         assertFalse('\u0000' in across.text)
         assertEntitiesValid(across, "blankLabelPastRewindAcross")
     }
@@ -681,5 +689,31 @@ class EntityRenderTest {
         val rendered = TelegramEntities.render("<code><tg-emoji emoji-id=\"0\">x</tg-emoji></code>")
         assertEquals("<tg-emoji emoji-id=\"0\">x</tg-emoji>", rendered.text)
         assertEntitiesValid(rendered, "invalidEmojiIdInCode")
+    }
+
+    // ---------- the seventh audit round: post-rewind range starts converge ----------
+
+    @Test
+    fun rangeOpenedAfterRewoundTextConvergesToTheRewindPoint() {
+        // <br>'s newline pushed the range's start past the point the blank paragraph's
+        // rewind restored: the unclosed <u> then formatted "ello" only (UNDERLINE(1,4))
+        // — or, with a PRE block following, measured strictly inside the pre's text
+        // (UNDERLINE(1,1) inside PRE(0,2), the nesting the Bot API rejects). The start
+        // now converges to the rewind point: the range covers the re-seated text from
+        // its first character, the same-span containment the pinned bold-over-pre
+        // shape ships
+        val plain = TelegramEntities.render("<br><u>\n\nhello")
+        assertEquals(listOf(MessageEntity(MessageEntityType.UNDERLINE, 0, 5)), plain.entities)
+        assertEquals("hello", plain.text)
+        assertEntitiesValid(plain, "rewindStartConverges")
+        val pre = TelegramEntities.render("<br><u><code>\n\n```\ncc\n```")
+        assertEquals(
+            listOf(
+                MessageEntity(MessageEntityType.PRE, 0, 2),
+                MessageEntity(MessageEntityType.UNDERLINE, 0, 2),
+            ),
+            pre.entities,
+        )
+        assertEntitiesValid(pre, "rewindStartConvergesBeforePre")
     }
 }

@@ -84,10 +84,12 @@ private class OpenAnchorTag(
  * complete at the nearest container boundary (an emphasis, strikethrough or link/image
  * label that closes over them) or at output time, always latest-opened first so the
  * output stays properly nested; code tags cannot span blocks ("Pre and Code can't
- * contain nested entities") and complete at every block start, while anchors
- * additionally complete before <pre>-emitting blocks and block quotes (neither a pre
- * nor a blockquote wrapper may sit inside a link entity — the entities documentation's
- * "Cannot be nested inside other entities"); block quotes wrap in <blockquote> tags
+ * contain nested entities") and complete at every block start, while anchors and
+ * custom-emoji tags additionally complete before <pre>-emitting blocks and block quotes
+ * (neither a pre nor a blockquote wrapper may sit inside a link entity — the entities
+ * documentation's "Cannot be nested inside other entities" — nor inside a custom
+ * emoji's fallback, "all other entities can't contain each other"); block quotes wrap
+ * in <blockquote> tags
  * (no line-prefix grammar to satisfy, so — unlike the MarkdownV2 visitor — a quote
  * inside a list item keeps its formatting; nested quotes flatten into one wrapper —
  * Bot API formatting rules say blockquote entities can't nest); tables degrade to
@@ -157,8 +159,11 @@ internal class HtmlVisitor(
     // whitespace is real output (it sits between words — `<b> </b>` keeps its space),
     // while at output time the trailing trimEnd strips it anyway and would expose a
     // literal empty pair (`a <b>` + separator renders `a <b></b>`), so only there does
-    // blank read as empty. A tg-emoji entry's blank fallback never rewrites to nothing:
-    // its url keeps the emoji's address as visible text (see OpenInlineTag.url)
+    // blank read as empty. A url-carrying entry (a real custom emoji) runs its blank
+    // fallback BEFORE the widened empty test: whitespace-only content still degrades to
+    // the bare escaped URL at output time — the address the anchor twin keeps there
+    // (closeAnchor's blank label), never an empty rewrite — while a zero-length region
+    // drops outright, the entities twin's own empty-fallback trade (see OpenInlineTag.url)
     private fun closeInlineTag(
         entity: OpenInlineTag,
         sink: StringBuilder,
@@ -172,6 +177,17 @@ internal class HtmlVisitor(
             return
         }
         val contentStart = entity.openStart + entity.openLength
+        if (entity.url != null && sb.length > contentStart && regionIsBlank(contentStart)) {
+            // Telegram requires the custom emoji fallback: one that renders to no visible
+            // text degrades to the bare escaped URL — the same trade the anchor paths
+            // make of a blank label, and the MarkdownV2 twin makes here. Like
+            // closeAnchor's blank-label branch the URL lands in sb, not the closers
+            // builder: at output time trimEnd would otherwise eat the whitespace
+            // between the preceding text and the address
+            sb.setLength(entity.openStart)
+            sb.append(escapeHtmlText(entity.url))
+            return
+        }
         val empty = sb.length == contentStart || (outputTime && regionIsBlank(contentStart))
         if (entity.openStart >= 0 && empty) {
             // Nothing visible was emitted inside the entity — Telegram rejects empty
@@ -179,14 +195,6 @@ internal class HtmlVisitor(
             // goes back too: the entity no longer exists
             if (entity.tag == "code") codeDepth--
             sb.setLength(entity.openStart)
-            return
-        }
-        if (entity.url != null && regionIsBlank(contentStart)) {
-            // Telegram requires the custom emoji fallback: one that renders to no visible
-            // text degrades to the bare escaped URL — the same trade the anchor paths
-            // make of a blank label, and the MarkdownV2 twin makes here
-            sb.setLength(entity.openStart)
-            sink.append(escapeHtmlText(entity.url))
             return
         }
         if (entity.tag == "code") codeDepth--
@@ -505,19 +513,25 @@ internal class HtmlVisitor(
     }
 
     /**
-     * The <pre>-emitting twin of [completeOpenInlineCodeTags]: completes code tags and
-     * anchors alike (everything opened inside the earliest of them) before a `<pre>`
-     * block emits. A pre entity may not sit inside a link entity — the entities
-     * documentation's "Cannot be nested inside other entities" — and a Markdown link
-     * never spans blocks, so an unclosed HTML anchor must not reach across one either.
-     * Emphasis keeps the documented complete-at-output behavior (the pinned
-     * bold-over-pre containment).
+     * The <pre>-emitting twin of [completeOpenInlineCodeTags]: completes code tags,
+     * custom-emoji tags and anchors alike (everything opened inside the earliest of
+     * them) before a `<pre>` block or blockquote wrapper emits. A pre entity may not
+     * sit inside a link entity — the entities documentation's "Cannot be nested inside
+     * other entities" — nor inside a custom emoji's fallback ("all other entities can't
+     * contain each other"), and a Markdown link never spans blocks, so an unclosed HTML
+     * anchor must not reach across one either (linkEntityOpen counts a real custom
+     * emoji among its link entities, so the tag completes for the same reason the
+     * anchor does). Merged tg-emoji entries never reach the boundary themselves: they
+     * only exist beneath an open code or link entry that is already one. Emphasis
+     * keeps the documented complete-at-output behavior (the pinned bold-over-pre
+     * containment).
      */
     private fun completeOpenInlineCodeAndAnchorTags() {
         val boundary =
             openTags
-                .filter { (it is OpenInlineTag && it.tag == "code") || it is OpenAnchorTag }
-                .minOfOrNull { it.seq }
+                .filter {
+                    (it is OpenInlineTag && (it.tag == "code" || it.tag == "tg-emoji")) || it is OpenAnchorTag
+                }.minOfOrNull { it.seq }
                 ?: return
         completeThroughSeparator(boundary - 1)
     }
