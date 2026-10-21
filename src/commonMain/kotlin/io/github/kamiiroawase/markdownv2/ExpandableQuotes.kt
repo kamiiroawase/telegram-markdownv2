@@ -87,26 +87,47 @@ private const val CLOSE_TAG = "</blockquote>"
  * replacement it just built. The rewrite runs only on trees the library parsed itself
  * (see parseForRender): a tree handed to the render(document) overloads is the caller's
  * AST, spelling and all.
+ *
+ * The walk itself is iterative (an explicit work stack, the same shape
+ * IterativeExtensions gives its post-processors): every sibling chain descends one work
+ * item per node regardless of parser nesting depth, so no input — a pathological
+ * quote-in-quote chain the parser itself happily builds at thousands of levels — can
+ * overflow the call stack here. The library's contract is that pathological input
+ * flattens or degrades, never crashes, and the renderer's own depth cap
+ * (MAX_RENDER_DEPTH) stays the only bound that matters.
  */
 internal fun rewriteExpandableHtmlQuotes(
     root: Node,
     parser: Parser,
     depth: Int = 0,
 ) {
-    var node = root.firstChild
-    while (node != null) {
-        val next = node.next
-        val quote = quoteHtmlBlockOf(node, parser, depth)
-        if (quote != null) {
-            node.insertAfter(quote)
-            node.unlink()
-            rewriteExpandableHtmlQuotes(quote, parser, depth + 1)
-        } else {
-            rewriteExpandableHtmlQuotes(node, parser, depth)
+    // One work item per node whose children to walk; depth grows only through
+    // quote-spelling replacements (a nested <blockquote> re-parse), the depth the cap
+    // below keys on — plain structural nesting rides at its parent's depth
+    val stack = ArrayDeque<QuoteRewriteWork>()
+    stack.addLast(QuoteRewriteWork(root, depth))
+    while (stack.isNotEmpty()) {
+        val work = stack.removeLast()
+        var node = work.parent.firstChild
+        while (node != null) {
+            val next = node.next
+            val quote = quoteHtmlBlockOf(node, parser, work.depth)
+            if (quote != null) {
+                node.insertAfter(quote)
+                node.unlink()
+                stack.addLast(QuoteRewriteWork(quote, work.depth + 1))
+            } else {
+                stack.addLast(QuoteRewriteWork(node, work.depth))
+            }
+            node = next
         }
-        node = next
     }
 }
+
+private class QuoteRewriteWork(
+    val parent: Node,
+    val depth: Int,
+)
 
 // The HtmlBlock → BlockQuote conversion; null leaves the node untouched. The depth cap
 // matches the render cap: a pathological chain of nested quote spellings (each level

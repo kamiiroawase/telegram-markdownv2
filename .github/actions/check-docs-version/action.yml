@@ -59,7 +59,7 @@ runs:
         # every old version by design, so requiring the previous one to disappear
         # would fail every release
         if [ "$REVERSE" = "true" ]; then
-          PREV_TAG="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          PREV_TAG="$(git describe --tags --abbrev=0 --match="v*" "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
           if [ -n "$PREV_TAG" ]; then
             PREV_VERSION="${PREV_TAG#v}"
             for doc in $DOCS; do

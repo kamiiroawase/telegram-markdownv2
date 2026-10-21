@@ -292,4 +292,36 @@ class HtmlTruncationTest {
             TelegramHtml.render("- ![😀](tg://emoji?id=5368324170671202286) " + "t".repeat(40), 12),
         )
     }
+
+    // ---------- the tenth audit round: the language fence's yielding tier, separated quote fallbacks ----------
+
+    @Test
+    fun languageFenceDegradesToBarePreWhenTheClassTagCannotFit() {
+        // The language rides the open tag's class attribute (35 chars with a short
+        // language); a budget too small for that tag beside any content used to drop
+        // the whole block to the plain-text fallback — pre structure and language both
+        // gone at budgets where the MarkdownV2 twin keeps its 3-char fence and the
+        // entities twin keeps its language-carrying range. The language yields first:
+        // a bare <pre> keeps the block a code block (and the chunk seam degrades
+        // alike)
+        val content = "```kotlin\nval x = 1\n```"
+        assertEquals("<pre>val x = 1</pre>…", TelegramHtml.render(content, 30))
+        assertEquals(
+            listOf("<pre>val x = 1</pre>"),
+            TelegramHtml.renderChunked(content, 30),
+        )
+        // Contrast: a budget that holds the class tag keeps the language
+        assertEquals(
+            "<pre><code class=\"language-kotlin\">val x = 1</code></pre>",
+            TelegramHtml.render(content, 0),
+        )
+    }
+
+    @Test
+    fun quotePlainFallbackSeparatesTheQuoteParagraphs() {
+        // The plain fallback of a quote too small for its wrapper used to weld the
+        // quote's paragraphs together ("aaaaaabbbbbb"); the block separator keeps
+        // them apart, the display the structured paths ship
+        assertEquals("aaaaaa\n\nbbb…", TelegramHtml.render("> aaaaaa\n>\n> bbbbbb", 12))
+    }
 }

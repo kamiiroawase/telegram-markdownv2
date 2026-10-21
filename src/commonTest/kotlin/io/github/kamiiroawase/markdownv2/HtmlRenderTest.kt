@@ -697,10 +697,12 @@ class HtmlRenderTest {
     }
 
     @Test
-    fun customEmojiEmptyFallbackDropsThePair() {
-        // An empty tg-emoji pair is an empty entity — Telegram requires the fallback, so
-        // the pair rewinds (the entities twin's zero-length range drops alike)
-        assertEquals("", TelegramHtml.render("![](tg://emoji?id=5368324170671202286)"))
+    fun customEmojiEmptyFallbackDegradesToTheBareUrl() {
+        // An empty fallback is a blank label: the pair degrades to the bare URL — the
+        // same trade the anchor paths and the MarkdownV2/entities twins make, so all
+        // three formats show the same text (pre-fix the pair rewound to nothing here,
+        // a zero-length-only divergence from the whitespace-only shape beside it)
+        assertEquals("tg://emoji?id=5368324170671202286", TelegramHtml.render("![](tg://emoji?id=5368324170671202286)"))
     }
 
     // ---------- fence language stays inside the attribute grammar ----------
@@ -730,13 +732,16 @@ class HtmlRenderTest {
         // An unclosed anchor inside the fallback used to pop under an unchecked cast —
         // a ClassCastException crashing the whole render. It now completes before the
         // emoji closes, literalized exactly the way the MarkdownV2 twin renders it
-        // (links cannot nest inside a custom emoji)
+        // (links cannot nest inside a custom emoji). The literal text is no single
+        // emoji, so the wrapper itself degrades away (the single-emoji validation the
+        // MarkdownV2 twin has always run) — the anchor completion still happens first,
+        // so no tag strands
         assertEquals(
-            "<tg-emoji emoji-id=\"5\">&lt;a href=\"u\"&gt;x</tg-emoji> tail",
+            "&lt;a href=\"u\"&gt;x tail",
             TelegramHtml.render("""![<a href="u">x](tg://emoji?id=5) tail"""),
         )
         assertEquals(
-            "<tg-emoji emoji-id=\"5\">&lt;a&gt;x</tg-emoji> tail",
+            "&lt;a&gt;x tail",
             TelegramHtml.render("""![<a>x](tg://emoji?id=5) tail"""),
         )
     }
@@ -745,13 +750,15 @@ class HtmlRenderTest {
     fun customEmojiFallbackClosesInlineTagsTightly() {
         // The unclosed <b> completes before </tg-emoji>, so the entity ends at the
         // image — the same tight close a balanced fallback gets, not one swallowing the
-        // text that follows
+        // text that follows. The tagged fallback is no single emoji, so the wrapper
+        // degrades and the bold's balanced pair ships alone — the MarkdownV2 twin's
+        // exact output shape (`*x*` without the `![…]` opener)
         assertEquals(
-            "<tg-emoji emoji-id=\"7\"><b>x</b></tg-emoji> tail",
+            "<b>x</b> tail",
             TelegramHtml.render("![<b>x](tg://emoji?id=7) tail"),
         )
         assertEquals(
-            "<tg-emoji emoji-id=\"7\"><b>x</b></tg-emoji> tail",
+            "<b>x</b> tail",
             TelegramHtml.render("![<b>x</b>](tg://emoji?id=7) tail"),
         )
     }
@@ -760,9 +767,10 @@ class HtmlRenderTest {
     fun anchorInsideCustomEmojiFallbackLiteralizes() {
         // The tag path twin: an <a> opened inside a <tg-emoji> fallback literalizes —
         // links cannot nest inside a custom emoji, the same degradation the MarkdownV2
-        // twin makes (its emoji entries are anchors, so its linkEntityOpen reads true)
+        // twin makes (its emoji entries are anchors, so its linkEntityOpen reads true).
+        // The literal text breaks the single-emoji fallback, so the wrapper drops too
         assertEquals(
-            "<tg-emoji emoji-id=\"5\">&lt;a href=\"u\"&gt;x&lt;/a&gt;</tg-emoji>",
+            "&lt;a href=\"u\"&gt;x&lt;/a&gt;",
             TelegramHtml.render("""<tg-emoji emoji-id="5"><a href="u">x</a></tg-emoji>"""),
         )
     }
@@ -805,9 +813,11 @@ class HtmlRenderTest {
     fun nestedTgEmojiTagDegradesToItsFallbackText() {
         // A custom emoji counts as link-open (see linkEntityOpen), so an inner tag
         // drops and its fallback renders as plain text — the same degradation the
-        // image path makes of an inner emoji (the tags used to nest)
+        // image path makes of an inner emoji (the tags used to nest). The mixed
+        // fallback is no single emoji, so the outer wrapper degrades too — plain text
+        // alone remains, the MarkdownV2 twin's exact output
         assertEquals(
-            "<tg-emoji emoji-id=\"1\">abc</tg-emoji>",
+            "abc",
             TelegramHtml.render("<tg-emoji emoji-id=\"1\">a<tg-emoji emoji-id=\"2\">b</tg-emoji>c</tg-emoji>"),
         )
     }
@@ -872,22 +882,23 @@ class HtmlRenderTest {
     }
 
     @Test
-    fun codeInsideCustomEmojiDegradesToPlainText() {
-        // "All other entities can't contain each other": a code entity may not nest
-        // inside a custom emoji, so code-family tags and spans drop their tags and their
-        // content renders as plain fallback text — the tag path, its kbd synonym and the
-        // image syntax's markdown span alike
+    fun codeInsideCustomEmojiKeepsTheCodeTags() {
+        // A code-bearing fallback is never a single emoji, so the tg-emoji wrapper
+        // degrades — and the code tags pass through freely, the formatting surviving
+        // the fallback's own degradation exactly as the MarkdownV2 twin keeps its `
+        // markers and the entities twin keeps its CODE range (pre-fix the tags dropped
+        // here, a display divergence between the formats)
         assertEquals(
-            "<tg-emoji emoji-id=\"5\">x</tg-emoji>",
+            "<code>x</code>",
             TelegramHtml.render("<tg-emoji emoji-id=\"5\"><code>x</code></tg-emoji>"),
         )
         assertEquals(
-            "<tg-emoji emoji-id=\"5\">x</tg-emoji>",
+            "<code>x</code>",
             TelegramHtml.render("<tg-emoji emoji-id=\"5\"><kbd>x</kbd></tg-emoji>"),
         )
-        assertEquals("<tg-emoji emoji-id=\"5\">x</tg-emoji>", TelegramHtml.render("![`x`](tg://emoji?id=5)"))
+        assertEquals("<code>x</code>", TelegramHtml.render("![`x`](tg://emoji?id=5)"))
         assertEquals(
-            "<tg-emoji emoji-id=\"5\">a x b</tg-emoji>",
+            "a <code>x</code> b",
             TelegramHtml.render("<tg-emoji emoji-id=\"5\">a `x` b</tg-emoji>"),
         )
         assertTelegramHtmlParseable(
@@ -899,9 +910,11 @@ class HtmlRenderTest {
     @Test
     fun boldStaysFormattedInsideCustomEmoji() {
         // Only the code family degrades inside a custom emoji: the bold family is legal
-        // there ("can contain and be part of any other entity"), so its tags stay
+        // there ("can contain and be part of any other entity"). The tagged fallback is
+        // no single emoji, so the wrapper degrades — but the bold's own pair survives
+        // intact, the MarkdownV2 twin's exact output (`*x*` with the `![` opener gone)
         assertEquals(
-            "<tg-emoji emoji-id=\"5\"><b>x</b></tg-emoji>",
+            "<b>x</b>",
             TelegramHtml.render("<tg-emoji emoji-id=\"5\"><b>x</b></tg-emoji>"),
         )
     }
@@ -913,13 +926,19 @@ class HtmlRenderTest {
         // Pre-fix the block landed inside the unclosed <tg-emoji> — a pre/blockquote
         // nested in the custom-emoji fallback, the containment the anchor twin
         // completes (preCompletesOpenAnchor); linkEntityOpen already counts a real
-        // custom emoji among its link entities, so the boundary treats it alike
-        val fence = TelegramHtml.render("<tg-emoji emoji-id=\"5\">x\n\n```\nc\n```")
-        assertEquals("<tg-emoji emoji-id=\"5\">x</tg-emoji>\n\n<pre>c</pre>", fence)
+        // custom emoji among its link entities, so the boundary treats it alike. The
+        // fallback is a single emoji so the tag legitimately survives the completion —
+        // and closes tightly at the cluster; a non-emoji fallback drops the wrapper
+        // outright instead (the single-emoji validation)
+        val fence = TelegramHtml.render("<tg-emoji emoji-id=\"5\">😀\n\n```\nc\n```")
+        assertEquals("<tg-emoji emoji-id=\"5\">😀</tg-emoji>\n\n<pre>c</pre>", fence)
         assertTelegramHtmlParseable(fence, "preCompletesEmoji")
-        val quote = TelegramHtml.render("<tg-emoji emoji-id=\"5\">x\n> q")
-        assertEquals("<tg-emoji emoji-id=\"5\">x</tg-emoji>\n\n<blockquote>q</blockquote>", quote)
+        val quote = TelegramHtml.render("<tg-emoji emoji-id=\"5\">😀\n> q")
+        assertEquals("<tg-emoji emoji-id=\"5\">😀</tg-emoji>\n\n<blockquote>q</blockquote>", quote)
         assertTelegramHtmlParseable(quote, "blockquoteCompletesEmoji")
+        val plain = TelegramHtml.render("<tg-emoji emoji-id=\"5\">x\n\n```\nc\n```")
+        assertEquals("x\n\n<pre>c</pre>", plain)
+        assertTelegramHtmlParseable(plain, "preCompletesEmojiPlainFallback")
     }
 
     @Test
@@ -927,8 +946,8 @@ class HtmlRenderTest {
         // The output-time blank widening let the empty branch win over the URL
         // degradation and silently dropped the address (pre-fix: "a") — the anchor
         // twin keeps its bare URL at output (closeAnchor's blank label) and mid-render
-        // ships it (blankEmojiFallbackDegradesToTheBareUrl); a zero-length fallback
-        // still drops, the entities twin's own empty-fallback trade
+        // ships it (blankEmojiFallbackDegradesToTheBareUrl); zero-length and
+        // whitespace-only fallbacks degrade alike now, every format showing the URL
         assertEquals("a tg://emoji?id=5", TelegramHtml.render("a <tg-emoji emoji-id=\"5\"> <!-- c -->"))
     }
 
@@ -967,9 +986,10 @@ class HtmlRenderTest {
     @Test
     fun listItemPreCompletesOpenCustomEmojiTag() {
         // The tg-emoji twin of the anchor case: completeOpenInlineCodeAndAnchorTags
-        // completes the emoji tag too, so the item's <pre> stays outside it
-        val output = TelegramHtml.render("<tg-emoji emoji-id=\"5\">x\n\n- item\n\n  ```\n  c\n  ```")
-        assertEquals("<tg-emoji emoji-id=\"5\">x</tg-emoji>\n\n• item\n\n  <pre>c</pre>", output)
+        // completes the emoji tag too, so the item's <pre> stays outside it. The
+        // fallback is a single emoji, so the tag survives the completion
+        val output = TelegramHtml.render("<tg-emoji emoji-id=\"5\">😀\n\n- item\n\n  ```\n  c\n  ```")
+        assertEquals("<tg-emoji emoji-id=\"5\">😀</tg-emoji>\n\n• item\n\n  <pre>c</pre>", output)
         assertTelegramHtmlParseable(output, "listItemPreCompletesEmoji")
     }
 
@@ -1001,18 +1021,60 @@ class HtmlRenderTest {
         // always drew: everything opened inside the fallback completes first, then the
         // emoji closes. Pre-fix the closer went literal whenever anything sat on top —
         // including zero-output merged entries — and the two spellings of one construct
-        // diverged
+        // diverged. None of these fallbacks is a single emoji, so the wrapper degrades
+        // — with the inner entries still completed first, their balanced pairs plain
+        // to see in the output
         assertEquals(
-            "<tg-emoji emoji-id=\"5\">&lt;a&gt;x</tg-emoji> tail",
+            "&lt;a&gt;x tail",
             TelegramHtml.render("<tg-emoji emoji-id=\"5\"><a>x</tg-emoji> tail"),
         )
         assertEquals(
-            "<tg-emoji emoji-id=\"5\">x</tg-emoji> tail",
+            "<code>x</code> tail",
             TelegramHtml.render("<tg-emoji emoji-id=\"5\"><code>x</tg-emoji> tail"),
         )
         assertEquals(
-            "<tg-emoji emoji-id=\"7\"><b>x</b></tg-emoji> tail",
+            "<b>x</b> tail",
             TelegramHtml.render("<tg-emoji emoji-id=\"7\"><b>x</tg-emoji> tail"),
         )
+        // The tight close a single-emoji fallback keeps: the boundary completes the
+        // unclosed bold inside the entity, the cluster alone wrapped
+        assertEquals(
+            "<tg-emoji emoji-id=\"7\">😀</tg-emoji> tail",
+            TelegramHtml.render("<tg-emoji emoji-id=\"7\">😀<b></tg-emoji> tail"),
+        )
+    }
+
+    // ---------- the re-audit round: same-type tags, the quote seam's empty inner ----------
+
+    @Test
+    fun sameTypeTagNestingDegradesToTheOuterEntity() {
+        // Telegram bars same-type entities from nesting; the MarkdownV2 twin's flat
+        // markers cannot express the shape (`*a*b*c*`) and the entities twin degrades
+        // the inner range — the tag drops here too, the content continuing inside the
+        // outer entity whose formatting already covers it (the display is identical)
+        assertEquals("<b>abc</b>", TelegramHtml.render("<b>a<b>b</b>c</b>"))
+        assertEquals("<i>ab</i>", TelegramHtml.render("<i>a<i>b</i></i>"))
+        // Different types still nest freely
+        assertEquals("<b>a<i>b</i></b>", TelegramHtml.render("<b>a<i>b</i></b>"))
+    }
+
+    @Test
+    fun whitespaceFenceInsideAQuoteChunksToNothingInsteadOfCrashing() {
+        // A quote child that renders visible HTML but carries no placeable text (a
+        // whitespace-only fence) yields zero pieces at the inner seam — the tail
+        // subList used to throw IllegalArgumentException, both before this round (the
+        // final handoff) and at the new tail-packing line. The quote now renders
+        // nothing, the full render's own all-blank-child skip (the MarkdownV2 twin
+        // emits its bare ">" marker; the entities twin skips alike)
+        assertEquals(emptyList<String>(), TelegramHtml.renderChunked("> ```\n>  \n> ```", 30))
+        assertEquals(emptyList<String>(), TelegramHtml.renderChunked("> ```\n>  \n> ```", 36))
+        // A longer whitespace fence sweeps the whole crash window
+        for (limit in 30..75) {
+            val content = "> ```\n> " + " ".repeat(40) + "\n> ```"
+            for (piece in TelegramHtml.renderChunked(content, limit)) {
+                assertTrue(piece.length <= limit, "over-limit piece at $limit")
+                assertTelegramHtmlParseable(piece, "whitespaceFenceQuote")
+            }
+        }
     }
 }

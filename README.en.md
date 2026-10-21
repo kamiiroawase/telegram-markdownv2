@@ -180,7 +180,7 @@ cd telegram-markdownv2
 
 The API reference (Dokka) deploys to [GitHub Pages](https://kamiiroawase.github.io/telegram-markdownv2/) on every main push.
 
-752 tests — 751 behavior-level (input/output assertions) plus one seeded random-document property test (150 seeds, a generator over random combinations of emphasis/code/links/quotes/lists/task lists/tables/footnotes/autolinks/raw HTML/emoji asserting every invariant for all three formats), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, close-order listing, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
+776 tests — 775 behavior-level (input/output assertions) plus one seeded random-document property test (150 seeds, a generator over random combinations of emphasis/code/links/quotes/lists/task lists/tables/footnotes/autolinks/raw HTML/emoji asserting every invariant for all three formats), running on every platform; every HTML-side output passes a port of tdlib's HTML parser rules (`assertTelegramHtmlParseable`), the MarkdownV2 side does likewise (`assertTelegramParseable`), and the entities side passes structural validation (ranges in bounds, nesting by containment, close-order listing, surrogate pairs never split). Quality gates hang off `build`: Spotless formatting, `explicitApi()`, binary-compatibility-validator public-API snapshots (run `./gradlew apiDump` for intentional changes).
 
 ## License
 

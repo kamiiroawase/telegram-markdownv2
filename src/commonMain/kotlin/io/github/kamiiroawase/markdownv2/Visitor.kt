@@ -428,10 +428,23 @@ internal fun decodeHtmlEntities(text: String): String {
             index++
             continue
         }
-        val end = text.indexOf(';', index + 1)
         // An entity body is 1-10 chars here: at least one char between & and ;, at most
-        // &#x10FFFF; — anything longer cannot be a supported entity and stays literal
-        if (end == -1 || end - index < 2 || end - index > 10) {
+        // &#x10FFFF; — anything longer cannot be a supported entity and stays literal.
+        // The window cap bounds the scan itself: a search from index+1 without it
+        // rescans to the string's end for every '&' — quadratic on ampersand-dense
+        // attribute values, the same shape parseHtmlTag's linear scan exists for (the
+        // tagScanLinear* regression tests pin that one at 100k scale)
+        var end = -1
+        val windowEnd = minOf(text.length, index + 11)
+        var probe = index + 1
+        while (probe < windowEnd) {
+            if (text[probe] == ';') {
+                end = probe
+                break
+            }
+            probe++
+        }
+        if (end == -1 || end - index < 2) {
             sb.append(char)
             index++
             continue
@@ -670,7 +683,7 @@ internal class Visitor(
                     when {
                         entity.nested || entity.url.isEmpty() -> {}
 
-                        regionIsBlank(entity.labelStart) -> {
+                        regionIsBlankResolvingMarkers(entity.labelStart) -> {
                             // A blank label means nothing was emitted after its [ —
                             // anything opened inside would have output a marker or a
                             // literal tag — so this anchor is the latest open entry and
@@ -808,8 +821,15 @@ internal class Visitor(
         // quote formatting traded for output Telegram parses (the same trade tables and
         // raw HTML make). An all-blank quote renders nothing; the blank-item skip upstream
         // drops the emptied marker. A code entity from an earlier block completes first —
-        // the quote's markers are structure, not code content
+        // the quote's markers are structure, not code content. A custom emoji completes
+        // here too ("all other entities can't contain each other" — a quote may not sit
+        // inside one): the HTML/entities twins complete their emoji entries at the same
+        // boundary, so an unclosed <tg-emoji> keeps its emoji rather than completing at
+        // output time over a region the quote's text has already made non-single. Regular
+        // anchors keep the documented span-over-quote behavior — markers re-pair across
+        // blocks, where the HTML twin's wrapper tags leave no choice
         completeOpenCodeEntities()
+        completeOpenEmojiAnchors()
         val pieces = mutableListOf<String>()
         var child = blockQuote.firstChild
         while (child != null) {
@@ -916,6 +936,20 @@ internal class Visitor(
             exitInline()
             return
         }
+        // Same-type emphasis cannot nest (see renderHtmlInline's same-type
+        // degradation): the entry goes silent — no opener, no closer — and the content
+        // renders inside the outer entity. The parser pairs most same-type runs into
+        // siblings, but `_a _b_ c_`-shaped runs nest them; two open markers would
+        // re-pair into siblings that drop the middle segment's formatting
+        if (emphasisEntryOpen("_")) {
+            val seq = nextSeq++
+            openEntities.addLast(OpenEmphasisMarker("_", html = false, seq = seq, silent = true))
+            visitChildren(emphasis)
+            completeOpenedAfter(seq)
+            openEntities.removeLast()
+            exitInline()
+            return
+        }
         // A '_' opening onto a trailing underscore marker would glue (see
         // atUnderscoreGlue) — flatten to plain text, the depth-cap degradation
         if (atUnderscoreGlue()) {
@@ -957,6 +991,18 @@ internal class Visitor(
             exitInline()
             return
         }
+        // See visit(emphasis): same-type emphasis cannot nest — a silent entry, the
+        // content renders inside the outer entity (`**a **b** c**` parses to nested
+        // strongs, the shape this guards)
+        if (emphasisEntryOpen("*")) {
+            val seq = nextSeq++
+            openEntities.addLast(OpenEmphasisMarker("*", html = false, seq = seq, silent = true))
+            visitChildren(strongEmphasis)
+            completeOpenedAfter(seq)
+            openEntities.removeLast()
+            exitInline()
+            return
+        }
         val seq = nextSeq++
         val entry =
             OpenEmphasisMarker("*", html = false, seq = seq, openPosition = sb.length + 1)
@@ -989,6 +1035,17 @@ internal class Visitor(
                 // surface as literal characters; drop them, keep the content
                 if (htmlCodeDepth > 0) {
                     visitChildren(customNode)
+                    exitInline()
+                    return
+                }
+                // See visit(emphasis): same-type emphasis cannot nest — a silent entry,
+                // the content renders inside the outer entity
+                if (emphasisEntryOpen("~")) {
+                    val seq = nextSeq++
+                    openEntities.addLast(OpenEmphasisMarker("~", html = false, seq = seq, silent = true))
+                    visitChildren(customNode)
+                    completeOpenedAfter(seq)
+                    openEntities.removeLast()
                     exitInline()
                     return
                 }
@@ -1091,7 +1148,7 @@ internal class Visitor(
                     when {
                         entity.nested || entity.url.isEmpty() -> {}
 
-                        regionIsBlank(entity.labelStart) -> {
+                        regionIsBlankResolvingMarkers(entity.labelStart) -> {
                             // See output(): a blank label guarantees this anchor is the
                             // latest open entry, so the rewind discards only whitespace
                             sb.setLength(entity.openBracket)
@@ -1144,6 +1201,20 @@ internal class Visitor(
         val boundary =
             openEntities
                 .filter { (it is OpenEmphasisMarker && it.marker == "`") || it is OpenAnchor }
+                .minOfOrNull { it.seq }
+                ?: return
+        completeThroughSeparator(boundary - 1)
+    }
+
+    // Completes every open custom-emoji entry (and everything opened inside it) before a
+    // block boundary the emoji may not cross — a quote or a list whose child blocks emit
+    // their own structure ("all other entities can't contain each other"). Regular
+    // anchors deliberately stay open (see visit(blockQuote)); the emoji entries complete
+    // exactly the way completeOpenCodeAndAnchorEntities completes them before fences
+    private fun completeOpenEmojiAnchors() {
+        val boundary =
+            openEntities
+                .filter { it is OpenAnchor && it.emoji }
                 .minOfOrNull { it.seq }
                 ?: return
         completeThroughSeparator(boundary - 1)
@@ -1217,8 +1288,11 @@ internal class Visitor(
         val destination = link.destination.orEmpty()
         // Telegram rejects link entities with an empty URL, and links cannot nest (a nested
         // Link cannot come out of CommonMark parsing; the guard covers hand-built ASTs) —
-        // degrade to the link text alone in both cases
-        if (destination.isEmpty() || linkEntityOpen()) {
+        // degrade to the link text alone in both cases. A link entity inside an open
+        // HTML code entity is barred alike ("Pre and Code can't contain nested
+        // entities"): the label text stays, the link drops — the degradation the HTML
+        // and entities twins make of the shape (their codeDepth guards)
+        if (destination.isEmpty() || linkEntityOpen() || htmlCodeDepth > 0) {
             visitChildren(link)
             return
         }
@@ -1244,7 +1318,7 @@ internal class Visitor(
         // label that ships — pre-fix it passed on the tag's opener marker and the link
         // completed into a [](url)-shaped entity whose URL Telegram drops with it.
         // Rewinding is safe — a blank label left nothing open on the stack
-        if (regionIsBlank(labelStart)) {
+        if (regionIsBlankResolvingMarkers(labelStart)) {
             sb.setLength(openBracket)
             sb.append(escapeTextInContext(destination))
             return
@@ -1281,7 +1355,7 @@ internal class Visitor(
                 // degrades to the bare escaped URL, the same trade visit(link) makes
                 // (the completion runs first so an unclosed tag as the fallback's only
                 // content counts as blank — see visit(link))
-                if (regionIsBlank(labelStart)) {
+                if (regionIsBlankResolvingMarkers(labelStart)) {
                     sb.setLength(openBracket)
                     sb.append(escapeTextInContext(destination))
                     return
@@ -1302,7 +1376,7 @@ internal class Visitor(
                 return
             }
         }
-        if (destination.isEmpty() || linkEntityOpen()) {
+        if (destination.isEmpty() || linkEntityOpen() || htmlCodeDepth > 0) {
             visitChildren(image)
             return
         }
@@ -1318,7 +1392,7 @@ internal class Visitor(
         // was an unclosed tag counts as blank
         completeOpenedAfter(entrySeq)
         // See visit(link): a label with no visible text degrades to the bare escaped URL
-        if (regionIsBlank(labelStart)) {
+        if (regionIsBlankResolvingMarkers(labelStart)) {
             sb.setLength(openBracket)
             sb.append(escapeTextInContext(destination))
             return
@@ -1367,7 +1441,7 @@ internal class Visitor(
             return ""
         }
 
-        val parts = parseHtmlTag(tag) ?: return escapeText(tag)
+        val parts = parseHtmlTag(tag) ?: return escapeTextInContext(tag)
         if (parts.name == "br") return "\n"
         if (parts.name == "a") return renderAnchor(tag, parts.closing, parts.selfClosing, parts.attrs)
 
@@ -1380,64 +1454,29 @@ internal class Visitor(
                 "code", "kbd", "samp", "tt" -> "`"
                 "tg-spoiler" -> "||"
                 "tg-emoji" -> return renderEmojiTag(tag, parts)
-                else -> return escapeText(tag)
+                else -> return escapeTextInContext(tag)
             }
-        if (parts.selfClosing) return escapeText(tag)
+        if (parts.selfClosing) return escapeTextInContext(tag)
         if (parts.closing) {
             val top = openEntities.lastOrNull()
             if (top is OpenEmphasisMarker && top.html && top.marker == marker) {
-                // A glue-degraded entry emitted nothing and closes with nothing
-                if (top.silent) {
-                    openEntities.removeLast()
-                    return ""
-                }
-                // The '_'/'__' closer would glue onto the tail — a just-closed inner
-                // entity's marker, or this entry's own opener when it is empty
-                // (<i></i>, which would complete into "__", an opened underline): drop
-                // the entity's markers and keep the content (see atUnderscoreGlue)
-                if ((marker == "_" || marker == "__") && atUnderscoreGlue()) {
-                    openEntities.removeLast()
-                    rewindUnderscoreOpener(top)
-                    return ""
-                }
-                // An empty code pair (<code></code>, or one whose only content dropped
-                // out — a lone comment) rewinds its opener: emitting the closer would
-                // glue `` — an empty entity Telegram rejects; the tags carried no
-                // visible text, so nothing is lost (see output() for the same trade at
-                // completion points)
-                if (marker == "`" && top.codeDelimiter == CodeDelimiter.LOUD && sb.length == top.openPosition) {
-                    openEntities.removeLast()
-                    htmlCodeDepth--
-                    sb.setLength(top.openPosition - 1)
-                    return ""
-                }
-                // An empty spoiler pair rewinds for the same reason: || straight onto ||
-                // is an empty entity, and the tags carried no visible text
-                if (marker == "||" && sb.length == top.openPosition) {
-                    openEntities.removeLast()
-                    sb.setLength(top.openPosition - 2)
-                    return ""
-                }
-                // An empty bold or strikethrough pair rewinds alike: * straight onto *
-                // (and ~ onto ~) is the empty entity every other marker family rewinds,
-                // and the tags carried no visible text, so nothing is lost
-                if ((marker == "*" || marker == "~") && sb.length == top.openPosition) {
-                    openEntities.removeLast()
-                    sb.setLength(top.openPosition - 1)
-                    return ""
-                }
-                openEntities.removeLast()
-                // LOUD and MERGED entries own a depth unit; a SUPPRESSED one never took
-                // one (and a non-code marker has none to give back either)
-                if (marker == "`" && top.codeDelimiter != CodeDelimiter.SUPPRESSED) htmlCodeDepth--
-                if (top.codeDelimiter != CodeDelimiter.LOUD) return ""
-                when (marker) {
-                    "_" -> lastUnderscoreEmission = UnderscoreEmission.I_CLOSE
-                    "__" -> lastUnderscoreEmission = UnderscoreEmission.U_CLOSE
-                }
-                return marker
+                return closeMatchedEmphasis(top, marker)
             }
-            return escapeText(tag)
+            // Zero-output entries never block a closer on their own (see the HTML
+            // twin's probe): a silent degradation or a href-less sentinel emitted
+            // nothing, so a legitimate closer must reach the emitting entry beneath —
+            // a </code> behind an unclosed in-code <b> used to escape literally,
+            // surfacing as visible text and stranding the block's remainder inside
+            // the code entity. The entries pop only when a real match sits beneath;
+            // otherwise everything stays open exactly as before
+            var probe = openEntities.size - 1
+            while (probe >= 0 && emitsNothing(openEntities[probe])) probe--
+            val beneath = if (probe >= 0) openEntities[probe] as? OpenEmphasisMarker else null
+            if (beneath != null && beneath.html && beneath.marker == marker) {
+                completeOpenedAfter(beneath.seq)
+                return closeMatchedEmphasis(beneath, marker)
+            }
+            return escapeTextInContext(tag)
         }
         // The '_'/'__' opener would glue onto a trailing underscore marker — degrade:
         // the entry goes silent (no opener, its closer emits nothing), the content
@@ -1464,6 +1503,23 @@ internal class Visitor(
         // emits nothing, the same shape as the glue degradation above — and the content
         // renders code-escaped in place
         if (marker != "`" && htmlCodeDepth > 0) {
+            openEntities.addLast(
+                OpenEmphasisMarker(marker, html = true, seq = nextSeq++, silent = true),
+            )
+            return ""
+        }
+        // Same-type entities cannot nest (the entities twin's formatRangeOpen degrades
+        // the inner range, and Telegram's entity rules bar the shape): the tag goes
+        // silent — no opener, its closer emits nothing — and the content renders inside
+        // the outer entity, whose marker already formats it. Two open markers of one
+        // kind would otherwise re-pair into sibling entities and drop the middle
+        // segment's formatting entirely (`*a*b*c*` bolds a and c, never b — the
+        // HTML/entities twins show the whole region formatted as one entity). The
+        // code family is exempt: a code tag inside an open code entity MERGES into it
+        // below (nested code renders as single code), and a silent code entry would
+        // own no depth unit while the output-time URL-context stack read counts it —
+        // the anchor-completion URLs would escape by code rules they do not sit in
+        if (marker != "`" && emphasisEntryOpen(marker)) {
             openEntities.addLast(
                 OpenEmphasisMarker(marker, html = true, seq = nextSeq++, silent = true),
             )
@@ -1511,7 +1567,7 @@ internal class Visitor(
         selfClosing: Boolean,
         attrs: String,
     ): String {
-        if (selfClosing) return escapeText(tag)
+        if (selfClosing) return escapeTextInContext(tag)
         if (closing) {
             // See renderHtmlInline: </a> matches only the innermost open entity — an
             // anchor closed while something opened inside it is still open goes literal
@@ -1520,26 +1576,35 @@ internal class Visitor(
             // OpenAnchor.emoji), so a mistyped </a> stays visible instead of silently
             // completing the custom emoji
             val top = openEntities.lastOrNull()
-            if (top !is OpenAnchor || top.emoji) return escapeText(tag)
-            openEntities.removeLast()
-            if (top.nested) return escapeText(tag)
-            // "" is the href-less open tag: pop the stack, emit no link
-            if (top.url.isEmpty()) return ""
-            // Telegram rejects link entities with empty text: a label that rendered no
-            // visible text (whitespace included) degrades to the bare escaped URL,
-            // rewinding the bracket — safe for the same reason as in visit(link): a blank
-            // label left nothing open
-            if (regionIsBlank(top.labelStart)) {
-                sb.setLength(top.openBracket)
-                return escapeTextInContext(top.url)
+            if (top is OpenAnchor && !top.emoji) {
+                return closeMatchedAnchor(top, tag)
             }
-            return "](${escapeUrlInContext(top.url)})"
+            // See renderHtmlInline's probe: zero-output entries never block a closer
+            // on their own — a legitimate </a> reaches the anchor beneath an unclosed
+            // in-code <b> or a silent degradation (the HTML twin's </a> probe)
+            var probe = openEntities.size - 1
+            while (probe >= 0 && emitsNothing(openEntities[probe])) probe--
+            val beneath = if (probe >= 0) openEntities[probe] as? OpenAnchor else null
+            if (beneath != null && !beneath.emoji) {
+                completeOpenedAfter(beneath.seq)
+                return closeMatchedAnchor(beneath, tag)
+            }
+            return escapeTextInContext(tag)
         }
         // Telegram links cannot nest: while any link entity is open (Markdown link, image
         // link or an outer anchor), an inner anchor and its closing tag are escaped literally
         if (linkEntityOpen()) {
             openEntities.addLast(OpenAnchor("", sb.length, sb.length, nextSeq++, nested = true))
-            return escapeText(tag)
+            return escapeTextInContext(tag)
+        }
+        // A link entity cannot sit inside an open HTML code entity ("Pre and Code
+        // can't contain nested entities"): the href-less sentinel shape, whose closer
+        // emits nothing — the label text continues as plain code text, the degradation
+        // the HTML and entities twins make of the tag (their codeDepth guards) and
+        // visit(link) makes of the Markdown spelling
+        if (htmlCodeDepth > 0) {
+            openEntities.addLast(OpenAnchor("", sb.length, sb.length, nextSeq++))
+            return ""
         }
         // href="" is treated like a missing href: the empty URL degrades to plain text
         val href = extractHref(attrs)
@@ -1548,6 +1613,102 @@ internal class Visitor(
     }
 
     private fun linkEntityOpen(): Boolean = openEntities.any { it is OpenAnchor } || openMarkdownLinks > 0
+
+    // Entries that emitted no output of their own: silent emphasis degradations,
+    // href-less sentinel anchors and the in-link tg-emoji sentinel (a nested ANCHOR
+    // emitted its literal tag text, so it does not qualify) — the HTML twin's
+    // emitsNothing twin, backing the closing-tag probes
+    private fun emitsNothing(entry: OpenEntity): Boolean =
+        (entry is OpenEmphasisMarker && entry.silent) ||
+            (entry is OpenAnchor && !entry.nested && entry.url.isEmpty()) ||
+            (entry is OpenAnchor && entry.nested && entry.emoji)
+
+    // The matched close of an html-owned emphasis entry: every arm the innermost match
+    // and the zero-output probe's beneath-match share (the entry is on top of the stack
+    // at every call — callers pop the blockers away first)
+    private fun closeMatchedEmphasis(
+        top: OpenEmphasisMarker,
+        marker: String,
+    ): String {
+        // A glue-degraded entry emitted nothing and closes with nothing
+        if (top.silent) {
+            openEntities.removeLast()
+            return ""
+        }
+        // The '_'/'__' closer would glue onto the tail — a just-closed inner entity's
+        // marker, or this entry's own opener when it is empty (<i></i>, which would
+        // complete into "__", an opened underline): drop the entity's markers and keep
+        // the content (see atUnderscoreGlue)
+        if ((marker == "_" || marker == "__") && atUnderscoreGlue()) {
+            openEntities.removeLast()
+            rewindUnderscoreOpener(top)
+            return ""
+        }
+        // An empty code pair (<code></code>, or one whose only content dropped out — a
+        // lone comment) rewinds its opener: emitting the closer would glue `` — an
+        // empty entity Telegram rejects; the tags carried no visible text, so nothing
+        // is lost (see output() for the same trade at completion points)
+        if (marker == "`" && top.codeDelimiter == CodeDelimiter.LOUD && sb.length == top.openPosition) {
+            openEntities.removeLast()
+            htmlCodeDepth--
+            sb.setLength(top.openPosition - 1)
+            return ""
+        }
+        // An empty spoiler pair rewinds for the same reason: || straight onto || is an
+        // empty entity, and the tags carried no visible text
+        if (marker == "||" && sb.length == top.openPosition) {
+            openEntities.removeLast()
+            sb.setLength(top.openPosition - 2)
+            return ""
+        }
+        // An empty bold or strikethrough pair rewinds alike: * straight onto * (and ~
+        // onto ~) is the empty entity every other marker family rewinds, and the tags
+        // carried no visible text, so nothing is lost
+        if ((marker == "*" || marker == "~") && sb.length == top.openPosition) {
+            openEntities.removeLast()
+            sb.setLength(top.openPosition - 1)
+            return ""
+        }
+        openEntities.removeLast()
+        // LOUD and MERGED entries own a depth unit; a SUPPRESSED one never took one
+        // (and a non-code marker has none to give back either)
+        if (marker == "`" && top.codeDelimiter != CodeDelimiter.SUPPRESSED) htmlCodeDepth--
+        if (top.codeDelimiter != CodeDelimiter.LOUD) return ""
+        when (marker) {
+            "_" -> lastUnderscoreEmission = UnderscoreEmission.I_CLOSE
+            "__" -> lastUnderscoreEmission = UnderscoreEmission.U_CLOSE
+        }
+        return marker
+    }
+
+    // Whether an open, marker-emitting entry of [marker]'s kind exists — same-type
+    // entities cannot nest, and two open markers of one kind re-pair into sibling
+    // entities that drop the middle segment's formatting (see renderHtmlInline's
+    // same-type degradation). Silent entries emitted no marker and do not count
+    private fun emphasisEntryOpen(marker: String): Boolean =
+        openEntities.any { it is OpenEmphasisMarker && it.marker == marker && !it.silent }
+
+    // The matched close of an html-owned anchor: the arms the innermost match and the
+    // zero-output probe's beneath-match share (the entry is on top of the stack at
+    // every call — callers pop the blockers away first)
+    private fun closeMatchedAnchor(
+        top: OpenAnchor,
+        tag: String,
+    ): String {
+        openEntities.removeLast()
+        if (top.nested) return escapeTextInContext(tag)
+        // "" is the href-less open tag: pop the stack, emit no link
+        if (top.url.isEmpty()) return ""
+        // Telegram rejects link entities with empty text: a label that rendered no
+        // visible text (whitespace included) degrades to the bare escaped URL,
+        // rewinding the bracket — safe for the same reason as in visit(link): a blank
+        // label left nothing open
+        if (regionIsBlankResolvingMarkers(top.labelStart)) {
+            sb.setLength(top.openBracket)
+            return escapeTextInContext(top.url)
+        }
+        return "](${escapeUrlInContext(top.url)})"
+    }
 
     // <tg-emoji emoji-id="…">fallback</tg-emoji> renders as MarkdownV2's own custom emoji
     // syntax, ![fallback](tg://emoji?id=…) — the entry is anchor-shaped, so the generic
@@ -1563,40 +1724,51 @@ internal class Visitor(
         parts: TagParts,
     ): String {
         if (parts.closing) {
-            val top = openEntities.lastOrNull()
-            if (top is OpenAnchor && top.emoji) {
-                openEntities.removeLast()
-                return when {
-                    top.nested || top.url.isEmpty() -> {
-                        ""
-                    }
+            // The closer matches the innermost emoji entry wherever it sits — a real
+            // entry opened inside the fallback (an unclosed <b>) completes first so its
+            // marker lands inside the emoji's region, the tight close the HTML and
+            // entities twins make of the same shape (their lastOrNull probes and
+            // completeOpenedAfter alike; pre-fix the closer went literal whenever the
+            // emoji was not the innermost entry, surfacing as visible text)
+            val top =
+                openEntities.lastOrNull { it is OpenAnchor && it.emoji } as? OpenAnchor
+                    ?: return escapeTextInContext(tag)
+            completeOpenedAfter(top.seq)
+            openEntities.removeLast()
+            return when {
+                top.nested || top.url.isEmpty() -> {
+                    ""
+                }
 
-                    regionIsBlank(top.labelStart) -> {
-                        // Telegram requires the fallback: one that renders to no visible
-                        // text degrades to the bare escaped URL, the same trade
-                        // visit(link) makes
-                        sb.setLength(top.openBracket)
-                        escapeTextInContext(top.url)
-                    }
+                regionIsBlankResolvingMarkers(top.labelStart) -> {
+                    // Telegram requires the fallback: one that renders to no visible
+                    // text degrades to the bare escaped URL, the same trade
+                    // visit(link) makes
+                    sb.setLength(top.openBracket)
+                    escapeTextInContext(top.url)
+                }
 
-                    !isSingleEmojiFallback(sb.substring(top.labelStart)) -> {
-                        // The fallback must be exactly one regular emoji (see
-                        // isSingleEmojiFallback): an entity the server silently ignores
-                        // never opens — drop the ![ opener only, the fallback text ships
-                        // as plain inline content, the same degrade the in-link path
-                        // makes of the whole tag
-                        sb.deleteRange(top.openBracket, top.openBracket + 2)
-                        ""
-                    }
+                !isSingleEmojiFallback(sb.substring(top.labelStart)) -> {
+                    // The fallback must be exactly one regular emoji (see
+                    // isSingleEmojiFallback): an entity the server silently ignores
+                    // never opens — drop the ![ opener only, the fallback text ships
+                    // as plain inline content, the same degrade the in-link path
+                    // makes of the whole tag
+                    sb.deleteRange(top.openBracket, top.openBracket + 2)
+                    ""
+                }
 
-                    else -> {
-                        "](${escapeUrlInContext(top.url)})"
-                    }
+                else -> {
+                    "](${escapeUrlInContext(top.url)})"
                 }
             }
-            return escapeText(tag)
         }
-        if (parts.selfClosing) return escapeText(tag)
+        if (parts.selfClosing) return escapeTextInContext(tag)
+        // The id check runs before every context branch (the HTML/entities twins' own
+        // order): an id-less or invalid tag is visible text whichever context it sits
+        // in — inside an open code entity the sentinel would otherwise swallow it
+        // silently, diverging from the twins' literalization
+        val id = tgEmojiIdOf(parts.attrs) ?: return escapeTextInContext(tag)
         if (linkEntityOpen()) {
             // See visit(link)'s guard: while any link entity is open, the emoji syntax
             // degrades to the fallback text (the sentinel keeps a stray closer silent)
@@ -1609,7 +1781,6 @@ internal class Visitor(
             openEntities.addLast(OpenAnchor("", sb.length, sb.length, nextSeq++, emoji = true))
             return ""
         }
-        val id = tgEmojiIdOf(parts.attrs) ?: return escapeText(tag)
         openEntities.addLast(OpenAnchor(TG_EMOJI_URL_PREFIX + id, sb.length, sb.length + 2, nextSeq++, emoji = true))
         return "!["
     }
@@ -1627,20 +1798,67 @@ internal class Visitor(
         return true
     }
 
+    // The blank test with entity markup resolved, for LABEL regions: a label of only
+    // markers and whitespace — a code span around spaces, an emphasis pair around
+    // nothing — still renders no visible text and is the empty link Telegram rejects.
+    // Outside a code span an unescaped marker char is necessarily a marker (text
+    // escapes them), and an escape pair is literal content of exactly one character,
+    // non-whitespace unless the escaped char itself is (which the escapers never emit
+    // — no whitespace character is MarkdownV2-special); INSIDE a code span or code
+    // entity only ` and \ are escapes, so the same chars are literal content there —
+    // the delimiters themselves toggle that state (label regions are entity-balanced
+    // when the blank test runs, and MERGED/SUPPRESSED code entries emit no delimiter)
+    private fun regionIsBlankResolvingMarkers(start: Int): Boolean {
+        var index = start
+        var inCode = false
+        while (index < sb.length) {
+            val char = sb[index]
+            when {
+                char == '\\' && index + 1 < sb.length -> {
+                    if (!sb[index + 1].isWhitespace()) return false
+                    index += 2
+                }
+
+                char == '`' -> {
+                    inCode = !inCode
+                    index++
+                }
+
+                !inCode && (char == '*' || char == '_' || char == '~' || char == '|') -> {
+                    index++
+                }
+
+                !char.isWhitespace() -> {
+                    return false
+                }
+
+                else -> {
+                    index++
+                }
+            }
+        }
+        return true
+    }
+
     // Whether [output]'s last line is a quote line — one that starts with the unescaped
     // '>' only the quote grammar emits (a literal '>' in text escapes as \'>', so that
-    // line starts with the backslash). A closer glued straight onto such a line would
-    // parse as an entity the quote itself opens, never as the outer entity's closer —
-    // tdlib closes the blockquote at the first newline not followed by '>', so a
-    // newline lead placed before the closers lifts them past the quote's end, where
-    // they reach their own entities (the glued shape instead draws "Can't find end of
-    // the entity" / "Character ']' is reserved"). Inside an open HTML code entity a
-    // '>' at a line start is literal code content and a newline there would corrupt
-    // the entity's text, so depth above zero answers false
+    // line starts with the backslash), or with an expandable quote's "**>" lead (the
+    // first line of a <blockquote expandable> render; a bold-in-bold opener pair is the
+    // only other '**' a line can start with, and the '>' behind it would always escape
+    // — content '>' never emits bare — so the shape is unambiguous). A closer glued
+    // straight onto such a line would parse as an entity the quote itself opens, never
+    // as the outer entity's closer — tdlib closes the blockquote at the first newline
+    // not followed by '>', so a newline lead placed before the closers lifts them past
+    // the quote's end, where they reach their own entities (the glued shape instead
+    // draws "Can't find end of the entity" / "Character ']' is reserved"). Inside an
+    // open HTML code entity a '>' at a line start is literal code content and a newline
+    // there would corrupt the entity's text, so depth above zero answers false
     private fun endsOnQuoteLine(output: CharSequence): Boolean {
         if (htmlCodeDepth > 0) return false
         val lineStart = output.lastIndexOf('\n') + 1
-        return lineStart < output.length && output[lineStart] == '>'
+        if (lineStart >= output.length) return false
+        if (output[lineStart] == '>') return true
+        return output.startsWith("**>", lineStart)
     }
 
     // Whether [output]'s last line is a code fence's closing line — "```", optionally
@@ -1737,9 +1955,12 @@ internal class Visitor(
     // its marker consumed — the same walk forEachListItem makes, so the full render,
     // truncation and chunking agree on which items exist and how they number. A code
     // entity from an earlier block completes first — the marker and indent are structure,
-    // not code content
+    // not code content — and a custom emoji completes alike: item bodies render through
+    // child visitors whose own quote/fence markers must not land inside the emoji's
+    // fallback (see visit(blockQuote); the HTML twin's renderList completes the same set)
     private fun renderList(list: Node) {
         completeOpenCodeEntities()
+        completeOpenEmojiAnchors()
         val start = sb.length
         val marker = listMarkerOf(list)
         var item = list.firstChild
@@ -1795,9 +2016,9 @@ internal class Visitor(
     // escapes on the way in — text-escaped outside code entities, code-escaped inside one
     // (a glue degradation can fire while an HTML code entity is open, and a \_ there
     // would show the backslash). The HTML twin's appendEscapedHtmlPlainText is the same
-    // shape. One caveat inherited from appendPlainText: consecutive block children of the
-    // flattened subtree join with no separator, so pathological depth-capped structure
-    // can render words run together — content over formatting, at 100+ levels of nesting
+    // shape. Block-level children of the flattened subtree separate with the blank line
+    // appendPlainText places between them — the same separator the structured render
+    // emits, so a depth-capped subtree still reads as the blocks it flattened
     private fun escapedPlainText(node: Node): String {
         val plain = StringBuilder()
         appendPlainText(plain, node)

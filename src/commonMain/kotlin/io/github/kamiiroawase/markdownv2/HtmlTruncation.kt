@@ -159,10 +159,22 @@ private fun shrinkHtmlFence(
     // on its own
     if (rendered.isEmpty()) return ""
     val (open, close) = htmlFenceOf(node)
-    if (open.length + close.length + 1 > budget) return ""
-
     val lines = rendered.substring(open.length, rendered.length - close.length).split('\n')
-    val sb = StringBuilder(open)
+    // A fenced block that names a language carries it in the open tag's class attribute;
+    // when the budget cannot hold that tag beside any content, the language yields
+    // first — a bare <pre> keeps the pre structure (the MarkdownV2 twin's 3-char markers
+    // keep their fence at far smaller budgets, and the entities twin loses nothing: its
+    // language rides on the range, never the text) where the whole block used to fall
+    // through to the caller's plain-text fallback
+    val (effOpen, effClose) =
+        if (open.length > "<pre>".length && open.length + close.length + 1 > budget) {
+            "<pre>" to "</pre>"
+        } else {
+            open to close
+        }
+    if (effOpen.length + effClose.length + 1 > budget) return ""
+
+    val sb = StringBuilder(effOpen)
     // A blank first line appends nothing yet still counts as placed: comparing against
     // the open tag's length cannot tell "no line yet" from "an empty line just glued",
     // and the newline joining the NEXT line would be lost
@@ -171,15 +183,15 @@ private fun shrinkHtmlFence(
         // The first content line glues directly onto the open tag (the full render emits
         // no separator there); every later one carries the '\n' that joined it
         val joiner = if (hasLine) "\n" else ""
-        if (sb.length + joiner.length + line.length + close.length > budget) break
+        if (sb.length + joiner.length + line.length + effClose.length > budget) break
         sb.append(joiner).append(line)
         hasLine = true
     }
     // Only blank lines placed is no content at all: the empty tag pair is not a
     // truncated prefix of this block — "" lets the caller fall back to plain text (the
     // MarkdownV2 and entities twins make the same drop)
-    if (sb.length == open.length) return ""
-    return sb.append(close).toString()
+    if (sb.length == effOpen.length) return ""
+    return sb.append(effClose).toString()
 }
 
 // Truncation stops at the first item that does not fit — later items are dropped whole,

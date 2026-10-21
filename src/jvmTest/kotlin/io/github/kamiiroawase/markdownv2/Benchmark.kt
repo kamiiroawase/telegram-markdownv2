@@ -226,7 +226,14 @@ private fun medianNanos(
         samples[index] = System.nanoTime() - start
     }
     samples.sort()
-    return samples[samples.size / 2]
+    // The standard median: an even sample count averages the two middle values (the old
+    // samples[size / 2] picked the upper one, a systematically higher estimate on every
+    // even iteration count this harness runs)
+    return if (samples.size % 2 == 1) {
+        samples[samples.size / 2]
+    } else {
+        (samples[samples.size / 2 - 1] + samples[samples.size / 2]) / 2
+    }
 }
 
 private fun formatBytes(bytes: Long): String =

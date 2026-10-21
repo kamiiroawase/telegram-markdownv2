@@ -152,23 +152,34 @@ internal fun applyEntityPrefix(
         acc += lines[index].length + 1
     }
 
+    // The continuation-line starts that carry the indent, ascending — a binary-searched
+    // prefix count replaces the per-endpoint linear rescan (two per entity: an item
+    // with E entities over L lines used to cost O(E·L), quadratic when both grow)
+    val indentedStarts =
+        (1 until lines.size)
+            .filter { lines[it].isNotEmpty() }
+            .map { starts[it] }
+            .toIntArray()
+
+    // How many indented line starts lie at or before [point]
+    fun indentsPassed(point: Int): Int {
+        var low = 0
+        var high = indentedStarts.size
+        while (low < high) {
+            val mid = (low + high) ushr 1
+            if (indentedStarts[mid] <= point) low = mid + 1 else high = mid
+        }
+        return low
+    }
+
     // Insertions a shifted point passes: the marker at 0 for every point, plus the
     // indent at each non-empty continuation line start the point lies at or beyond
-    // ([inclusive] — the marker/indent precedes the content a START indexes into, while
-    // an END at a line start closed before that line's indent)
+    // ([inclusive] — the marker/indent precede the content a START indexes into, while
+    // an END at one closed before that line's indent)
     fun shift(
         point: Int,
         inclusive: Boolean,
-    ): Int {
-        var shifted = point + prefix.length
-        for (index in 1 until lines.size) {
-            if (lines[index].isNotEmpty()) {
-                val atStart = if (inclusive) starts[index] <= point else starts[index] < point
-                if (atStart) shifted += indent
-            }
-        }
-        return shifted
-    }
+    ): Int = point + prefix.length + indentsPassed(if (inclusive) point else point - 1) * indent
 
     val entities =
         body.entities.map { entity ->

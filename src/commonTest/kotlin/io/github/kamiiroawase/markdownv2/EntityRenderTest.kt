@@ -618,11 +618,17 @@ class EntityRenderTest {
     }
 
     @Test
-    fun customEmojiEmptyFallbackDropsTheRange() {
-        // Telegram requires the fallback text; a zero-length custom_emoji range drops
+    fun customEmojiEmptyFallbackDegradesToTheBareUrl() {
+        // Telegram requires the fallback text; one that renders to no visible text
+        // degrades to the bare custom-emoji URL — the same trade visit(link) and both
+        // string twins make of a blank label, so all three formats show the same text
         assertEquals(
-            EntityText("", emptyList()),
+            EntityText("tg://emoji?id=5368324170671202286", emptyList()),
             TelegramEntities.render("![](tg://emoji?id=5368324170671202286)"),
+        )
+        assertEquals(
+            EntityText("x tg://emoji?id=5 y", emptyList()),
+            TelegramEntities.render("x ![ ](tg://emoji?id=5) y"),
         )
     }
 
@@ -769,30 +775,41 @@ class EntityRenderTest {
     fun blockCompletesOpenCustomEmojiRange() {
         // Pre-fix CUSTOM_EMOJI sat outside the containment discipline entirely: a fence
         // (or quote) after an unclosed tag landed strictly inside the emoji range. The
-        // boundary completion now covers custom_emoji alongside code and links
-        val result = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x\n\n```\ncode\n```")
+        // boundary completion now covers custom_emoji alongside code and links. The
+        // fallback is a single emoji so the range legitimately survives the close —
+        // and wraps exactly the cluster, the pending block separator staying outside
+        val result = TelegramEntities.render("<tg-emoji emoji-id=\"5\">😀\n\n```\ncode\n```")
         assertEquals(
             EntityText(
-                "x\n\ncode",
+                "😀\n\ncode",
                 listOf(
-                    MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 3, customEmojiId = "5"),
-                    MessageEntity(MessageEntityType.PRE, 3, 4),
+                    MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 2, customEmojiId = "5"),
+                    MessageEntity(MessageEntityType.PRE, 4, 4),
                 ),
             ),
             result,
         )
         assertEntitiesValid(result, "blockCompletesEmoji")
+        // A fallback that is not exactly one emoji drops the range outright (the server
+        // silently ignores such entities — the MarkdownV2 twin's degrade); the fence's
+        // own pre range is untouched
+        val plain = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x\n\n```\ncode\n```")
+        assertEquals(
+            EntityText("x\n\ncode", listOf(MessageEntity(MessageEntityType.PRE, 3, 4))),
+            plain,
+        )
+        assertEntitiesValid(plain, "blockCompletesEmojiPlainFallback")
     }
 
     @Test
     fun quoteCompletesOpenCustomEmojiRange() {
-        val result = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x\n\n> quoted")
+        val result = TelegramEntities.render("<tg-emoji emoji-id=\"5\">😀\n\n> quoted")
         assertEquals(
             EntityText(
-                "x\n\nquoted",
+                "😀\n\nquoted",
                 listOf(
-                    MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 3, customEmojiId = "5"),
-                    MessageEntity(MessageEntityType.BLOCKQUOTE, 3, 6),
+                    MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 2, customEmojiId = "5"),
+                    MessageEntity(MessageEntityType.BLOCKQUOTE, 4, 6),
                 ),
             ),
             result,
@@ -802,67 +819,73 @@ class EntityRenderTest {
 
     @Test
     fun linkInsideCustomEmojiDegradesToLabel() {
-        // linkEntityOpen now counts custom emoji — the HTML twin's own count — so a
-        // link (Markdown or anchor tag) inside an open emoji degrades to its label
-        // text instead of nesting TEXT_LINK inside CUSTOM_EMOJI
+        // linkEntityOpen counts custom emoji — the HTML twin's own count — so a link
+        // (Markdown or anchor tag) inside an open emoji degrades to its label text
+        // instead of nesting TEXT_LINK inside CUSTOM_EMOJI. The link's visible text
+        // also breaks the single-emoji fallback, so the outer range drops too — text
+        // alone remains, the exact shape the MarkdownV2 twin ships
         val result = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x [y](https://e.com) z")
-        assertEquals(
-            listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 5, customEmojiId = "5")),
-            result.entities,
-        )
-        assertEquals("x y z", result.text)
+        assertEquals(EntityText("x y z", emptyList()), result)
         assertEntitiesValid(result, "linkInsideEmoji")
     }
 
     @Test
-    fun codeInsideCustomEmojiRendersPlain() {
-        // A code span inside an open custom emoji renders as plain fallback text —
-        // backticks dropped, the same degradation the HTML twin's visit(code) makes
+    fun codeInsideCustomEmojiKeepsTheCodeFormatting() {
+        // A code span inside an open custom emoji registers its CODE entity — the
+        // code-formatted fallback is no single emoji, so the emoji range drops and the
+        // span's formatting survives the degradation, the MarkdownV2 twin's exact
+        // shape (` markers kept, `![` opener gone)
         val result = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x `c` y</tg-emoji>")
         assertEquals(
-            EntityText("x c y", listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 5, customEmojiId = "5"))),
+            EntityText("x c y", listOf(MessageEntity(MessageEntityType.CODE, 2, 1))),
             result,
         )
         assertEntitiesValid(result, "codeInsideEmoji")
+        // The one shape the text-based single-emoji check cannot see: a span whose
+        // literal IS one emoji would look single while carrying CODE inside — the
+        // close bars the emoji over any code registered in the region, matching the
+        // MarkdownV2 twin (its marker-carrying label region fails the check outright)
+        val cluster = TelegramEntities.render("<tg-emoji emoji-id=\"5\">`😀`</tg-emoji>")
+        assertEquals(
+            EntityText("😀", listOf(MessageEntity(MessageEntityType.CODE, 0, 2))),
+            cluster,
+        )
+        assertEntitiesValid(cluster, "codeInsideEmojiSingleCluster")
     }
 
     @Test
     fun nestedCustomEmojiDegradesToFallback() {
         // Both spellings of a nested custom emoji — the image syntax and a literal
-        // inner tag — degrade to the inner fallback text; the outer range stays single
+        // inner tag — degrade to the inner fallback text; the mixed region is no
+        // single emoji either, so the outer range drops and plain text remains (the
+        // MarkdownV2 twin's degrade of the same shapes)
         val image = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x ![y](tg://emoji?id=6) z")
-        assertEquals(
-            EntityText("x y z", listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 5, customEmojiId = "5"))),
-            image,
-        )
+        assertEquals(EntityText("x y z", emptyList()), image)
         assertEntitiesValid(image, "nestedEmojiImage")
         val tag = TelegramEntities.render("<tg-emoji emoji-id=\"5\">x <tg-emoji emoji-id=\"6\">y</tg-emoji> z")
-        assertEquals(
-            EntityText("x y z", listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 5, customEmojiId = "5"))),
-            tag,
-        )
+        assertEquals(EntityText("x y z", emptyList()), tag)
         assertEntitiesValid(tag, "nestedEmojiTag")
     }
 
     // ---------- the re-audit round: the code tag inside an emoji, the blank-label separator, the emoji closer ----------
 
     @Test
-    fun codeTagInsideCustomEmojiRendersPlain() {
-        // The TAG spelling of the code-in-emoji shape visit(code) already degrades —
-        // pre-fix renderHtmlInlineTag opened a real CODE range inside CUSTOM_EMOJI,
-        // the very nesting this suite's own type rules reject. The merge takes no
-        // codeDepth unit (the emoji is no code entity); the kbd/samp/tt twins share
-        // the branch
+    fun codeTagInsideCustomEmojiKeepsTheCodeFormatting() {
+        // The TAG spelling of the code-in-emoji shape: the CODE entity registers
+        // freely (the MarkdownV2 twin keeps its ` markers in the same position), and
+        // the code-formatted text is no single emoji, so the CUSTOM_EMOJI range drops —
+        // formatting survives the fallback's own degradation, all three formats
+        // agreeing on the display
         val result = TelegramEntities.render("""<tg-emoji emoji-id="5">x <code>c</code> y</tg-emoji>""")
         assertEquals(
-            EntityText("x c y", listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 5, customEmojiId = "5"))),
+            EntityText("x c y", listOf(MessageEntity(MessageEntityType.CODE, 2, 1))),
             result,
         )
         assertEntitiesValid(result, "codeTagInsideEmoji")
         val unclosed = TelegramEntities.render("""<tg-emoji emoji-id="5">x <kbd>c""")
         assertEquals(
-            listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 3, customEmojiId = "5")),
-            unclosed.entities,
+            EntityText("x c", listOf(MessageEntity(MessageEntityType.CODE, 2, 1))),
+            unclosed,
         )
         assertEntitiesValid(unclosed, "kbdTagInsideEmojiUnclosed")
     }
@@ -896,16 +919,67 @@ class EntityRenderTest {
     fun emojiCloserCompletesNestedEntriesTightly() {
         // The </tg-emoji> twin of the HTML fix: the anchor literalized inside the
         // emoji (links cannot nest in it) completes at the closer instead of stranding
-        // a literal "</tg-emoji>" under the range (pre-fix text:
-        // "x <a href="u">y</tg-emoji> tail" with CUSTOM_EMOJI spanning all 31 chars)
+        // a literal "</tg-emoji>" under the range. The mixed fallback is no single
+        // emoji, so the outer range drops — the literal anchor text ships plainly,
+        // the MarkdownV2 twin's exact degrade
         val result = TelegramEntities.render("""<tg-emoji emoji-id="5">x <a href="u">y</tg-emoji> tail""")
+        assertEquals(EntityText("""x <a href="u">y tail""", emptyList()), result)
+        assertEntitiesValid(result, "emojiCloserTight")
+    }
+
+    // ---------- the tenth audit round: same-type nesting, blank-label separators ----------
+
+    @Test
+    fun sameTypeTagNestingDegradesToTheOuterRange() {
+        // Telegram bars same-type entities from nesting inside each other; the flat
+        // markers of the MarkdownV2 twin cannot even express the shape (it renders
+        // `*a*b*c*`). The inner tag degrades now — one bold range over the text, the
+        // display identical (the whole region is already bold), and the suite's own
+        // containment validator rejects the strictly-nested shape
+        val nested = TelegramEntities.render("<b>a<b>b</b>c</b>")
+        assertEquals(EntityText("abc", listOf(MessageEntity(MessageEntityType.BOLD, 0, 3))), nested)
+        assertEntitiesValid(nested, "sameTypeNesting")
+        val identical = TelegramEntities.render("<b><b>x</b></b>")
+        assertEquals(EntityText("x", listOf(MessageEntity(MessageEntityType.BOLD, 0, 1))), identical)
+        assertEntitiesValid(identical, "sameTypeIdentical")
+        val italic = TelegramEntities.render("<i>a<i>b</i></i>")
+        assertEquals(EntityText("ab", listOf(MessageEntity(MessageEntityType.ITALIC, 0, 2))), italic)
+        assertEntitiesValid(italic, "sameTypeItalic")
+        val underline = TelegramEntities.render("<u>a<u>b</u>c</u>")
+        assertEquals(EntityText("abc", listOf(MessageEntity(MessageEntityType.UNDERLINE, 0, 3))), underline)
+        assertEntitiesValid(underline, "sameTypeUnderline")
+        // Different types still nest freely
+        val mixed = TelegramEntities.render("<b>a<i>b</i>c</b>")
         assertEquals(
             EntityText(
-                "x <a href=\"u\">y tail",
-                listOf(MessageEntity(MessageEntityType.CUSTOM_EMOJI, 0, 15, customEmojiId = "5")),
+                "abc",
+                listOf(
+                    MessageEntity(MessageEntityType.ITALIC, 1, 1),
+                    MessageEntity(MessageEntityType.BOLD, 0, 3),
+                ),
             ),
-            result,
+            mixed,
         )
-        assertEntitiesValid(result, "emojiCloserTight")
+        assertEntitiesValid(mixed, "differentTypesStillNest")
+    }
+
+    @Test
+    fun blankLabelSeparatorMatchesTheStringTwins() {
+        // The blank-label degradation used to count the trailing newline run from the
+        // whole buffer — separators below the label included — and re-emit them after
+        // the URL on top of the paragraph's own separator: four newlines where the
+        // HTML twin shows two. A synchronous close re-emits nothing now (the label's
+        // soft-break newline drops with the rewind, both string twins' trade); a
+        // block-boundary completion keeps exactly the separator it lifted, and an
+        // anchor whose paragraph blank-skipped takes a fresh one from the boundary
+        val paragraph = TelegramEntities.render("**b**\n\n[](https://example.com)\n\nnext")
+        assertEquals("b\n\nhttps://example.com\n\nnext", paragraph.text)
+        assertEntitiesValid(paragraph, "blankLabelOwnSeparator")
+        val inline = TelegramEntities.render("x [\n](http://u) y")
+        assertEquals("x http://u y", inline.text)
+        assertEntitiesValid(inline, "blankLabelSoftBreakDrops")
+        val boundary = TelegramEntities.render("x <a href=\"http://u/x\"> \n\n> q")
+        assertEquals("x http://u/x\n\nq", boundary.text)
+        assertEntitiesValid(boundary, "blankLabelBoundaryKeepsSeparator")
     }
 }

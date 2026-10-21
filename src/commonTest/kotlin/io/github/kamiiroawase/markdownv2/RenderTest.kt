@@ -845,8 +845,12 @@ class RenderTest {
 
     @Test
     fun unclosedHtmlInsideEmphasisClosesNestedFirst() {
-        // Same-kind markers can overlap (_ inside _); completion locates by stack depth, not by marker value
-        assertEquals("_*_x_*_", MarkdownV2.render("*<b><i>x*"))
+        // Same-kind markers can overlap (_ inside _); completion locates by stack depth, not by marker value.
+        // The markdown bold's own `<b>` tag is same-type now and degrades to a silent
+        // entry — one bold over the region, the display the HTML/entities twins ship
+        // (`<b><i>x</i></b>`); pre-fix the two open markers re-paired and un-formatted
+        // the middle
+        assertEquals("_*x*_", MarkdownV2.render("*<b><i>x*"))
     }
 
     @Test
@@ -1234,11 +1238,13 @@ class RenderTest {
 
     @Test
     fun unclosedHtmlEmphasisInsideHtmlCodeCompletesSilently() {
-        // The </code> closer cannot match past the still-open <b> and goes literal —
-        // the crossed-entity completion every unclosed tag already gets — while the
-        // silent <b> entry completes at output time emitting nothing and the code
-        // entity itself completes with its closing backtick
-        assertEquals("`ac</code\\>d`", MarkdownV2.render("<code>a<b>c</code>d"))
+        // The silent <b> entry emitted nothing, so the legitimate </code> reaches the
+        // code entity beneath it (the zero-output probe) and closes it here — the
+        // HTML/entities twins' own shape (`<code>ac</code>d`); pre-fix the closer went
+        // literal and stranded itself inside the entity. The orphan's literal escapes
+        // by the code context it lands in when there is nothing to match (see
+        // orphanTagLiteralsEscapeForTheCodeContextTheyLandIn)
+        assertEquals("`ac`d", MarkdownV2.render("<code>a<b>c</code>d"))
     }
 
     @Test
@@ -1735,9 +1741,14 @@ class RenderTest {
     fun urlTextEscapesForTheCodeContextItLandsIn() {
         // Inside an open HTML code entity only \` and \ are escapes: a URL degraded
         // with the text-context set (\_) would show its backslashes — the URL escapes
-        // by code rules there, the same context switch text itself makes
-        assertEquals("`http://a_b.com`", MarkdownV2.render("<code>[](http://a_b.com)</code>"))
-        assertEquals("`a_b`", MarkdownV2.render("<code><a href=\"a_b\"> </a></code>"))
+        // by code rules there, the same context switch text itself makes. That
+        // applies to the anchors that still OPEN before a code entity and complete
+        // around it; a link of any spelling OPENING inside code takes the twins'
+        // degradation instead — label text stays, the link drops
+        assertEquals("`x`", MarkdownV2.render("<code>[x](http://a_b.com)</code>"))
+        assertEquals("", MarkdownV2.render("<code>[](http://a_b.com)</code>"))
+        assertEquals("`ty`", MarkdownV2.render("<code><a href=\"http://a_b.com\">t</a>y</code>"))
+        assertEquals("`y`", MarkdownV2.render("<code><a href=\"http://a_b.com\"></a>y</code>"))
     }
 
 // ---------- the seventh audit round: empty bold/strike rewinds, label-final blankness, code-silent emphasis, emoji fallback validation ----------
@@ -1922,12 +1933,209 @@ class RenderTest {
     }
 
     @Test
-    fun anchorUrlInsideStillOpenCodeKeepsCodeEscaping() {
-        // The mirror that guards the fix's stack read: a code entity BELOW the anchor
-        // stays open around the anchor's whole region, and the completed URL genuinely
-        // sits inside it — '(' and ')' are literal content there, escaped by nothing
+    fun anchorInsideStillOpenCodeKeepsOnlyItsLabel() {
+        // The mirror of completedCodeEntityDoesNotLeakItsEscapeContextIntoTheAnchorUrl:
+        // an anchor OPENING inside an open code entity takes the twins' degradation
+        // now ("Pre and Code can't contain nested entities" — the label stays, the
+        // link drops; pre-fix it opened for real and the completed URL landed inside
+        // the entity, code-escaped by the stack read that test guards)
         val output = MarkdownV2.render("<code>x<a href=\"http://e.com/(1)\">y")
-        assertEquals("`x[y](http://e.com/(1))`", output)
-        assertTelegramParseable(output, "anchorUrlInsideOpenCode")
+        assertEquals("`xy`", output)
+        assertTelegramParseable(output, "anchorInsideOpenCode")
+    }
+
+    // ---------- the tenth audit round: the expandable quote line as a quote line ----------
+
+    @Test
+    fun closersTakeTheNewlineLeadBeforeAnExpandableQuoteLine() {
+        // endsOnQuoteLine recognized only '>' line starts; an expandable quote's first
+        // line opens with "**>", so output()-time closers glued straight onto it — the
+        // exact shapes tdlib rejects ("Can't find end of the BOLD entity",
+        // "Character ']' is reserved"). The lead now lifts every closer family past
+        // the quote like any other quote line
+        val bold = MarkdownV2.render("<b>x\n\n<blockquote expandable>\nq\n</blockquote>")
+        assertEquals("*x\n\n**> q\n*", bold)
+        assertTelegramParseable(bold, "expandableQuoteLeadBold")
+        val italic = MarkdownV2.render("<i>x\n\n<blockquote expandable>\nq\n</blockquote>")
+        assertEquals("_x\n\n**> q\n_", italic)
+        assertTelegramParseable(italic, "expandableQuoteLeadItalic")
+        val anchor = MarkdownV2.render("<a href=\"https://e.com\">label\n\n<blockquote expandable>\nq\n</blockquote>")
+        assertEquals("[label\n\n**> q\n](https://e.com)", anchor)
+        assertTelegramParseable(anchor, "expandableQuoteLeadAnchor")
+        // The empty expandable quote is the bare "**>" line — the same lead applies
+        val empty = MarkdownV2.render("<b>x\n\n<blockquote expandable>\n</blockquote>")
+        assertEquals("*x\n\n**>\n*", empty)
+        assertTelegramParseable(empty, "expandableQuoteLeadEmpty")
+        // Contrast: a regular quote line already took the lead
+        assertEquals("*x\n\n> q\n*", MarkdownV2.render("<b>x\n\n<blockquote>\nq\n</blockquote>"))
+    }
+
+    @Test
+    fun emojiAnchorCompletesBeforeQuoteAndListBoundaries() {
+        // A custom emoji may not contain a quote or a list ("all other entities can't
+        // contain each other"): the unclosed <tg-emoji> completes at those boundaries
+        // as it does before a fence. Pre-fix it lingered to output time, where the
+        // region had grown past the single-emoji check and the whole custom emoji
+        // dropped — a display divergence against the HTML/entities twins, which
+        // complete their emoji entries at the same boundaries
+        val quote = MarkdownV2.render("<tg-emoji emoji-id=\"5\">😀\n\n> q")
+        assertEquals("![😀](tg://emoji?id=5)\n\n> q", quote)
+        assertTelegramParseable(quote, "emojiCompletesBeforeQuote")
+        val list = MarkdownV2.render("<tg-emoji emoji-id=\"5\">😀\n\n- item")
+        assertEquals("![😀](tg://emoji?id=5)\n\n• item", list)
+        assertTelegramParseable(list, "emojiCompletesBeforeList")
+        // A non-emoji fallback still degrades at the boundary (the completion runs the
+        // same single-emoji check the closer does)
+        val plain = MarkdownV2.render("<tg-emoji emoji-id=\"5\">x\n\n> q")
+        assertEquals("x\n\n> q", plain)
+        assertTelegramParseable(plain, "plainFallbackEmojiCompletesBeforeQuote")
+        // Regular anchors keep the documented span-over-quote behavior (markers
+        // re-pair across blocks; the HTML twin's wrapper tags leave no choice)
+        assertEquals("[x\n\n> q\n](https://e.com)", MarkdownV2.render("<a href=\"https://e.com\">x\n\n> q"))
+    }
+
+    @Test
+    fun emojiCloserCompletesNestedEntriesTightly() {
+        // </tg-emoji> matches the innermost emoji entry wherever it sits: an unclosed
+        // real entry inside the fallback (<b> here) completes first so its marker
+        // lands inside the emoji's region — the tight close the HTML and entities
+        // twins make (pre-fix the closer went literal whenever the emoji was not the
+        // innermost entry, surfacing </tg-emoji> as visible text)
+        val output = MarkdownV2.render("<tg-emoji emoji-id=\"5\"><b>x</tg-emoji> tail")
+        assertEquals("*x* tail", output)
+        assertTelegramParseable(output, "emojiCloserNestedBold")
+        // The single-emoji fallback keeps its entity; an inner EMPTY bold completes
+        // and rewinds inside the region, the cluster alone wrapped
+        val emoji = MarkdownV2.render("<tg-emoji emoji-id=\"7\">😀<b></tg-emoji> tail")
+        assertEquals("![😀](tg://emoji?id=7) tail", emoji)
+        assertTelegramParseable(emoji, "emojiCloserClusterWithInner")
+    }
+
+    @Test
+    fun sameTypeNestingFormatsOneEntityInEveryFormat() {
+        // `<b>a<b>b</b>c</b>` used to render `*a*b*c*` here — the flat markers
+        // re-pair into siblings and the middle segment loses its formatting — while
+        // the HTML/entities twins formatted the whole region. All three degrade the
+        // inner tag now: one entity over the region, the display identical
+        assertEquals("*abc*", MarkdownV2.render("<b>a<b>b</b>c</b>"))
+        assertEquals("<b>abc</b>", TelegramHtml.render("<b>a<b>b</b>c</b>"))
+        // The parser can nest same-type MARKDOWN emphasis (`**a **b** c**`): every
+        // format's degradation covers that spelling too
+        assertEquals("*a b c*", MarkdownV2.render("**a **b** c**"))
+        assertEquals("<b>a b c</b>", TelegramHtml.render("**a **b** c**"))
+        assertEquals(
+            EntityText("a b c", listOf(MessageEntity(MessageEntityType.BOLD, 0, 5))),
+            TelegramEntities.render("**a **b** c**"),
+        )
+    }
+
+    @Test
+    fun orphanTagLiteralsEscapeForTheCodeContextTheyLandIn() {
+        // The literal branches (orphan closers, unrecognized names) used escapeText
+        // unconditionally: inside an open code entity only ` and \ escape, so the
+        // text-context backslashes rendered visibly. Every literal routes through
+        // escapeTextInContext now, and the HTML/entities twins' plain in-code text
+        // is the display all three ship
+        assertEquals("`a</b>b`", MarkdownV2.render("<code>a</b>b"))
+        assertEquals("`<x>y`", MarkdownV2.render("<code><x>y"))
+        assertTelegramParseable(MarkdownV2.render("<code>a</b>b"), "orphanLiteralInCode")
+        // Outside code the text-context escapes stay: the '>' is MarkdownV2-special
+        assertEquals("a</b\\>b", MarkdownV2.render("a</b>b"))
+    }
+
+    @Test
+    fun legitimateClosersPopZeroOutputSentinelsInEveryFormat() {
+        // Zero-output entries (silent degradations, sentinels) never block a closer
+        // on their own: a legitimate </code> or </a> behind an unclosed in-code <b>
+        // reaches the emitting entry beneath — the HTML twin always probed; the
+        // MarkdownV2 and entities twins leaked the closer literally instead
+        assertEquals("`ac`d", MarkdownV2.render("<code>a<b>c</code>d"))
+        assertEquals("<code>ac</code>d", TelegramHtml.render("<code>a<b>c</code>d"))
+        assertEquals(
+            EntityText("acd", listOf(MessageEntity(MessageEntityType.CODE, 0, 2))),
+            TelegramEntities.render("<code>a<b>c</code>d"),
+        )
+        // The </a> twin of the same probe: the closer first matches the sentinel it
+        // pairs with (silently), the </code> then probes past the silent <b> — every
+        // format closes the code cleanly at its own closer
+        assertEquals("`ty`", MarkdownV2.render("<code><b><a href=\"u\">t</a>y</code>"))
+        assertEquals("<code>ty</code>", TelegramHtml.render("<code><b><a href=\"u\">t</a>y</code>"))
+        assertEquals(
+            EntityText("ty", listOf(MessageEntity(MessageEntityType.CODE, 0, 2))),
+            TelegramEntities.render("<code><b><a href=\"u\">t</a>y</code>"),
+        )
+    }
+
+    // ---------- the final hardening round: code-context anchors, markup-aware blank labels, id-check order ----------
+
+    @Test
+    fun anchorUrlNeverEscapesByAPhantomCodeEntity() {
+        // Two glued <code> openers take the SUPPRESSED degradation (no depth unit, no
+        // entry the output-time URL-context stack read counts), so the anchor behind
+        // them opens for real and its URL escapes by URL rules — pre-fix the same-type
+        // degradation caught the second <code> as a silent-LOUD entry the stack read
+        // counted, and the bare ')' drew the reserved-character 400
+        val output = MarkdownV2.render("<code>a</code><code><code><a href=\"http://e.com/(1)\">t")
+        assertEquals("`a`[t](http://e.com/(1\\))", output)
+        assertTelegramParseable(output, "phantomCodeBelow")
+    }
+
+    @Test
+    fun markupOnlyLinkLabelsAreBlankInEveryFormat() {
+        // A label whose visible text is nothing but formatting markup — a code span
+        // around whitespace — is still the empty link entity Telegram rejects: the
+        // blank test resolves the markup (markers in MarkdownV2, this format's own
+        // tags in HTML) and every format degrades to the bare URL
+        assertEquals("u", MarkdownV2.render("""<a href="u"><code> </code></a>"""))
+        assertEquals("u", TelegramHtml.render("""<a href="u"><code> </code></a>"""))
+        assertEquals(EntityText("u", emptyList()), TelegramEntities.render("""<a href="u"><code> </code></a>"""))
+        // The Markdown spelling of the same shape, both emphasis families
+        assertEquals("u", MarkdownV2.render("[` `](u)"))
+        assertEquals("u", TelegramHtml.render("[` `](u)"))
+        assertEquals("u", MarkdownV2.render("[<b> </b>](u)"))
+        assertEquals("u", TelegramHtml.render("[<b> </b>](u)"))
+        // Contrast: a code span whose CONTENT is marker characters is real text —
+        // code content escapes only ` and \, so the label is not blank and its text
+        // ships (the resolver toggles its code state at the delimiters)
+        assertEquals("[`*`](u)", MarkdownV2.render("[`*`](u)"))
+        assertEquals("<a href=\"u\"><code>*</code></a>", TelegramHtml.render("[`*`](u)"))
+        // The <code> tag spelling renders as a backtick span in this format — the
+        // same kept-label shape
+        assertEquals("[`_`](u)", MarkdownV2.render("[<code>_</code>](u)"))
+        assertEquals("<a href=\"u\"><code>_</code></a>", TelegramHtml.render("[<code>_</code>](u)"))
+    }
+
+    @Test
+    fun idlessEmojiTagInsideCodeLiteralizesLikeTheTwins() {
+        // The id check runs before every context branch now (the twins' own order):
+        // an id-less <tg-emoji> inside a code entity is visible literal text, not a
+        // silently swallowed sentinel
+        val output = MarkdownV2.render("<code><tg-emoji>x")
+        assertEquals("`<tg-emoji>x`", output)
+        assertTelegramParseable(output, "idlessEmojiInCode")
+    }
+
+    @Test
+    fun anchorCloserProbesPastTheInLinkEmojiSentinel() {
+        // The in-link tg-emoji sentinel emitted nothing (its opener and closer are
+        // both silent), so a legitimate </a> reaches the anchor beneath it — the tight
+        // close the HTML/entities twins make; pre-fix the sentinel blocked the probe
+        // and the closer leaked literally into the label
+        val output = MarkdownV2.render("""<a href="u"><tg-emoji emoji-id="1">x</a>""")
+        assertEquals("[x](u)", output)
+        assertTelegramParseable(output, "anchorPastEmojiSentinel")
+    }
+
+    @Test
+    fun htmlDeformatSkipsTheUrlTailWhenTheLabelIsTheUrl() {
+        // The MarkdownV2 twin's autolink rule: a label equal to its URL already shows
+        // the URL, and the " (url)" tail would duplicate it — the HTML deformat now
+        // draws the same line
+        assertEquals(
+            "see https://e.com/x end",
+            deformatHtml(TelegramHtml.render("see https://e.com/x end")),
+        )
+        // A genuine link keeps its tail
+        assertEquals("label (https://e.com/x)", deformatHtml(TelegramHtml.render("[label](https://e.com/x)")))
     }
 }

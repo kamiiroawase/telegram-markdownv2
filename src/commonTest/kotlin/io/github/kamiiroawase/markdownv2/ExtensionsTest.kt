@@ -319,4 +319,31 @@ class ExtensionsTest {
         assertEquals("• \\[x\\] hello", MarkdownV2.render("- [x]   hello"))
         assertEquals("• \\[ \\] hello", MarkdownV2.render("- [\t]   hello"))
     }
+
+    // ---------- the tenth audit round: the \s+ after the bracket pair, the quote-rewrite walk ----------
+
+    @Test
+    fun taskMarkerBindsAfterEveryAsciiWhitespace() {
+        // The whitespace after the bracket pair is upstream's \s+ too, not just the
+        // space/tab pair: a vertical tab or form feed binds the marker there
+        // ("[x]\u000Bhello" is a task item upstream, and used to stay literal here).
+        // Kept programmatic to keep the source ASCII; \r cannot reach a Text literal
+        // (the parser splits lines first)
+        assertEquals("• \\[x\\] vtab", MarkdownV2.render("- [x]" + 11.toChar() + "vtab"))
+        assertEquals("• \\[ \\] formfeed", MarkdownV2.render("- [ ]" + 12.toChar() + "formfeed"))
+    }
+
+    @Test
+    fun deepQuoteChainRewriteNeverOverflows() {
+        // rewriteExpandableHtmlQuotes used to recurse once per sibling level with the
+        // depth cap only guarding the quote-spelling branch — a plain parser-depth
+        // quote chain (no <blockquote> spelling anywhere) overflowed the native stack
+        // and killed the test process at ~2000 levels, 1.3x the depth the suite pins.
+        // The walk is an explicit stack now: no input depth reaches the call stack, and
+        // every entry object renders it (the renderer's own cap stays the only bound)
+        val content = ">".repeat(5000) + " x"
+        assertTelegramParseable(MarkdownV2.render(content), "deepQuoteChainMdv2")
+        assertTelegramHtmlParseable(TelegramHtml.render(content), "deepQuoteChainHtml")
+        assertEntitiesValid(TelegramEntities.render(content), "deepQuoteChainEntities")
+    }
 }

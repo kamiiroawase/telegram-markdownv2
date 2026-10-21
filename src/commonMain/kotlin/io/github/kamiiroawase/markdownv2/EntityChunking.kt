@@ -237,11 +237,18 @@ private fun chunkEntityFence(
             current.append(joiner).append(line)
             hasLine = true
         } else {
+            // The trailing trimEnd drops blank lines pending at a mid-content seam —
+            // the documented whitespace exception the MarkdownV2/HTML twins' fence
+            // seams make too, so the formats agree on the display and the PRE range
+            // covers exactly the visible content. hasLine resets unconditionally with
+            // the seam (the twins' own "start the next piece unplaced"): a blank line
+            // placed after the flush would otherwise surface as the next piece's
+            // leading newline, and the twins drop it there too
             if (current.isNotEmpty()) {
-                if (current.isNotBlank()) pieces += preEntityOf(current.toString(), node)
+                if (current.isNotBlank()) pieces += preEntityOf(current.toString().trimEnd('\n'), node)
                 current.setLength(0)
-                hasLine = false
             }
+            hasLine = false
             if (line.length <= maxLength) {
                 current.append(line)
                 hasLine = true
@@ -254,7 +261,7 @@ private fun chunkEntityFence(
             }
         }
     }
-    if (current.isNotBlank()) pieces += preEntityOf(current.toString(), node)
+    if (current.isNotBlank()) pieces += preEntityOf(current.toString().trimEnd('\n'), node)
     if (pieces.isEmpty()) return
     pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)
     acc.appendRendered("", pieces.last())
@@ -336,9 +343,17 @@ private fun chunkEntityQuote(
                 } else {
                     val temp = EntityChunkAccumulator()
                     chunkEntityBlockInto(node, rendered, maxLength, depth + 1, options, temp)
-                    temp.finish().forEach { piece ->
+                    val inner = temp.finish()
+                    if (inner.isEmpty()) continue
+                    // The oversized child's last piece stays open under the quote
+                    // span — the tail handoff the MarkdownV2 twin's appendQuoteChunk
+                    // makes: the quote's following children join the same message's
+                    // blockquote range instead of starting a fresh piece
+                    inner.subList(0, inner.size - 1).forEach { piece ->
                         acc.pieces += blockquoteEntityOf(piece, quoteType)
                     }
+                    quoteStart = acc.length
+                    acc.appendRendered("", inner.last())
                 }
             }
         }

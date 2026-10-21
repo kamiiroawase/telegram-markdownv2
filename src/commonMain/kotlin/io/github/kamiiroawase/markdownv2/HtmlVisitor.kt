@@ -47,10 +47,12 @@ private sealed interface OpenTag {
 // own entry can never be stolen from under it. openStart/openLength: the emitted opener's
 // position and length — an entity whose content renders to no visible text drops both its
 // tags (Telegram rejects empty entities), rewinding the opener instead of emitting a
-// closer. merged: a code-family tag nested inside an already-open inline <code> emitted
-// nothing (nested code renders exactly as single code); its closer emits nothing either.
-// url: tg-emoji only — the custom emoji address its blank fallback degrades to (the bare
-// URL text, the anchor twin's own empty-label trade; null on every other tag)
+// closer. merged: a no-output degradation (a code-family tag nested inside an already-open
+// inline <code>, or a same-type tag inside its own kind — nested code renders exactly as
+// single code, and Telegram bars same-type entities from nesting); its closer emits
+// nothing either. url: tg-emoji only — the custom emoji address its blank fallback
+// degrades to (the bare URL text, the anchor twin's own empty-label trade; null on every
+// other tag)
 private class OpenInlineTag(
     val tag: String,
     val html: Boolean,
@@ -59,11 +61,6 @@ private class OpenInlineTag(
     val openLength: Int = 0,
     val merged: Boolean = false,
     val url: String? = null,
-    // A merged code-family entry that merged into an open code entity took a codeDepth
-    // unit on push and must return it on close; one merged into a custom-emoji fallback
-    // took none — the formatting tags that stay legal inside an emoji (bold, italic, …)
-    // must not see a code depth no code entity owns
-    val ownsCodeDepth: Boolean = false,
 ) : OpenTag
 
 // An open anchor — a Markdown link, a Markdown image or an HTML <a>: the href ("" when
@@ -160,32 +157,41 @@ internal class HtmlVisitor(
     // while at output time the trailing trimEnd strips it anyway and would expose a
     // literal empty pair (`a <b>` + separator renders `a <b></b>`), so only there does
     // blank read as empty. A url-carrying entry (a real custom emoji) runs its blank
-    // fallback BEFORE the widened empty test: whitespace-only content still degrades to
-    // the bare escaped URL at output time — the address the anchor twin keeps there
-    // (closeAnchor's blank label), never an empty rewrite — while a zero-length region
-    // drops outright, the entities twin's own empty-fallback trade (see OpenInlineTag.url)
+    // fallback BEFORE the widened empty test — zero-length and whitespace-only alike
+    // degrade to the bare escaped URL, the address the anchor twin keeps there
+    // (closeAnchor's blank label) and the MarkdownV2/entities twins ship too
     private fun closeInlineTag(
         entity: OpenInlineTag,
         sink: StringBuilder,
         outputTime: Boolean = false,
     ) {
         if (entity.merged) {
-            // A merged entry emitted no opener — its closer emits nothing either; only a
-            // merge into an open code entity returns the depth unit its push took (a
-            // custom-emoji merge never took one — see ownsCodeDepth)
-            if (entity.tag == "code" && entity.ownsCodeDepth) codeDepth--
+            // A merged entry emitted no opener — its closer emits nothing either; a
+            // code-family merge returns the depth unit its push took
+            if (entity.tag == "code") codeDepth--
             return
         }
         val contentStart = entity.openStart + entity.openLength
-        if (entity.url != null && sb.length > contentStart && regionIsBlank(contentStart)) {
+        if (entity.url != null && regionIsBlankResolvingTags(contentStart)) {
             // Telegram requires the custom emoji fallback: one that renders to no visible
-            // text degrades to the bare escaped URL — the same trade the anchor paths
-            // make of a blank label, and the MarkdownV2 twin makes here. Like
-            // closeAnchor's blank-label branch the URL lands in sb, not the closers
-            // builder: at output time trimEnd would otherwise eat the whitespace
-            // between the preceding text and the address
+            // text (whitespace-only or none at all) degrades to the bare escaped URL —
+            // the same trade the anchor paths make of a blank label, and the
+            // MarkdownV2/entities twins make here. Like closeAnchor's blank-label branch
+            // the URL lands in sb, not the closers builder: at output time trimEnd would
+            // otherwise eat the whitespace between the preceding text and the address
             sb.setLength(entity.openStart)
             sb.append(escapeHtmlText(entity.url))
+            return
+        }
+        if (entity.url != null && !isSingleEmojiFallback(sb.substring(contentStart))) {
+            // The fallback must be exactly one regular emoji (see isSingleEmojiFallback):
+            // anything else is an entity the server silently ignores, so the wrapper tags
+            // drop and the fallback content ships as it rendered — inner tags included,
+            // the exact degrade the MarkdownV2 twin makes of the shape (its opener
+            // deleteRange) and the entities twin's never-opened range. Escaped content
+            // (&amp; and friends) and tag-bearing regions are never an emoji cluster, so
+            // the check reads the escaped region as-is
+            sb.deleteRange(entity.openStart, entity.openStart + entity.openLength)
             return
         }
         val empty = sb.length == contentStart || (outputTime && regionIsBlank(contentStart))
@@ -219,7 +225,7 @@ internal class HtmlVisitor(
 
             entity.url.isEmpty() -> {}
 
-            regionIsBlank(entity.labelStart) -> {
+            regionIsBlankResolvingTags(entity.labelStart) -> {
                 // A blank label means nothing was emitted after the opener — anything
                 // opened inside would have emitted a tag — so this anchor is the latest
                 // open entry and rewinding discards only whitespace
@@ -381,13 +387,11 @@ internal class HtmlVisitor(
             // meaning in HTML and render exactly as the MarkdownV2 render shows them
             // inside a code entity
             sb.append('`').append(escapeHtmlText(code.literal)).append('`')
-        } else if (customEmojiOpen()) {
-            // A code entity can't nest inside a custom emoji ("all other entities can't
-            // contain each other"): the span's content renders as the fallback's plain
-            // text, tags and backticks both dropped — the same silent degradation the
-            // tag path makes of a code-family tag there (see renderHtmlInlineTag)
-            sb.append(escapeHtmlText(code.literal))
         } else {
+            // Inside a custom-emoji fallback the tags pass through freely: the fallback
+            // closes into no wrapper over tag-bearing content (see closeInlineTag's
+            // single-emoji check), so the code formatting survives the fallback's own
+            // degradation — the MarkdownV2 twin keeps its ` markers in the same shape
             sb.append("<code>")
             sb.append(escapeHtmlText(code.literal))
             sb.append("</code>")
@@ -395,15 +399,25 @@ internal class HtmlVisitor(
     }
 
     override fun visit(emphasis: Emphasis) {
+        if (!enterInline()) {
+            appendEscapedHtmlPlainText(sb, emphasis)
+            return
+        }
         if (codeDepth > 0) {
             // Telegram forbids entities nested inside code ("Pre and Code can't contain
             // nested entities"): the tags drop, the content renders as plain code text —
             // the same degradation the MarkdownV2 twin's silent emphasis entries make
             visitChildren(emphasis)
+            exitInline()
             return
         }
-        if (!enterInline()) {
-            appendEscapedHtmlPlainText(sb, emphasis)
+        if (formatTagOpen("i")) {
+            // Same-type entities cannot nest (see renderHtmlInlineTag): the tags drop
+            // and the content renders inside the outer entity. The parser pairs most
+            // same-type runs into siblings, but `*a *b* c*`-shaped runs nest them —
+            // the entities twin degrades the inner range alike
+            visitChildren(emphasis)
+            exitInline()
             return
         }
         val seq = nextSeq++
@@ -418,13 +432,21 @@ internal class HtmlVisitor(
     }
 
     override fun visit(strongEmphasis: StrongEmphasis) {
+        if (!enterInline()) {
+            appendEscapedHtmlPlainText(sb, strongEmphasis)
+            return
+        }
         if (codeDepth > 0) {
             // See visit(emphasis): the tags drop inside an open code entity
             visitChildren(strongEmphasis)
+            exitInline()
             return
         }
-        if (!enterInline()) {
-            appendEscapedHtmlPlainText(sb, strongEmphasis)
+        if (formatTagOpen("b")) {
+            // See visit(emphasis): same-type nesting degrades to the outer entity
+            // (`**a **b** c**` parses to nested strongs, the shape this guards)
+            visitChildren(strongEmphasis)
+            exitInline()
             return
         }
         val seq = nextSeq++
@@ -440,13 +462,20 @@ internal class HtmlVisitor(
     override fun visit(customNode: CustomNode) {
         when (customNode) {
             is Strikethrough -> {
+                if (!enterInline()) {
+                    appendEscapedHtmlPlainText(sb, customNode)
+                    return
+                }
                 if (codeDepth > 0) {
                     // See visit(emphasis): the tags drop inside an open code entity
                     visitChildren(customNode)
+                    exitInline()
                     return
                 }
-                if (!enterInline()) {
-                    appendEscapedHtmlPlainText(sb, customNode)
+                if (formatTagOpen("s")) {
+                    // See visit(emphasis): same-type nesting degrades to the outer entity
+                    visitChildren(customNode)
+                    exitInline()
                     return
                 }
                 val seq = nextSeq++
@@ -616,7 +645,7 @@ internal class HtmlVisitor(
         // passes any earlier blank test on its opener's strength, then rewinds to
         // nothing and would leave the empty <a></a> pair behind. Rewinding is safe: the
         // completion has already popped everything the label opened
-        if (regionIsBlank(labelStart)) {
+        if (regionIsBlankResolvingTags(labelStart)) {
             sb.setLength(openStart)
             sb.append(escapeHtmlText(destination))
             return
@@ -682,7 +711,7 @@ internal class HtmlVisitor(
         // and the empty-label degradation checks the post-completion state — an unclosed
         // inner tag as the alt's whole content rewinds only at that completion
         completeOpenedAfter(entrySeq)
-        if (regionIsBlank(labelStart)) {
+        if (regionIsBlankResolvingTags(labelStart)) {
             sb.setLength(openStart)
             sb.append(escapeHtmlText(destination))
             return
@@ -800,17 +829,8 @@ internal class HtmlVisitor(
             // A code-family tag never nests a second code level: inside an open code
             // entity it merges into it (nested code renders exactly as single code),
             // the tags dropping while the content continues code-styled
-            openTags.addLast(OpenInlineTag("code", html = true, seq = nextSeq++, merged = true, ownsCodeDepth = true))
-            codeDepth++
-            return
-        }
-        if (mapped == "code" && customEmojiOpen()) {
-            // A code entity can't nest inside a custom emoji either ("all other entities
-            // can't contain each other"): the tags drop — merged keeps the closer matched
-            // and emission-free — and the content continues as plain fallback text. No
-            // depth unit: the emoji is no code entity, and the formatting tags that stay
-            // legal inside it (bold, italic, …) must keep their own tags
             openTags.addLast(OpenInlineTag("code", html = true, seq = nextSeq++, merged = true))
+            codeDepth++
             return
         }
         if (codeDepth > 0) {
@@ -818,6 +838,15 @@ internal class HtmlVisitor(
             // Telegram rejects ("Pre and Code can't contain nested entities"): the tag
             // drops — merged keeps the closer matched and emission-free, the content
             // continues as plain code text (the MarkdownV2 twin's silent entries)
+            openTags.addLast(OpenInlineTag(mapped, html = true, seq = nextSeq++, merged = true))
+            return
+        }
+        if (formatTagOpen(mapped)) {
+            // Same-type entities cannot nest (see formatTagOpen): the tag drops —
+            // merged keeps the closer matched and emission-free — and the content
+            // renders inside the outer entity, whose formatting already covers it (the
+            // display is identical; the MarkdownV2 twin's flat markers flatten the same
+            // input shape, and the entities twin degrades the inner range the same way)
             openTags.addLast(OpenInlineTag(mapped, html = true, seq = nextSeq++, merged = true))
             return
         }
@@ -978,13 +1007,12 @@ internal class HtmlVisitor(
     private fun linkEntityOpen(): Boolean =
         openTags.any { it is OpenAnchorTag || (it is OpenInlineTag && it.tag == "tg-emoji") } || openMarkdownLinks > 0
 
-    // Whether a real custom-emoji entity is open: a tg-emoji entry that emitted its
-    // opener — not one of the merged no-output degradations, which sit inside a code
-    // entity or a link and are no custom emoji at all. "All other entities can't contain
-    // each other" bars a code entity from nesting inside one, so code-family content
-    // renders as plain fallback text while one is open (see visit(code) and
-    // renderHtmlInlineTag)
-    private fun customEmojiOpen(): Boolean = openTags.any { it is OpenInlineTag && it.tag == "tg-emoji" && !it.merged }
+    // Whether a formatting tag of [tag]'s kind is open: Telegram bars same-type entities
+    // from nesting inside each other, and the MarkdownV2 twin's flat markers cannot even
+    // express the shape — so a same-type tag degrades and the content joins the outer
+    // entity, whose formatting already covers it. Merged entries are no-output
+    // degradations, not entities, and do not count
+    private fun formatTagOpen(tag: String): Boolean = openTags.any { it is OpenInlineTag && it.tag == tag && !it.merged }
 
     // Whether the output region starting at [start] renders no visible text: empty or
     // whitespace only. The label callers check it immediately after the label's children,
@@ -995,6 +1023,36 @@ internal class HtmlVisitor(
     private fun regionIsBlank(start: Int): Boolean {
         for (index in start until sb.length) {
             if (!sb[index].isWhitespace()) return false
+        }
+        return true
+    }
+
+    // The blank test with tag markup resolved, for LABEL regions: this format's
+    // labels carry their inner tags' text in the region, and a whitespace-only label
+    // wrapped in <code> tags still renders no visible text — the empty link entity
+    // Telegram rejects. Only the balanced tags THIS visitor emits are skipped:
+    // attribute values escape their quotes (escapeHtmlAttribute), so a bare '>' never
+    // hides inside one, and literalized nested anchors emit ESCAPED text (&lt;…&gt;),
+    // which reads as content exactly as it displays
+    private fun regionIsBlankResolvingTags(start: Int): Boolean {
+        var index = start
+        while (index < sb.length) {
+            val char = sb[index]
+            when {
+                char == '<' -> {
+                    val close = sb.indexOf('>', index)
+                    if (close == -1) return false
+                    index = close + 1
+                }
+
+                !char.isWhitespace() -> {
+                    return false
+                }
+
+                else -> {
+                    index++
+                }
+            }
         }
         return true
     }

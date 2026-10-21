@@ -330,4 +330,43 @@ class PlainTextTest {
         // A closed span still drops both delimiters
         assertEquals("code", MarkdownV2.toPlainText("`code`"))
     }
+
+    // ---------- the tenth audit round: block separators and the custom emoji URL ----------
+
+    @Test
+    fun plainTextSeparatesBlockSiblings() {
+        // appendPlainText's container branch used to join adjacent blocks with no
+        // separator at all: the truncation and chunking fallback paths shipped
+        // "alphabeta" — words welded across a block boundary. Block boundaries take
+        // the blank line the rendered formats place between blocks, line-level
+        // siblings (list items, table rows and cells) the single newline, and a
+        // code-block literal's own trailing newline never doubles one
+        fun plain(content: String): String {
+            val doc = MarkdownV2.defaultParser.parse(content)!!
+            return plainText(listOf(doc))
+        }
+        assertEquals("para one\n\npara two", plain("para one\n\npara two"))
+        assertEquals("a\n\nb\nc", plain("- a\n\n  b\n- c"))
+        assertEquals("first\nsecond", plain("- first\n- second"))
+        assertEquals("code\n\nafter", plain("```\ncode\n```\n\nafter"))
+        assertEquals("a\nb\nc\nd", plain("| a | b |\n| --- | --- |\n| c | d |"))
+        // A no-content sibling between two boundaries collapses: two separators
+        // normalize into one, exactly one blank line where the render shows one
+        assertEquals("x\n\ny", plain("x\n\n<!-- nothing -->\n\ny"))
+    }
+
+    @Test
+    fun blankCustomEmojiFallbackDegradesToTheBareUrlInPlainText() {
+        // visit(image) degrades ![](tg://emoji?id=…) to the bare destination, and the
+        // plain extraction feeds the MarkdownV2 pipeline's own truncation/chunking
+        // fallbacks — pre-fix it rendered nothing there, a visible-text divergence
+        // between the full render and its fallback on the same input
+        fun plain(content: String): String {
+            val doc = MarkdownV2.defaultParser.parse(content)!!
+            return plainText(listOf(doc))
+        }
+        assertEquals("tg://emoji?id=5", plain("![](tg://emoji?id=5)"))
+        // A non-blank fallback never surfaces the internal URL beside the text
+        assertEquals("😀", plain("![😀](tg://emoji?id=5)"))
+    }
 }

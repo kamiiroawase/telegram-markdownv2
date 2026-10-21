@@ -853,4 +853,80 @@ class ChunkingTest {
             }
         }
     }
+
+    // ---------- the tenth audit round: flatten separators and cross-format seams ----------
+
+    @Test
+    fun oversizedListItemFlattensWithoutGluingWords() {
+        // The flatten fallback used to join the item's blocks with no separator at
+        // all: the default 4096 limit shipped "alphabeta" mid-message — words welded
+        // across a paragraph boundary, visible corruption the losslessness guarantee
+        // forbids. The plain-text source separates blocks now, in every format
+        val content = "- " + "alpha ".repeat(600) + "\n  " + "beta ".repeat(600)
+        for (pieces in listOf(
+            MarkdownV2.renderChunked(content),
+            TelegramHtml.renderChunked(content),
+            TelegramEntities.renderChunked(content).map { it.text },
+        )) {
+            assertTrue(pieces.size > 1, "the oversized item must split")
+            val joined = pieces.joinToString("")
+            assertFalse(joined.contains("alphabeta"), "words glued across a block boundary: ${joined.take(80)}")
+            assertTrue(joined.contains("alpha"))
+            assertTrue(joined.contains("beta"))
+        }
+    }
+
+    @Test
+    fun fenceSeamPendingBlankLineDropsInEveryFormat() {
+        // The MarkdownV2 fence seam always dropped blank lines pending at a
+        // mid-content seam; the HTML twin kept a trailing "\n" inside its <pre> and
+        // the entities twin's PRE range covered it — the comment claiming the twins'
+        // pieces "show none either" was wrong. The twins trim now: no piece's display
+        // text may end on a blank line a seam crossed (the formats seam at different
+        // limits — their wrapper overheads differ — so the check runs per format
+        // across the whole crossing range; 16 is the HTML fence floor, below which
+        // that format flattens to plain text)
+        val content = "```\nabcdefgh\n\nijklmnop\n\nqrstuvwx\n```"
+        for (limit in 16..25) {
+            for (chunk in MarkdownV2.renderChunked(content, limit)) {
+                val plain = MarkdownV2.toPlainText(chunk)
+                assertFalse(plain.endsWith("\n"), "md piece ships a trailing blank line at limit=$limit: $plain")
+            }
+            for (chunk in TelegramHtml.renderChunked(content, limit)) {
+                val plain = deformatHtml(chunk)
+                assertFalse(plain.endsWith("\n"), "html piece ships a trailing blank line at limit=$limit: $plain")
+            }
+            for (piece in TelegramEntities.renderChunked(content, limit)) {
+                assertFalse(
+                    piece.text.endsWith("\n"),
+                    "entities piece ships a trailing blank line at limit=$limit: ${piece.text}",
+                )
+                assertEntitiesValid(piece, "fenceSeamEntities limit=$limit")
+            }
+        }
+    }
+
+    @Test
+    fun smallQuoteTailPacksWithTheOversizedChildInEveryFormat() {
+        // The MarkdownV2 seam keeps an oversized quote child's last piece open for the
+        // following children to pack alongside; the HTML and entities twins completed
+        // every wrapped piece outright, so a small tail after a big child became its
+        // own message where the twin packed one. The twins keep the tail open now:
+        // the wrapper content here (17 chars) overflows a fresh HTML wrapper at 40 by
+        // exactly one character, so its last seam piece stays open and the tail joins
+        // it inside the same message
+        val content = "> " + "y ".repeat(8) + "x\n>\n> tail"
+        val md = MarkdownV2.renderChunked(content, 40)
+        val html = TelegramHtml.renderChunked(content, 40)
+        val entities = TelegramEntities.renderChunked(content, 40)
+        assertTrue(md.last().contains("tail"))
+        assertFalse(md.last() == "> tail", "md tail shipped alone: ${md.last()}")
+        assertTrue(html.last().contains("tail"))
+        assertFalse(html.last() == "<blockquote>tail</blockquote>", "html tail shipped alone: ${html.last()}")
+        assertTrue(entities.last().text.contains("tail"))
+        assertFalse(entities.last().text == "tail", "entities tail shipped alone: ${entities.last().text}")
+        md.forEach { assertTelegramParseable(it, "quoteTailPack md") }
+        html.forEach { assertTelegramHtmlParseable(it, "quoteTailPack html") }
+        entities.forEach { assertEntitiesValid(it, "quoteTailPack entities") }
+    }
 }

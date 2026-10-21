@@ -5,7 +5,9 @@ package io.github.kamiiroawase.markdownv2
  * piece — back into the plain text Telegram would display: the HTML twin of [deformat].
  * Tags drop (a code-family or emphasis tag contributes nothing visible), entity
  * references decode, and an anchor's href survives as `label (url)` — the same
- * no-target-loss trade the MarkdownV2 deformat and the plain-text extraction make.
+ * no-target-loss trade the MarkdownV2 deformat and the plain-text extraction make —
+ * save that a label equal to its URL (an autolink's render) stays the single URL,
+ * the MarkdownV2 twin's own rule.
  *
  * The input is expected to be this library's output; arbitrary strings degrade
  * best-effort but losslessly — a '<' with no closing '>' stays literal, an unrecognized
@@ -15,9 +17,9 @@ package io.github.kamiiroawase.markdownv2
 internal fun deformatHtml(rendered: String): String {
     if ('<' !in rendered && '&' !in rendered) return rendered
     val sb = StringBuilder(rendered.length)
-    // Open anchors' hrefs, innermost last; the " (url)" tail appends when the matching
-    // close strips, so a link target is never silently dropped
-    val openUrls = ArrayDeque<String>()
+    // Open anchors' hrefs and label starts, innermost last; the " (url)" tail appends
+    // when the matching close strips, so a link target is never silently dropped
+    val openHrefs = ArrayDeque<OpenHref>()
     var index = 0
     while (index < rendered.length) {
         val char = rendered[index]
@@ -31,7 +33,7 @@ internal fun deformatHtml(rendered: String): String {
                 index++
                 continue
             }
-            appendTagText(sb, openUrls, rendered.substring(index + 1, end))
+            appendTagText(sb, openHrefs, rendered.substring(index + 1, end))
             index = end + 1
         } else {
             sb.append(char)
@@ -42,20 +44,34 @@ internal fun deformatHtml(rendered: String): String {
     // innermost first — the order a run of matching closes would take — so the
     // no-target-loss trade holds on unterminated shapes too (the MarkdownV2 twin's
     // degradation keeps the target the same way: "[a](u" stays "[a](u")
-    while (openUrls.isNotEmpty()) {
-        val url = openUrls.removeLast()
-        if (url.isNotEmpty()) {
-            sb.append(" (").append(url).append(')')
-        }
+    while (openHrefs.isNotEmpty()) {
+        appendHrefTail(sb, openHrefs.removeLast())
     }
     return decodeHtmlEntities(sb.toString())
+}
+
+// One open anchor: its (still-encoded) href and where its label began in the output
+private class OpenHref(
+    val url: String,
+    val labelStart: Int,
+)
+
+// The " (url)" tail, with the autolink carve-out the MarkdownV2 twin makes: a label
+// equal to its URL already shows the URL — the tail would duplicate it
+private fun appendHrefTail(
+    sb: StringBuilder,
+    href: OpenHref,
+) {
+    if (href.url.isNotEmpty() && sb.substring(href.labelStart) != href.url) {
+        sb.append(" (").append(href.url).append(')')
+    }
 }
 
 // Strips one tag's inner text (between the angle brackets), recording anchor hrefs and
 // emitting link tails on their closes
 private fun appendTagText(
     sb: StringBuilder,
-    openUrls: ArrayDeque<String>,
+    openHrefs: ArrayDeque<OpenHref>,
     inner: String,
 ) {
     val parts =
@@ -67,9 +83,9 @@ private fun appendTagText(
         }
     if (parts.name == "a") {
         if (parts.closing) {
-            val url = openUrls.removeLastOrNull()
-            if (!url.isNullOrEmpty()) {
-                sb.append(" (").append(url).append(')')
+            val href = openHrefs.removeLastOrNull()
+            if (href != null) {
+                appendHrefTail(sb, href)
             }
         } else {
             // The raw, still-encoded attribute value: this library's output escaped the
@@ -78,7 +94,9 @@ private fun appendTagText(
             // would decode here already, and the final pass would decode the URL a
             // second time, mangling a href that literally contains an entity-shaped
             // run ("&amp;" in the Markdown source's link destination stays "&amp;")
-            openUrls.addLast(extractAttribute(parts.attrs, "href")?.takeIf { it.isNotEmpty() }.orEmpty())
+            openHrefs.addLast(
+                OpenHref(extractAttribute(parts.attrs, "href")?.takeIf { it.isNotEmpty() }.orEmpty(), sb.length),
+            )
         }
     }
     // Every other tag carries no visible text of its own

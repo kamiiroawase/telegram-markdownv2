@@ -167,40 +167,54 @@ private fun chunkHtmlFence(
     if (rendered.isEmpty()) return
     val (open, close) = htmlFenceOf(node)
     val lines = rendered.substring(open.length, rendered.length - close.length).split('\n')
+    // A language whose open tag cannot fit beside one escape unit yields to a bare
+    // <pre> before the fence formatting gives way entirely — the MarkdownV2 twin's
+    // 3-char markers keep their fence at far smaller budgets, and the entities twin
+    // loses nothing (its language rides on the range, never the text). The content
+    // lines come off the ORIGINAL tag pair: only the emitted tags change
+    var effOpen = open
+    var effClose = close
+    if (open.length > "<pre>".length && maxLength - open.length - close.length < MAX_HTML_UNIT) {
+        effOpen = "<pre>"
+        effClose = "</pre>"
+    }
     // No newline overhead exists beyond the tags themselves (the first content line glues
     // onto the open tag), so the whole budget between the tags serves one line
-    val lineBudget = maxLength - open.length - close.length
+    val lineBudget = maxLength - effOpen.length - effClose.length
     if (lineBudget < MAX_HTML_UNIT) {
         flattenHtmlToPlainText(node, maxLength, depth, options, acc)
         return
     }
 
     val pieces = mutableListOf<String>()
-    val current = StringBuilder(open)
+    val current = StringBuilder(effOpen)
     // See shrinkHtmlFence: a blank first line appends nothing yet still counts as placed,
     // or the newline joining the next line would be lost. Placing no line is different
     // from placing a blank one only until the split fires: there a marker that placed
     // nothing but blank lines drops them instead of shipping — a piece whose visible
     // text is blank is a message the server trims and rejects (400 "message text is
     // empty") — the one lossless-chunking exception, the same drop the verbatim and
-    // flatten seams make; the MarkdownV2 twin's guard makes the same trade
+    // flatten seams make; the MarkdownV2 twin's guard makes the same trade. A blank
+    // line pending at a mid-content seam trims away with the close too (the trailing
+    // trimEnd below): the MarkdownV2 and entities twins' pieces show none either, so
+    // the formats agree on the display
     var hasLine = false
     for (line in lines) {
         val joiner = if (hasLine) "\n" else ""
-        if (current.length + joiner.length + line.length + close.length <= maxLength) {
+        if (current.length + joiner.length + line.length + effClose.length <= maxLength) {
             current.append(joiner).append(line)
             hasLine = true
         } else {
-            if (current.length > open.length && !isBlankBeyond(current, open.length)) {
-                pieces += current.toString() + close
+            if (current.length > effOpen.length && !isBlankBeyond(current, effOpen.length)) {
+                pieces += current.toString().trimEnd('\n') + effClose
                 current.setLength(0)
-                current.append(open)
+                current.append(effOpen)
                 hasLine = false
             } else {
                 // Only pending blank lines ever sit here (the fit check placed real
                 // content, and trailing newlines never reach this loop — the render
                 // trims them): drop them and start the next piece unplaced
-                current.setLength(open.length)
+                current.setLength(effOpen.length)
                 hasLine = false
             }
             if (line.length <= lineBudget) {
@@ -211,14 +225,16 @@ private fun chunkHtmlFence(
                     // A segment of a whitespace-only line is blank visible text — the
                     // same unsendable piece shape the seam drop above refuses, so the
                     // line drops whole
-                    if (!segment.isBlank()) pieces += "$open$segment$close"
+                    if (!segment.isBlank()) pieces += "$effOpen$segment$effClose"
                 }
             }
         }
     }
     // Same content guard as the split above: a marker never placed a real line, so the
     // tail cannot be an empty — or blank — tag pair either
-    if (current.length > open.length && !isBlankBeyond(current, open.length)) pieces += current.toString() + close
+    if (current.length > effOpen.length && !isBlankBeyond(current, effOpen.length)) {
+        pieces += current.toString().trimEnd('\n') + effClose
+    }
     if (pieces.isEmpty()) return
     pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)
     acc.appendRendered(pieces.last())
@@ -342,7 +358,15 @@ private fun chunkHtmlQuote(
                 // standing content, so every piece closes and reopens independently. A
                 // depth-capped nested quote (a BlockQuote entry) flattens to verbatim
                 // text instead: its own wrapper is the forbidden nesting, and
-                // re-entering the quote seam on it would recurse once per remaining level
+                // re-entering the quote seam on it would recurse once per remaining level.
+                // The LAST piece stays open in the wrapper — the tail handoff the
+                // MarkdownV2 twin's appendQuoteChunk makes — so the quote's following
+                // children pack into the same chunk's wrapper instead of starting a
+                // fresh piece: one message for a big child followed by a small tail. A
+                // child the inner seam cannot place AT ALL (a fence whose visible text
+                // is whitespace-only — blank at the seam, dropped by the unsendable-piece
+                // guard) yields no pieces and simply skips, the full render's own
+                // all-blank-child skip
                 val temp = ChunkAccumulator()
                 if (node is BlockQuote) {
                     val text = flattenTextOfHtml(node, depth + 1, options)
@@ -350,14 +374,22 @@ private fun chunkHtmlQuote(
                 } else {
                     chunkHtmlBlockInto(node, rendered, innerLimit, depth + 1, options, temp)
                 }
-                temp.finish().forEach { piece ->
+                val inner = temp.finish()
+                if (inner.isEmpty()) continue
+                inner.subList(0, inner.size - 1).forEach { piece ->
                     pieces += quoteOpenTag + piece + quoteCloseTag
                 }
+                current = StringBuilder(quoteOpenTag).append(inner.last())
+                quoteOpen = true
             }
         }
     }
     if (quoteOpen) current.append(quoteCloseTag)
     if (current.isNotEmpty()) pieces += current.toString()
+    // Every child skipped (each one a shape the inner seam cannot place): the quote
+    // renders nothing, the full render's own empty-quote skip — and the guard keeps
+    // the subList below safe on the empty list
+    if (pieces.isEmpty()) return
 
     pieces.subList(0, pieces.size - 1).forEach(acc.pieces::add)
     acc.appendRendered(pieces.last())

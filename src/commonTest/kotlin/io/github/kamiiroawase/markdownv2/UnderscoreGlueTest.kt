@@ -37,9 +37,15 @@ class UnderscoreGlueTest {
         // Contentful openers but glued closers ("<u>a<i>b</i></u>" renders "__a_b___",
         // which the parser leaves unterminated): the outer's closer rewinds its opener
         assertEquals("a_b_", MarkdownV2.render("<u>a<i>b</i></u>"))
-        assertEquals("a_b_", MarkdownV2.render("<i>a<i>b</i></i>"))
-        // Underline closers pair unconditionally — nested underlines stay rendered
-        assertEquals("__a__b____", MarkdownV2.render("<u>a<u>b</u></u>"))
+        // Same-type nesting degrades the inner tag outright (emphasisEntryOpen): one
+        // italic entity over the whole region, the display the HTML/entities twins
+        // ship — the flat marker re-pairing used to un-format the middle segment
+        assertEquals("_ab_", MarkdownV2.render("<i>a<i>b</i></i>"))
+        // Underline closers pair unconditionally, so same-type underlines USED to
+        // nest their markers ("__a__b____" — legal but a twin-divergent display);
+        // the same-type degradation makes one underline over the region now, the
+        // display the HTML/entities twins ship
+        assertEquals("__ab__", MarkdownV2.render("<u>a<u>b</u></u>"))
         // Plain separation never triggers anything
         assertEquals("__a _b_ c__", MarkdownV2.render("<u>a <i>b</i> c</u>"))
     }
@@ -68,8 +74,9 @@ class UnderscoreGlueTest {
     fun unclosedAdjacentTagsCompleteWithoutGlue() {
         // Unclosed tags complete at output time; the completions must respect the glue
         // rule too (pre-fix "<i>a<i>b" completed into "_a_b__" — an unterminated
-        // underline)
-        assertEquals("a_b_", MarkdownV2.render("<i>a<i>b"))
+        // underline). The same-type inner tag degrades outright now (one italic over
+        // the whole region, the twins' display), so no completion of its own arises
+        assertEquals("_ab_", MarkdownV2.render("<i>a<i>b"))
         assertEquals("_a__b___", MarkdownV2.render("<i>a<u>b"))
         assertTelegramParseable(MarkdownV2.render("<i>a</i><i>b</i> <u>c</u><u>d</u>"), "mixed adjacency")
     }

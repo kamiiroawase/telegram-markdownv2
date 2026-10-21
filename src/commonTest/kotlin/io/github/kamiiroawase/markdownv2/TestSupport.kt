@@ -456,6 +456,12 @@ internal fun sweepContents(): List<String> =
         add("- [ ] aaaa bbbb\n- [x] cccc dddd")
         add("note[^1]\n\n[^1]: aaaa bbbb cccc dddd eeee ffff")
         add("see https://e.com/aaaa?bbb=cccc dddd [explicit](https://e.com/eeee)")
+        // Same-type tag nesting degrades in every format (Telegram bars same-type
+        // entities from nesting) — the sweeps cross the degradation's budget paths
+        add("<b>a<b>bbbb</b>c</b> <i>x<i>yyyy</i></i>")
+        // The custom emoji spellings' degradation tiers: the blank fallback's bare
+        // URL, and the not-one-emoji fallback's plain text
+        add("![ ](tg://emoji?id=5368324170671202286) tail words to push the length out")
     }
 
 /**
@@ -548,10 +554,13 @@ internal fun assertEntitiesValid(
     // block-level ranges (pre, blockquote) sit inside no other entity ("Cannot be nested
     // inside other entities"); links never nest; a custom emoji holds exactly its one
     // emoji, so nothing of link or code shape sits inside it ("all other entities can't
-    // contain each other"). The one documented exemption: a blockquote inside a
-    // blockquote (the nested-quote deviation the server repairs silently); formatting
-    // ranges span freely (the pinned bold-over-pre containment), and a code span inside
-    // a text_link label is the shipped label-with-code shape
+    // contain each other"); and same-type formatting never nests ("entities can't be
+    // nested inside entities of the same type" — the string twins' flat markers cannot
+    // express the shape, and the entities pipeline degrades the inner tag into the
+    // outer range). The one documented exemption: a blockquote inside a blockquote (the
+    // nested-quote deviation the server repairs silently); formatting ranges span
+    // freely (the pinned bold-over-pre containment), and a code span inside a
+    // text_link label is the shipped label-with-code shape
     fun containmentViolation(
         inner: MessageEntityType,
         outer: MessageEntityType,
@@ -585,7 +594,11 @@ internal fun assertEntitiesValid(
             }
 
             else -> {
-                null
+                if (inner == outer) {
+                    "$inner inside $outer"
+                } else {
+                    null
+                }
             }
         }
     }

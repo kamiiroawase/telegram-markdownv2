@@ -141,6 +141,18 @@ jobs:
           docs: README.md README.en.md
           reverse: true
 
+      # The README test-count gate the Build workflow runs, re-run here: the tag may
+      # point at a commit that never passed CI (this workflow's own header notes every
+      # gate must run on the tag itself), and a stale count ships to every reader of
+      # the released revision's READMEs. Same anchored grep as build.yml's step
+      - name: Check README test counts match the suite
+        run: |
+          COUNT=$(grep -hE '^[[:space:]]*@Test\b' src/commonTest/kotlin/io/github/kamiiroawase/markdownv2/*.kt | wc -l | tr -d ' ')
+          test "$COUNT" -gt 0
+          grep -qE "(^|[^0-9])$COUNT 个测试" README.md || { echo "README.md test count is stale — the suite has $COUNT"; exit 1; }
+          grep -qE "(^|[^0-9])$COUNT tests" README.en.md || { echo "README.en.md test count is stale — the suite has $COUNT"; exit 1; }
+          echo "README test counts match: $COUNT"
+
       # Publishing-credentials gate before the long build, same spirit as the README
       # coordinates gate above: a missing configuration fails loudly and early. A missing
       # Portal token would otherwise surface as a 401 only at the upload stage; a missing

@@ -85,7 +85,12 @@ private object IterativeTaskListPostProcessor : PostProcessor {
                 else -> return
             }
         val after = literal[3]
-        if (after != ' ' && after != '\t') return
+        // Upstream's \s+ is the full ASCII whitespace class: a vertical tab or form feed
+        // after the bracket pair still binds the marker ("[x]\u000Bhello" is a task item
+        // there), so the check is the same isAsciiWhitespace the greedy skip below runs —
+        // not just the space/tab pair (a newline or carriage return cannot reach a Text
+        // literal: the parser splits lines before it ever forms one)
+        if (!isAsciiWhitespace(after)) return
         // Upstream's \s+ is greedy: every whitespace run after the bracket pair belongs
         // to the marker and group(2) starts at the first non-whitespace character, so
         // "- [x]␣␣␣hello" keeps no extra leading spaces (substring(4) used to leave
