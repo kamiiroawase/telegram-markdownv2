@@ -532,13 +532,16 @@ class EntityRenderTest {
     @Test
     fun codeRangeCompletesBeforeBlockquote() {
         // Pre-fix the still-open CODE range swallowed the quote's BLOCKQUOTE range — a
-        // nesting the Bot API rejects ("Pre and Code can't contain nested entities")
+        // nesting the Bot API rejects ("Pre and Code can't contain nested entities").
+        // The range covers the code text alone: the separator lift at the completion
+        // keeps the blank line out of the span, the shape the string twins ship
+        // (pre-fix the range ran over "b\n\n" and formatted the blank line too)
         val result = TelegramEntities.render("a <code>b\n> q")
         assertEquals(
             EntityText(
                 "a b\n\nq",
                 listOf(
-                    MessageEntity(MessageEntityType.CODE, 2, 3),
+                    MessageEntity(MessageEntityType.CODE, 2, 1),
                     MessageEntity(MessageEntityType.BLOCKQUOTE, 5, 1),
                 ),
             ),
@@ -549,11 +552,12 @@ class EntityRenderTest {
 
     @Test
     fun codeRangeCompletesBeforeHeading() {
+        // See codeRangeCompletesBeforeBlockquote: the separator stays outside the range
         val result = TelegramEntities.render("x <code>y\n\n# H")
         assertEquals(
             EntityText(
                 "x y\n\n# H",
-                listOf(MessageEntity(MessageEntityType.CODE, 2, 3)),
+                listOf(MessageEntity(MessageEntityType.CODE, 2, 1)),
             ),
             result,
         )
@@ -563,13 +567,15 @@ class EntityRenderTest {
     @Test
     fun preRangeCompletesOpenLinkRange() {
         // Pre-fix the PRE range landed inside the still-open TEXT_LINK range — "Cannot
-        // be nested inside other entities" per the entities documentation
+        // be nested inside other entities" per the entities documentation. The link
+        // covers its label alone: the separator lift at the completion keeps the blank
+        // line out of the span (see codeRangeCompletesBeforeBlockquote)
         val result = TelegramEntities.render("x <a href=\"https://e.com/u\">y\n\n```\ncode\n```")
         assertEquals(
             EntityText(
                 "x y\n\ncode",
                 listOf(
-                    MessageEntity(MessageEntityType.TEXT_LINK, 2, 3, url = "https://e.com/u"),
+                    MessageEntity(MessageEntityType.TEXT_LINK, 2, 1, url = "https://e.com/u"),
                     MessageEntity(MessageEntityType.PRE, 5, 4),
                 ),
             ),
@@ -738,13 +744,15 @@ class EntityRenderTest {
     fun quoteCompletesOpenLinkRange() {
         // Pre-fix the unclosed anchor stayed open across the quote — BLOCKQUOTE strictly
         // inside TEXT_LINK, "Cannot be nested inside other entities". The quote now
-        // draws the same completion the PRE-emitting blocks make
+        // draws the same completion the PRE-emitting blocks make. The link covers its
+        // label alone: the separator lift at the completion keeps the blank line out
+        // of the span (see codeRangeCompletesBeforeBlockquote)
         val result = TelegramEntities.render("x <a href=\"https://e.com/u\">y\n\n> quoted")
         assertEquals(
             EntityText(
                 "x y\n\nquoted",
                 listOf(
-                    MessageEntity(MessageEntityType.TEXT_LINK, 2, 3, url = "https://e.com/u"),
+                    MessageEntity(MessageEntityType.TEXT_LINK, 2, 1, url = "https://e.com/u"),
                     MessageEntity(MessageEntityType.BLOCKQUOTE, 5, 6),
                 ),
             ),
@@ -756,13 +764,15 @@ class EntityRenderTest {
     @Test
     fun listQuoteCompletesOpenLinkRange() {
         // The list twin: items render through child visitors, so a quote inside an item
-        // landed inside a range the list's own visitor still held open
+        // landed inside a range the list's own visitor still held open. The link covers
+        // its label alone — the separator stays out of the span (see
+        // codeRangeCompletesBeforeBlockquote)
         val result = TelegramEntities.render("x <a href=\"https://e.com/u\">y\n\n- > quoted")
         assertEquals(
             EntityText(
                 "x y\n\n• quoted",
                 listOf(
-                    MessageEntity(MessageEntityType.TEXT_LINK, 2, 3, url = "https://e.com/u"),
+                    MessageEntity(MessageEntityType.TEXT_LINK, 2, 1, url = "https://e.com/u"),
                     MessageEntity(MessageEntityType.BLOCKQUOTE, 7, 6),
                 ),
             ),
@@ -981,5 +991,66 @@ class EntityRenderTest {
         val boundary = TelegramEntities.render("x <a href=\"http://u/x\"> \n\n> q")
         assertEquals("x http://u/x\n\nq", boundary.text)
         assertEntitiesValid(boundary, "blankLabelBoundaryKeepsSeparator")
+    }
+
+    // ---------- the eleventh audit round: CRLF item bodies, blank footnote definitions, inner emphasis boundaries ----------
+
+    @Test
+    fun listItemShiftsEntitiesAcrossCrlfLineBreaks() {
+        // A &#13;&#10; pair inside an item body decodes into the Text literal, where
+        // lines() reads it as one TWO-character separator. Pre-fix applyEntityPrefix
+        // charged every separator a single character: offsets past the pair ran one
+        // per pair ahead of the prefixed text and the CODE range pointed past the
+        // message's end — the entity dropped as out of bounds. The shift now measures
+        // each separator from the text itself and hands back the compression
+        // applyPrefix's plain-\n re-join makes
+        val result = TelegramEntities.render("- a&#13;&#10;b `x`")
+        assertEquals(
+            EntityText(
+                "• a\n  b x",
+                listOf(MessageEntity(MessageEntityType.CODE, 8, 1)),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "crlfItemShift")
+    }
+
+    @Test
+    fun blankFootnoteDefinitionDropsEntirely() {
+        // A definition whose children all render to nothing (no body, or a comment-only
+        // paragraph) drops label and all — the MarkdownV2 twin's body.isNotEmpty()
+        // guard. Pre-fix the bare "[^1]: " label fused with the next block's first
+        // line ("[^1]: B"), while the truncation and chunking entries of this same API
+        // spaced them apart
+        assertEquals(
+            EntityText("A[^1]\n\nB", emptyList()),
+            TelegramEntities.render("A[^1]\n\n[^1]:\n\nB"),
+        )
+        assertEquals(
+            EntityText("A[^1]\n\npara", emptyList()),
+            TelegramEntities.render("A[^1]\n\n[^1]: <!--c-->\n\npara"),
+        )
+    }
+
+    @Test
+    fun sameTypeEmphasisCompletesUnclosedTagsAtTheInnerBoundary() {
+        // `**a **b <i>c** d**` parses to nested strongs; the inner one degrades into
+        // the outer range. An unclosed tag inside used to complete at OUTPUT — its
+        // range ran past the inner emphasis ("c d" italic, diverging from the
+        // MarkdownV2 render's `_c_`); it now completes at the inner boundary the
+        // twin's silent-entry degradation draws, so all three formats italicize
+        // exactly "c"
+        val result = TelegramEntities.render("**a **b <i>c** d**")
+        assertEquals(
+            EntityText(
+                "a b c d",
+                listOf(
+                    MessageEntity(MessageEntityType.ITALIC, 4, 1),
+                    MessageEntity(MessageEntityType.BOLD, 0, 7),
+                ),
+            ),
+            result,
+        )
+        assertEntitiesValid(result, "sameTypeInnerBoundary")
     }
 }

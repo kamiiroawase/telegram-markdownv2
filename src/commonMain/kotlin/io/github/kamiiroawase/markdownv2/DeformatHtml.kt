@@ -57,12 +57,16 @@ private class OpenHref(
 )
 
 // The " (url)" tail, with the autolink carve-out the MarkdownV2 twin makes: a label
-// equal to its URL already shows the URL — the tail would duplicate it
+// equal to its URL already shows the URL — the tail would duplicate it. The comparison
+// decodes the href first: the label region carries the text encoding (a '"' stays raw)
+// while the href carries the attribute encoding ("&quot;"), and comparing the encoded
+// spellings never matched a URL that holds a quote — the tail duplicated it where the
+// MarkdownV2 twin and appendPlainText keep the single URL
 private fun appendHrefTail(
     sb: StringBuilder,
     href: OpenHref,
 ) {
-    if (href.url.isNotEmpty() && sb.substring(href.labelStart) != href.url) {
+    if (href.url.isNotEmpty() && sb.substring(href.labelStart) != decodeHtmlEntities(href.url)) {
         sb.append(" (").append(href.url).append(')')
     }
 }

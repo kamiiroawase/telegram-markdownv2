@@ -1058,6 +1058,28 @@ class HtmlRenderTest {
         assertEquals("<b>a<i>b</i></b>", TelegramHtml.render("<b>a<i>b</i></b>"))
     }
 
+    // ---------- the eleventh audit round: blank footnote definitions, inner emphasis boundaries ----------
+
+    @Test
+    fun blankFootnoteDefinitionDropsEntirely() {
+        // See EntityRenderTest.blankFootnoteDefinitionDropsEntirely: pre-fix the bare
+        // escaped label fused with the next block's first line ("[^1]: B") while this
+        // pipeline's own truncation and chunking entries spaced them apart — the
+        // MarkdownV2 twin's blank-body guard now drops the definition everywhere
+        assertEquals("A[^1]\n\nB", TelegramHtml.render("A[^1]\n\n[^1]:\n\nB"))
+        assertEquals("A[^1]\n\npara", TelegramHtml.render("A[^1]\n\n[^1]: <!--c-->\n\npara"))
+    }
+
+    @Test
+    fun sameTypeEmphasisCompletesUnclosedTagsAtTheInnerBoundary() {
+        // See EntityRenderTest's twin: the unclosed <i> inside the degraded inner
+        // strong completed at output time and italicized "c d"; it now closes at the
+        // inner boundary, matching the MarkdownV2 render's `*a b _c_ d*`
+        val rendered = TelegramHtml.render("**a **b <i>c** d**")
+        assertEquals("<b>a b <i>c</i> d</b>", rendered)
+        assertTelegramHtmlParseable(rendered, "sameTypeInnerBoundary")
+    }
+
     @Test
     fun whitespaceFenceInsideAQuoteChunksToNothingInsteadOfCrashing() {
         // A quote child that renders visible HTML but carries no placeable text (a

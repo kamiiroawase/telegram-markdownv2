@@ -337,4 +337,24 @@ class EntityChunkingTest {
             assertEntitiesValid(chunk, "custom emoji seam")
         }
     }
+
+    // ---------- the eleventh audit round: the quote seam's empty inner ----------
+
+    @Test
+    fun deepQuoteChainWithBlankInnermostChildTerminates() {
+        // Pre-fix the quote seam's `continue` on an empty inner re-chunk skipped the
+        // node walk too and spun forever on the same child: a 120-level quote chain
+        // whose innermost paragraph renders blank under the seam's own depth handling
+        // hung the whole call (the render is deterministic — the retry never differs).
+        // The child now skips and the walk advances; every level renders to nothing
+        // here, and an empty range is no quote, so the empty list is the correct
+        // result — the full render of the same content is empty alike
+        assertEquals(emptyList(), TelegramEntities.renderChunked(">".repeat(120) + " <b></b>", 6))
+        // The <br> spelling flattens "<br>" as plain text at the tiny limit — every
+        // piece within it and valid, and the call returns
+        for (piece in TelegramEntities.renderChunked(">".repeat(120) + " <br>", 2)) {
+            assertTrue(piece.text.length <= 2, "over-limit piece: $piece")
+            assertEntitiesValid(piece, "deepQuoteBrSeam")
+        }
+    }
 }

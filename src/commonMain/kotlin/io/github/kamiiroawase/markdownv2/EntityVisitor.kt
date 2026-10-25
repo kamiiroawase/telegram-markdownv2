@@ -450,8 +450,14 @@ internal class EntityVisitor(
         if (formatRangeOpen(MessageEntityType.ITALIC)) {
             // Same-type entities cannot nest (see formatRangeOpen) — hand-built ASTs
             // only, the parser re-pairs same-type emphasis into siblings — the content
-            // joins the outer range's text, the display identical
+            // joins the outer range's text, the display identical. Unclosed ranges
+            // opened inside still complete HERE, at the inner emphasis's boundary —
+            // the same line the MarkdownV2 twin's silent-entry degradation draws (its
+            // flat markers force the completion; the ranges now stop at the boundary
+            // alike)
+            val seq = nextSeq++
             visitChildren(emphasis)
+            completeOpenedAfter(seq)
             exitInline()
             return
         }
@@ -475,8 +481,11 @@ internal class EntityVisitor(
             return
         }
         if (formatRangeOpen(MessageEntityType.BOLD)) {
-            // See visit(emphasis): same-type nesting degrades to the outer range
+            // See visit(emphasis): same-type nesting degrades to the outer range, with
+            // the inner boundary completing what opened inside
+            val seq = nextSeq++
             visitChildren(strongEmphasis)
+            completeOpenedAfter(seq)
             exitInline()
             return
         }
@@ -502,8 +511,11 @@ internal class EntityVisitor(
                     return
                 }
                 if (formatRangeOpen(MessageEntityType.STRIKETHROUGH)) {
-                    // See visit(emphasis): same-type nesting degrades to the outer range
+                    // See visit(emphasis): same-type nesting degrades to the outer
+                    // range, with the inner boundary completing what opened inside
+                    val seq = nextSeq++
                     visitChildren(customNode)
+                    completeOpenedAfter(seq)
                     exitInline()
                     return
                 }
@@ -559,12 +571,12 @@ internal class EntityVisitor(
     // entities — a nesting Telegram rejects ("Pre and Code can't contain nested
     // entities"). Other ranges may span block boundaries (the containment both string
     // formats ship for emphasis), so only the code family force-closes here. The close
-    // runs at a block boundary, so the blank-label degradation keeps the block
-    // separator (see closeRange's pendingSeparator)
+    // runs at a block boundary with the previous block's separator pending — the lift
+    // below keeps the range off the separator's "\n\n" (see completeThroughSeparator)
     private fun completeOpenCodeRanges() {
         val outermostCode =
             openRanges.firstOrNull { it.type == MessageEntityType.CODE } ?: return
-        completeOpenedAfter(outermostCode.seq - 1, pendingSeparator = true)
+        completeThroughSeparator(outermostCode.seq - 1)
     }
 
     // The block-entity twin of [completeOpenCodeRanges]: completes code, text_link and
@@ -575,8 +587,8 @@ internal class EntityVisitor(
     // other"), and a Markdown link never spans blocks, so an unclosed HTML anchor must
     // not reach across one either. Formatting ranges keep the documented
     // complete-at-output behavior (the pinned bold-over-pre containment). The close
-    // runs at a block boundary, so the blank-label degradation keeps the block
-    // separator (see closeRange's pendingSeparator)
+    // runs at a block boundary with the previous block's separator pending — the lift
+    // below keeps the range off the separator's "\n\n" (see completeThroughSeparator)
     private fun completeOpenCodeLinkAndEmojiRanges() {
         val boundary =
             openRanges
@@ -586,7 +598,26 @@ internal class EntityVisitor(
                         it.type == MessageEntityType.CUSTOM_EMOJI
                 }.minOfOrNull { it.seq }
                 ?: return
-        completeOpenedAfter(boundary - 1, pendingSeparator = true)
+        completeThroughSeparator(boundary - 1)
+    }
+
+    // Completes everything opened at or after [boundarySeq], lifting the trailing block
+    // separator first and re-emitting it after the closers — the twin of the string
+    // formats' completeThroughSeparator: a range closed at a block boundary measures
+    // itself against the content before the separator, never over the separator's own
+    // "\n\n" (the MarkdownV2 twin's closer lands after the lifted separator, the HTML
+    // twin's tag pair before it; pre-fix CODE and TEXT_LINK ranges swallowed the blank
+    // line and formatted it). The blank-label degradation re-emits a fresh separator
+    // only when nothing was lifted to restore (pendingSeparator rides on the lifted
+    // count, not an unconditional true — both would double the separator)
+    private fun completeThroughSeparator(boundarySeq: Int) {
+        var separatorLength = 0
+        while (separatorLength < sb.length && sb[sb.length - 1 - separatorLength] == '\n') {
+            separatorLength++
+        }
+        sb.setLength(sb.length - separatorLength)
+        completeOpenedAfter(boundarySeq, pendingSeparator = separatorLength == 0)
+        repeat(separatorLength) { sb.append('\n') }
     }
 
     override fun visit(customBlock: CustomBlock) {
@@ -604,8 +635,18 @@ internal class EntityVisitor(
                 // definition's own children re-check at their own boundaries; this also
                 // keeps a child blockquote from landing inside an unclosed anchor)
                 completeOpenCodeLinkAndEmojiRanges()
+                val start = sb.length
                 sb.append("[^${customBlock.label}]: ")
+                val bodyStart = sb.length
                 visitChildren(customBlock)
+                // A definition whose children all render to nothing (no body text, or a
+                // comment-only/blank paragraph) drops entirely, label included — the
+                // same blank-body guard the MarkdownV2 twin's body.isNotEmpty() makes.
+                // Kept, the bare label fused with the next block's first line: the
+                // children emitted no separator of their own, and this visitor walks
+                // straight into the sibling (a blank region guarantees nothing opened
+                // inside it, so the rewind strands no range)
+                if (regionIsBlank(bodyStart)) rewindTo(start)
             }
 
             else -> {

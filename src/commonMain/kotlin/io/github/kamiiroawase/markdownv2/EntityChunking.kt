@@ -344,16 +344,22 @@ private fun chunkEntityQuote(
                     val temp = EntityChunkAccumulator()
                     chunkEntityBlockInto(node, rendered, maxLength, depth + 1, options, temp)
                     val inner = temp.finish()
-                    if (inner.isEmpty()) continue
-                    // The oversized child's last piece stays open under the quote
-                    // span — the tail handoff the MarkdownV2 twin's appendQuoteChunk
-                    // makes: the quote's following children join the same message's
-                    // blockquote range instead of starting a fresh piece
-                    inner.subList(0, inner.size - 1).forEach { piece ->
-                        acc.pieces += blockquoteEntityOf(piece, quoteType)
+                    // A child the inner seam cannot place at all yields no pieces and
+                    // simply skips — but the walk must still advance: a `continue` here
+                    // skipped the node step below too and spun forever on the same
+                    // child (a deep quote chain whose innermost paragraph renders blank
+                    // under the seam's own depth handling reaches exactly this arm)
+                    if (inner.isNotEmpty()) {
+                        // The oversized child's last piece stays open under the quote
+                        // span — the tail handoff the MarkdownV2 twin's appendQuoteChunk
+                        // makes: the quote's following children join the same message's
+                        // blockquote range instead of starting a fresh piece
+                        inner.subList(0, inner.size - 1).forEach { piece ->
+                            acc.pieces += blockquoteEntityOf(piece, quoteType)
+                        }
+                        quoteStart = acc.length
+                        acc.appendRendered("", inner.last())
                     }
-                    quoteStart = acc.length
-                    acc.appendRendered("", inner.last())
                 }
             }
         }

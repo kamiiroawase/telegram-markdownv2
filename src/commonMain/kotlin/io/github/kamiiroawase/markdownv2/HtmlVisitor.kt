@@ -415,8 +415,14 @@ internal class HtmlVisitor(
             // Same-type entities cannot nest (see renderHtmlInlineTag): the tags drop
             // and the content renders inside the outer entity. The parser pairs most
             // same-type runs into siblings, but `*a *b* c*`-shaped runs nest them —
-            // the entities twin degrades the inner range alike
+            // the entities twin degrades the inner range alike. Unclosed tags opened
+            // inside still complete HERE, at the inner emphasis's boundary — the same
+            // line the MarkdownV2 twin's silent-entry degradation draws (its flat
+            // markers force the completion; the tag pair stays balanced either way,
+            // but the formatting scope now matches the twin's too)
+            val seq = nextSeq++
             visitChildren(emphasis)
+            completeOpenedAfter(seq)
             exitInline()
             return
         }
@@ -444,8 +450,11 @@ internal class HtmlVisitor(
         }
         if (formatTagOpen("b")) {
             // See visit(emphasis): same-type nesting degrades to the outer entity
-            // (`**a **b** c**` parses to nested strongs, the shape this guards)
+            // (`**a **b** c**` parses to nested strongs, the shape this guards), with
+            // the inner boundary completing what opened inside
+            val seq = nextSeq++
             visitChildren(strongEmphasis)
+            completeOpenedAfter(seq)
             exitInline()
             return
         }
@@ -473,8 +482,11 @@ internal class HtmlVisitor(
                     return
                 }
                 if (formatTagOpen("s")) {
-                    // See visit(emphasis): same-type nesting degrades to the outer entity
+                    // See visit(emphasis): same-type nesting degrades to the outer
+                    // entity, with the inner boundary completing what opened inside
+                    val seq = nextSeq++
                     visitChildren(customNode)
+                    completeOpenedAfter(seq)
                     exitInline()
                     return
                 }
@@ -593,8 +605,20 @@ internal class HtmlVisitor(
                 // block completes first — the label and blocks are structure and block
                 // content, neither may sit inside inline code
                 completeOpenInlineCodeTags()
+                val start = sb.length
                 sb.append(escapeHtmlText("[^${customBlock.label}]: "))
+                val bodyStart = sb.length
                 visitChildren(customBlock)
+                // A definition whose children all render to nothing (no body text, or a
+                // comment-only/blank paragraph) drops entirely, label included — the
+                // same blank-body guard the MarkdownV2 twin's body.isNotEmpty() makes.
+                // Kept, the bare label fused with the next block's first line: the
+                // children emitted no separator of their own, and this visitor walks
+                // straight into the sibling (a blank region guarantees nothing opened
+                // inside it, so the rewind strands no recorded tag position)
+                if (regionIsBlank(bodyStart)) {
+                    sb.setLength(start)
+                }
             }
 
             else -> {

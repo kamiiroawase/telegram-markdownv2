@@ -144,12 +144,31 @@ internal fun applyEntityPrefix(
     val indent = prefix.count { it != '\\' }
 
     val lines = body.text.lines()
-    // Line start offsets in the un-prefixed text
+    // Line start offsets in the un-prefixed text. lines() folds every separator — \n, a
+    // lone \r, a \r\n pair — into one boundary, but these offsets index the original
+    // text, where a \r\n pair consumes TWO characters: the separator length comes from
+    // the text itself, never the +1 a \n-only body would justify (pre-fix an entity past
+    // a &#13;&#10; pair shifted one character per pair and pointed past the text it
+    // claimed to cover)
     val starts = IntArray(lines.size)
+    // \r\n pairs before each line start: applyPrefix re-joins the lines with plain \n,
+    // so every pair compresses the prefixed text by one character — the shift below
+    // hands that character back
+    val pairsBefore = IntArray(lines.size)
     var acc = 0
+    var pairs = 0
     for (index in lines.indices) {
         starts[index] = acc
-        acc += lines[index].length + 1
+        pairsBefore[index] = pairs
+        acc += lines[index].length
+        if (index + 1 < lines.size) {
+            if (body.text[acc] == '\r' && body.text.getOrNull(acc + 1) == '\n') {
+                pairs++
+                acc += 2
+            } else {
+                acc++
+            }
+        }
     }
 
     // The continuation-line starts that carry the indent, ascending — a binary-searched
@@ -172,14 +191,29 @@ internal fun applyEntityPrefix(
         return low
     }
 
+    // How many \r\n pairs lie before [point]: the pair(s) before a point are exactly the
+    // pairs before its line's start (a separator never opens inside a line), so the
+    // cumulative count of the line [point] sits on answers — the same binary search
+    // indentsPassed runs over starts
+    fun pairsPassed(point: Int): Int {
+        var low = 0
+        var high = starts.size
+        while (low < high) {
+            val mid = (low + high) ushr 1
+            if (starts[mid] <= point) low = mid + 1 else high = mid
+        }
+        return if (low == 0) 0 else pairsBefore[low - 1]
+    }
+
     // Insertions a shifted point passes: the marker at 0 for every point, plus the
     // indent at each non-empty continuation line start the point lies at or beyond
     // ([inclusive] — the marker/indent precede the content a START indexes into, while
-    // an END at one closed before that line's indent)
+    // an END at one closed before that line's indent); every \r\n pair passed
+    // compressed the text by one character and comes back off
     fun shift(
         point: Int,
         inclusive: Boolean,
-    ): Int = point + prefix.length + indentsPassed(if (inclusive) point else point - 1) * indent
+    ): Int = point - pairsPassed(point) + prefix.length + indentsPassed(if (inclusive) point else point - 1) * indent
 
     val entities =
         body.entities.map { entity ->

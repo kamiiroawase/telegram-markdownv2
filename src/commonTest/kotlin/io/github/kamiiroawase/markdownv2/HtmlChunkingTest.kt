@@ -190,6 +190,16 @@ class HtmlChunkingTest {
     }
 
     @Test
+    fun autolinkDedupComparesDecodedUrls() {
+        // A URL holding a double quote renders attribute-escaped ("&quot;") while its
+        // label renders text-escaped (the quote stays raw): comparing the encoded
+        // spellings never matched, and the " (url)" tail duplicated a URL the label
+        // already showed. The comparison decodes the href first — the MarkdownV2
+        // twin's and appendPlainText's own label-equals-destination rule
+        assertEquals("\"x\"", deformatHtml(TelegramHtml.render("""["x"]("x")""")))
+    }
+
+    @Test
     fun entityHeavyTextNeverSplitsAnEntity() {
         val content = "&<>".repeat(2000)
         val chunks = TelegramHtml.renderChunked(content, 17)
