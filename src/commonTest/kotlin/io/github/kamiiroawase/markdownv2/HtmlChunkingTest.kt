@@ -190,6 +190,19 @@ class HtmlChunkingTest {
     }
 
     @Test
+    fun oversizedItemKeepsNestedListMarkers() {
+        // The MarkdownV2 twin's own defect: the list flatten seam's text source is the
+        // item body's de-formatted render (nested markers live only in rendered
+        // output), so a nested ordered marker or bullet survives a limit that holds
+        // it — pre-fix the AST plain extraction dropped it at any fitting limit
+        val ordered = TelegramHtml.renderChunked("- 1. " + "a".repeat(60), 40)
+        assertEquals(listOf("• 1. " + "a".repeat(35), "a".repeat(25)), ordered)
+        val nested = TelegramHtml.renderChunked("- - " + "c".repeat(60), 30)
+        assertEquals(listOf("• • " + "c".repeat(26), "c".repeat(28), "c".repeat(6)), nested)
+        (ordered + nested).forEach { assertTelegramHtmlParseable(it, "nestedMarkerFlatten") }
+    }
+
+    @Test
     fun autolinkDedupComparesDecodedUrls() {
         // A URL holding a double quote renders attribute-escaped ("&quot;") while its
         // label renders text-escaped (the quote stays raw): comparing the encoded
@@ -197,6 +210,17 @@ class HtmlChunkingTest {
         // already showed. The comparison decodes the href first — the MarkdownV2
         // twin's and appendPlainText's own label-equals-destination rule
         assertEquals("\"x\"", deformatHtml(TelegramHtml.render("""["x"]("x")""")))
+    }
+
+    @Test
+    fun autolinkDedupDecodesTheLabelToo() {
+        // '&', '<' and '>' spell "&amp;"/"&lt;"/"&gt;" in BOTH the text and the
+        // attribute encoding, so decoding the href alone still compared an encoded
+        // label against a decoded URL — an autolink with a query string ("?a=1&b=2",
+        // the shape every GFM autolink of a real URL takes) shipped its URL twice
+        // where the MarkdownV2 twin keeps the single URL. Both sides decode now
+        assertEquals("https://e.com/?a=1&b=2", deformatHtml(TelegramHtml.render("https://e.com/?a=1&b=2")))
+        assertEquals("a<b", deformatHtml(TelegramHtml.render("""[a<b](a<b)""")))
     }
 
     @Test

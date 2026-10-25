@@ -291,11 +291,29 @@ class ChunkingTest {
     fun renderChunkedOversizedItemKeepsFlattenedTrailingWhitespace() {
         // Code content keeps its trailing spaces where prose cannot (the parser strips
         // EOL spaces in paragraphs, fenced blocks do not), so the flattened item's text
-        // ends in " \n" — the tail piece flushes raw, never trimmed (pre-fix the final
-        // trimEnd dropped both characters)
+        // ends in " " — the tail piece flushes raw, never trimmed (pre-fix the final
+        // trimEnd dropped the spaces too). The source is the item body's de-formatted
+        // render (markers live only in rendered output), where the code literal's final
+        // newline is the fence's line separator — message-tail whitespace that never
+        // displays, the documented exception — so the space survives it
         val chunks = MarkdownV2.renderChunked("- ```\n  aaaa \n  bbbb \n  ```", 10)
-        assertEquals(listOf("• aaaa \nbb", "bb \n"), chunks)
+        assertEquals(listOf("• aaaa \nbb", "bb "), chunks)
         chunks.forEach { chunk -> assertTrue(chunk.length <= 10, "over-long chunk: $chunk") }
+    }
+
+    @Test
+    fun renderChunkedOversizedItemKeepsNestedListMarkers() {
+        // The flatten seam's text source is the item body's de-formatted render: a
+        // nested list's markers exist only in rendered output (the AST plain
+        // extraction carries none), and pre-fix they dropped at ANY limit the item
+        // alone exceeded — while the public contract scopes marker loss to limits too
+        // small to hold the marker beside a first content unit, and 40 holds
+        // "• 1\. " plus 34 a's. The ordered marker and the nested bullet both pin it
+        val ordered = MarkdownV2.renderChunked("- 1. " + "a".repeat(60), 40)
+        assertEquals(listOf("• 1\\. " + "a".repeat(34), "a".repeat(26)), ordered)
+        val nested = MarkdownV2.renderChunked("- - " + "c".repeat(60), 30)
+        assertEquals(listOf("• • " + "c".repeat(26), "c".repeat(28), "c".repeat(6)), nested)
+        (ordered + nested).forEach { assertTelegramParseable(it, "nestedMarkerFlatten") }
     }
 
     @Test

@@ -2138,4 +2138,33 @@ class RenderTest {
         // A genuine link keeps its tail
         assertEquals("label (https://e.com/x)", deformatHtml(TelegramHtml.render("[label](https://e.com/x)")))
     }
+
+    // ---------- the output-time blank-anchor round: stranded closers ----------
+
+    @Test
+    fun blankAnchorRewindDropsInnerClosersInEveryFormat() {
+        // An anchor left unclosed over an unclosed emphasis tag whose only content is
+        // a whitespace code span: the emphasis completes into the output-time closers
+        // builder first (its own blank test sees the backticks as content), then the
+        // anchor's marker-resolving blank test rewinds the label — deleting the
+        // emphasis OPENER from the body while its closer sat in the builder. Pre-fix
+        // the closer shipped alone ("u*" / "u</b>", the unmatched marker/tag Telegram
+        // rejects outright); the rewind drops the builder's completions with the
+        // openers they lost. Every emphasis family, the tg-emoji twin, and a list
+        // item's child visitor (the same output() runs per item) all pin the shape
+        for (tag in listOf("<b>", "<i>", "<u>", "<s>", "<tg-spoiler>")) {
+            assertEquals("u", MarkdownV2.render("""<a href="u">$tag` `"""), "mdv2 $tag")
+            assertEquals("u", TelegramHtml.render("""<a href="u">$tag` `"""), "html $tag")
+        }
+        assertEquals("""tg://emoji?id\=5""", MarkdownV2.render("""<tg-emoji emoji-id="5"><b>` `"""))
+        assertEquals("tg://emoji?id=5", TelegramHtml.render("""<tg-emoji emoji-id="5"><b>` `"""))
+        assertEquals("• u", MarkdownV2.render("- <a href=\"u\"><b>` `"))
+        assertEquals("• u", TelegramHtml.render("- <a href=\"u\"><b>` `"))
+        // Every piece asserts through the tdlib-ports too, not just string equality
+        assertTelegramParseable(MarkdownV2.render("""<a href="u"><b>` `"""), "blankAnchorClosers")
+        assertTelegramHtmlParseable(TelegramHtml.render("""<a href="u"><b>` `"""), "blankAnchorClosers")
+        // Entities never had the defect (its blank-label degradation drops inner
+        // ranges) — the pin keeps the three formats agreeing on the visible text
+        assertEquals(EntityText("u", emptyList()), TelegramEntities.render("""<a href="u"><b>` `"""))
+    }
 }

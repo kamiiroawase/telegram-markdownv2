@@ -303,7 +303,7 @@ private fun chunkList(
     options: RenderOptions,
     acc: ChunkAccumulator,
 ) {
-    forEachListItem(list, depth, options) { item, prefix, body ->
+    forEachListItem(list, depth, options) { _, prefix, body ->
         val full = applyPrefix(prefix, body)
         val separator = if (acc.current.isEmpty()) "" else "\n"
         if (acc.current.length + separator.length + full.length <= maxLength) {
@@ -315,9 +315,14 @@ private fun chunkList(
             } else {
                 // Untrimmed: edge whitespace of the item's text is content the
                 // flattening path must preserve (a trailing code-line space, say).
-                // flattenTextOf: an item whose text extracts to nothing but renders
-                // visible output (a lone thematic break) still flattens from the render
-                val text = flattenTextOf(item, depth + 1, options)
+                // The body render is the source: it carries the nested structure the
+                // plain extraction drops (a nested list's markers exist only in
+                // rendered output), and the de-format resolves its entities and
+                // escapes losslessly — marker loss stays scoped to the documented
+                // tiny-limit tier instead of firing at any limit the item alone
+                // exceeds. A body rendering visible output from no plain text (a
+                // lone thematic break) is the same source by construction
+                val text = deformat(body)
                 if (text.isNotBlank()) flattenWithLead(prefix, text, maxLength, acc)
             }
         }

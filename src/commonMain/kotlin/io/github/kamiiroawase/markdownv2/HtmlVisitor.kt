@@ -139,7 +139,7 @@ internal class HtmlVisitor(
         while (openTags.isNotEmpty()) {
             when (val entity = openTags.removeLast()) {
                 is OpenInlineTag -> closeInlineTag(entity, closers, outputTime = true)
-                is OpenAnchorTag -> closeAnchor(entity, closers, matched = false)
+                is OpenAnchorTag -> closeAnchor(entity, closers, matched = false, outputTime = true)
             }
         }
         if (closers.isEmpty()) return sb.toString()
@@ -178,7 +178,13 @@ internal class HtmlVisitor(
             // the same trade the anchor paths make of a blank label, and the
             // MarkdownV2/entities twins make here. Like closeAnchor's blank-label branch
             // the URL lands in sb, not the closers builder: at output time trimEnd would
-            // otherwise eat the whitespace between the preceding text and the address
+            // otherwise eat the whitespace between the preceding text and the address.
+            // Entries opened inside popped earlier in output()'s strictly-LIFO loop and
+            // their closers sit in the output-time builder; the rewind deletes their
+            // openers with the fallback, and a closer with no opener is the stray tag
+            // Telegram's parser rejects, so the builder drops them with the rewind
+            // (mid-render completions sink into sb, where the rewind removes them already)
+            if (outputTime) sink.setLength(0)
             sb.setLength(entity.openStart)
             sb.append(escapeHtmlText(entity.url))
             return
@@ -217,6 +223,7 @@ internal class HtmlVisitor(
         entity: OpenAnchorTag,
         sink: StringBuilder,
         matched: Boolean,
+        outputTime: Boolean = false,
     ) {
         when {
             entity.nested -> {
@@ -226,9 +233,15 @@ internal class HtmlVisitor(
             entity.url.isEmpty() -> {}
 
             regionIsBlankResolvingTags(entity.labelStart) -> {
-                // A blank label means nothing was emitted after the opener — anything
-                // opened inside would have emitted a tag — so this anchor is the latest
-                // open entry and rewinding discards only whitespace
+                // A blank label means nothing visible was emitted after the opener — the
+                // region resolves tags away, so rewinding loses no content. Entries
+                // opened inside the label popped earlier in output()'s strictly-LIFO
+                // loop and their closers sit in the output-time builder; the rewind just
+                // deleted their openers with the label, and a closer with no opener is
+                // the stray tag Telegram's parser rejects, so the builder drops them
+                // with the rewind (mid-render completions sink into sb, where the
+                // rewind removes them already)
+                if (outputTime) sink.setLength(0)
                 sb.setLength(entity.openStart)
                 sb.append(escapeHtmlText(entity.url))
             }

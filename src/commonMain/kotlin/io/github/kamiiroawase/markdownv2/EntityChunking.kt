@@ -278,7 +278,7 @@ private fun chunkEntityList(
     options: RenderOptions,
     acc: EntityChunkAccumulator,
 ) {
-    forEachEntityListItem(list, depth, options) { item, prefix, body ->
+    forEachEntityListItem(list, depth, options) { _, prefix, body ->
         val full = applyEntityPrefix(prefix, body)
         val separator = if (acc.isEmpty()) "" else "\n"
         if (acc.length + separator.length + full.text.length <= maxLength) {
@@ -288,7 +288,11 @@ private fun chunkEntityList(
             if (full.text.length <= maxLength) {
                 acc.appendRendered("", full)
             } else {
-                val text = flattenTextOfEntity(item, depth + 1, options)
+                // The body's own text is the source: it carries the nested structure
+                // the plain extraction drops (a nested list's markers exist only in
+                // rendered output) — the MarkdownV2 and HTML twins' flatten seams make
+                // the same trade
+                val text = body.text
                 if (text.isNotBlank()) flattenEntityWithLead(prefix, text, maxLength, acc)
             }
         }

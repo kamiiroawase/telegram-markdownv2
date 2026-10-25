@@ -684,11 +684,18 @@ internal class Visitor(
                         entity.nested || entity.url.isEmpty() -> {}
 
                         regionIsBlankResolvingMarkers(entity.labelStart) -> {
-                            // A blank label means nothing was emitted after its [ —
-                            // anything opened inside would have output a marker or a
-                            // literal tag — so this anchor is the latest open entry and
-                            // rewinding the bracket discards only whitespace
-                            // (regionIsBlank covers the whitespace-only label too)
+                            // A blank label means nothing visible was emitted after its [
+                            // — the region resolves markers away (regionIsBlank covers the
+                            // whitespace-only label too), so rewinding the bracket loses no
+                            // content. Entities opened inside the label popped earlier in
+                            // this loop — the pop order is strictly LIFO, so everything
+                            // below this anchor pops after it — and their closers sit in
+                            // this builder already; the rewind just deleted their openers
+                            // with the label, and a closer with no opener is the stray
+                            // marker Telegram rejects ("Can't find end of the entity" on
+                            // the bold of `<a href=u><b>` ` `), so the builder drops them
+                            // with the rewind
+                            closers.setLength(0)
                             sb.setLength(entity.openBracket)
                             sb.append(escapeTextInContext(entity.url))
                         }

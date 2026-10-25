@@ -253,7 +253,7 @@ private fun chunkHtmlList(
     options: RenderOptions,
     acc: ChunkAccumulator,
 ) {
-    forEachHtmlListItem(list, depth, options) { item, prefix, body ->
+    forEachHtmlListItem(list, depth, options) { _, prefix, body ->
         val full = applyPrefix(prefix, body)
         val separator = if (acc.current.isEmpty()) "" else "\n"
         if (acc.current.length + separator.length + full.length <= maxLength) {
@@ -264,8 +264,12 @@ private fun chunkHtmlList(
                 acc.appendRendered(full)
             } else {
                 // Untrimmed: edge whitespace of the item's text is content the
-                // flattening path must preserve (a trailing code-line space, say)
-                val text = flattenTextOfHtml(item, depth + 1, options)
+                // flattening path must preserve (a trailing code-line space, say).
+                // The body render is the source: it carries the nested structure the
+                // plain extraction drops (a nested list's markers exist only in
+                // rendered output), and the de-format resolves its tags and entities
+                // losslessly — the MarkdownV2 and entities twins make the same trade
+                val text = deformatHtml(body)
                 if (text.isNotBlank()) flattenWithHtmlLead(prefix, text, maxLength, acc)
             }
         }

@@ -264,6 +264,25 @@ class EntityChunkingTest {
     }
 
     @Test
+    fun oversizedItemKeepsNestedListMarkers() {
+        // The string twins' own defect: the list flatten seam's text source is the
+        // item body's own text (nested markers live only in rendered output, and the
+        // AST plain extraction carries none), so a nested ordered marker or bullet
+        // survives a limit that holds it
+        val ordered = TelegramEntities.renderChunked("- 1. " + "a".repeat(60), 40)
+        assertEquals(
+            listOf("• 1. " + "a".repeat(35), "a".repeat(25)),
+            ordered.map { it.text },
+        )
+        val nested = TelegramEntities.renderChunked("- - " + "c".repeat(60), 30)
+        assertEquals(
+            listOf("• • " + "c".repeat(26), "c".repeat(28), "c".repeat(6)),
+            nested.map { it.text },
+        )
+        (ordered + nested).forEach { assertEntitiesValid(it, "nestedMarkerFlatten") }
+    }
+
+    @Test
     fun chunkedQuotePiecesKeepCloseOrder() {
         // The EntityText contract: nested ranges before the ranges containing them. The
         // quote re-assembly (blockquoteEntityOf) used to prepend the container — the
